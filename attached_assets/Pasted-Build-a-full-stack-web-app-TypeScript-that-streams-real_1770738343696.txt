@@ -1,0 +1,44 @@
+Build a full-stack web app (TypeScript) that streams real-time US equities + ETF data and generates trading alerts using ONE consistent strategy: Breakout + Retest (intraday). Alerts only (no auto-execution yet). Web dashboard primary, mobile secondary.
+
+Core constraints:
+- Market hours only (US regular session).
+- Universe: S&P 500 OR dynamic watchlist of top 50–100 high-volume movers.
+- Exclusions: penny stocks, low-float, biotech. Avoid earnings day trades unless confirmation rules are met.
+- Risk rules: daily max loss = -2% of account; stop after 3 losing trades; 15-minute cooldown after a loss.
+- Per-trade risk: default 0.5% of account (user adjustable up to 1%).
+- Position size cap: never allocate >20% of account value to a single trade.
+- Always use stop-losses; never allow user to “move stop” manually in-app (signals engine enforces rules).
+- Outputs must be “SETUP forming” and “TRIGGER hit” (not “buy/sell now”).
+
+Strategy logic:
+- Multi-timeframe: 1H trend filter, 5m entries.
+- Long-only for v1.
+- 1H trend filter: price above 1H 50 EMA AND 50 EMA slope positive (EMA now > EMA 10 bars ago).
+- Resistance detection on 5m: define resistance as the highest high of the last N bars (N configurable default 48) that has been rejected at least 2 times with closes below it.
+- Breakout: 5m close above resistance by buffer (default 0.10%).
+- Confirmation: breakout volume > 1.5x 20-bar avg volume AND 5m ATR(14) > its 20-bar average (ATR expansion).
+- Retest: price returns to within 0.15% of breakout level without closing below the level by more than 0.15%.
+- Trigger: a bullish 5m candle closes green above the level after retest (bonus if engulfing/hammer).
+- Stop: below retest swing low with small buffer (default 0.05%).
+- Take profit: scale out 50% at +1R and move stop to breakeven automatically at +1R; aim main target 2R–3R; runner uses ATR trailing stop (default 1.5x ATR).
+
+Features:
+- Real-time streaming market data via websocket from a pluggable provider (implement Alpaca OR Finnhub first; keep interfaces so provider can be swapped).
+- Candle aggregation: build 5m and 1H candles from ticks/quotes/trades.
+- State machine per ticker: IDLE -> BREAKOUT -> RETEST -> TRIGGERED -> MANAGED -> CLOSED.
+- Risk engine: compute position sizing from account size and stop distance; enforce 20% cap; enforce daily limits and cooldown.
+- Alerting: push notifications + email; store alert history.
+- Backtest module using historical 5m data for the same strategy (basic, for validation).
+- Daily summary: win rate, avg R, max drawdown, rule violations.
+
+Tech stack:
+- Next.js + TypeScript frontend
+- Node.js backend (or Next.js API routes) with websocket streaming
+- PostgreSQL with Prisma
+- Auth (simple email/password)
+- Environment variables for API keys
+- Include clear disclaimer and a “paper mode” account balance simulator.
+
+Deliver:
+- Working project with README, setup steps, and default configs.
+- Clean UI with dashboard, watchlist/scanner, signal feed, and trade plan cards.
