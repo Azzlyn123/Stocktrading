@@ -14,6 +14,7 @@ import { Zap } from "lucide-react";
 
 import AuthPage from "@/pages/auth-page";
 import Dashboard from "@/pages/dashboard";
+import Scanner from "@/pages/scanner";
 import Watchlist from "@/pages/watchlist";
 import Signals from "@/pages/signals";
 import Trades from "@/pages/trades";
@@ -24,6 +25,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
+      <Route path="/scanner" component={Scanner} />
       <Route path="/watchlist" component={Watchlist} />
       <Route path="/signals" component={Signals} />
       <Route path="/trades" component={Trades} />

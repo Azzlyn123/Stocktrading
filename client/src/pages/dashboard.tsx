@@ -88,6 +88,7 @@ export default function Dashboard() {
   const { user } = useAuth();
   const { isConnected, subscribe } = useWebSocket();
   const [marketOpen, setMarketOpen] = useState(false);
+  const [isLunchChop, setIsLunchChop] = useState(false);
 
   const { data: signals, isLoading: signalsLoading } = useQuery<Signal[]>({
     queryKey: ["/api/signals"],
@@ -122,6 +123,7 @@ export default function Dashboard() {
   useEffect(() => {
     const unsub = subscribe("market_status", (data: any) => {
       setMarketOpen(data.isOpen);
+      setIsLunchChop(data.isLunchChop ?? false);
     });
     return unsub;
   }, [subscribe]);
@@ -182,6 +184,12 @@ export default function Dashboard() {
             />
             {isConnected ? "Live" : "Offline"}
           </Badge>
+          {isLunchChop && (
+            <Badge variant="outline" className="gap-1 text-amber-500 border-amber-500/30" data-testid="badge-lunch-chop">
+              <Clock className="w-3 h-3" />
+              Lunch Chop
+            </Badge>
+          )}
           {user?.paperMode && (
             <Badge variant="outline" className="gap-1">
               Paper Mode
@@ -394,11 +402,18 @@ export default function Dashboard() {
                       <p className="text-xs font-medium">
                         ${signal.currentPrice?.toFixed(2) ?? "—"}
                       </p>
-                      {signal.resistanceLevel && (
-                        <p className="text-[10px] text-muted-foreground">
-                          R: ${signal.resistanceLevel.toFixed(2)}
-                        </p>
-                      )}
+                      <div className="flex items-center gap-1.5 justify-end">
+                        {signal.rvol && (
+                          <span className={`text-[10px] font-medium ${signal.rvol >= 1.5 ? "text-emerald-500" : "text-muted-foreground"}`}>
+                            {signal.rvol.toFixed(1)}x
+                          </span>
+                        )}
+                        {signal.resistanceLevel && (
+                          <span className="text-[10px] text-muted-foreground">
+                            R: ${signal.resistanceLevel.toFixed(2)}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -477,9 +492,50 @@ export default function Dashboard() {
         </Card>
       </div>
 
+      {summaries && summaries.length > 0 && summaries.some((s) => (s.ruleViolations ?? 0) > 0) && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2 p-4">
+            <div>
+              <p className="text-sm font-medium">Rule Violations</p>
+              <p className="text-xs text-muted-foreground">Strategy discipline tracker</p>
+            </div>
+            <AlertTriangle className="w-4 h-4 text-amber-500" />
+          </CardHeader>
+          <CardContent className="p-4 pt-0">
+            <div className="space-y-1.5">
+              {summaries
+                .filter((s) => (s.ruleViolations ?? 0) > 0)
+                .slice(0, 5)
+                .map((s) => (
+                  <div
+                    key={s.id}
+                    className="flex items-start gap-2 p-2 rounded-md bg-accent/50"
+                    data-testid={`violation-${s.id}`}
+                  >
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-medium">{s.date}</span>
+                        <Badge variant="outline" className="text-[9px] px-1 min-h-4">
+                          {s.ruleViolations} violation{(s.ruleViolations ?? 0) > 1 ? "s" : ""}
+                        </Badge>
+                      </div>
+                      {Array.isArray(s.ruleViolationDetails) && (s.ruleViolationDetails as string[]).map((detail: string, i: number) => (
+                        <p key={i} className="text-[10px] text-muted-foreground mt-0.5">
+                          {detail}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="text-center py-2">
         <p className="text-[9px] text-muted-foreground/50">
-          Disclaimer: This is a paper trading simulator for educational purposes only. Not financial advice. Past performance does not guarantee future results.
+          Disclaimer: This is a paper trading simulator for educational purposes only. Not financial advice. Past simulated performance does not guarantee future results. Always consult a financial advisor before trading.
         </p>
       </div>
     </div>

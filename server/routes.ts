@@ -6,7 +6,7 @@ import { storage } from "./storage";
 import { setupAuth } from "./auth";
 import { insertUserSchema, settingsUpdateSchema } from "@shared/schema";
 import type { User } from "@shared/schema";
-import { startSimulatedDataFeed, registerUser, unregisterUser } from "./simulator";
+import { startSimulatedDataFeed, registerUser, unregisterUser, getScannerData } from "./simulator";
 import { seedDemoData } from "./seed";
 
 declare global {
@@ -29,6 +29,22 @@ declare global {
       volumeMultiplier: number | null;
       atrPeriod: number | null;
       trailingAtrMultiplier: number | null;
+      minPrice: number | null;
+      minAvgVolume: number | null;
+      minDollarVolume: number | null;
+      avoidEarnings: boolean | null;
+      lunchChopFilter: boolean | null;
+      lunchChopStart: string | null;
+      lunchChopEnd: string | null;
+      timeStopEnabled: boolean | null;
+      timeStopMinutes: number | null;
+      timeStopR: number | null;
+      partialExitPct: number | null;
+      partialExitR: number | null;
+      mainTargetRMin: number | null;
+      mainTargetRMax: number | null;
+      earningsGapPct: number | null;
+      earningsRvolMin: number | null;
     }
   }
 }
@@ -169,6 +185,17 @@ export async function registerRoutes(
   app.get("/api/summaries", requireAuth, async (req, res) => {
     const items = await storage.getSummaries(req.user!.id);
     res.json(items);
+  });
+
+  // Scanner data
+  app.get("/api/scanner", requireAuth, (req, res) => {
+    const user = req.user!;
+    const data = getScannerData({
+      minPrice: user.minPrice ?? 15,
+      minAvgVolume: user.minAvgVolume ?? 2000000,
+      minDollarVolume: user.minDollarVolume ?? 50000000,
+    });
+    res.json(data);
   });
 
   // WebSocket setup

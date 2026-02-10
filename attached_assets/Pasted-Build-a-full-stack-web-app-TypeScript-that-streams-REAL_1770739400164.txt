@@ -1,0 +1,41 @@
+Build a full-stack web app (TypeScript) that streams REAL-TIME US equities + ETFs during regular US market hours only (RTH) and generates alerts using ONE consistent strategy: Long-only Breakout + Retest (intraday). Alerts only (push + email), no auto-execution in v1.
+
+Hard constraints:
+- Universe: S&P 500 OR dynamic watchlist of top 50–100 “in-play” movers.
+- Hard filters: price >= $10 (default $15), avg daily volume >= 2,000,000 shares, avg daily dollar volume >= $50,000,000 (ADV * price). Exclude penny/low-float/biotech. Avoid earnings day trades by default.
+- Lunch chop: no new setups/entries 11:30 AM–1:30 PM ET (manage open trades only).
+- Earnings exception only if: post-earnings gap >= 10–15% in trend direction AND relative volume >= 5x AND clean breakout+retest aligns with higher timeframe trend AND no immediate reversal signs.
+- Risk: daily max loss -2% realized then stop; stop after 3 losing trades; 15-minute cooldown after any loss.
+- Per-trade risk default 0.5% of account (user adjustable up to 1%); max position value cap <= 20% of account.
+- Always use stop-losses; do not allow manual stop moving in app.
+
+Strategy (multi-timeframe):
+- Trend filter on 1H: price above 1H EMA(50) AND EMA slope positive (EMA now > EMA 10 bars ago).
+- Entries on 5m.
+- Resistance detection: resistance = highest high of last N=48 5m bars with >=2 rejections (touch and close back below).
+- Breakout: 5m close above resistance by 0.10% buffer.
+- Confirmation: breakout volume > 1.5x 20-bar avg volume AND ATR(14) > ATR(14) 20-bar average on 5m (ATR expansion).
+- Retest: price returns within 0.15% of breakout level; allow minor wicks or even a close below/above the level if still within 0.15% tolerance; invalidate if closes beyond tolerance.
+- Trigger: bullish 5m candle closes green above the level after retest (optional bonus pattern: engulfing/hammer).
+
+Stops & management (for trade-plan + paper stats):
+- Stop below retest swing low + 0.05% buffer.
+- Partial: sell 50% at +1R and auto-move stop to breakeven at +1R.
+- Main target 2R–3R; runner uses ATR trailing stop 1.5x ATR(14).
+- Time stop default ON: exit if not reaching +0.5R within 30 minutes after entry.
+
+Outputs:
+- Only “SETUP forming” and “TRIGGER hit” (no “buy/sell now” language).
+- Each alert includes: level, RVOL, ATR expansion, trend status, suggested entry/stop/size/targets.
+- Daily summary: win rate, avg R, max drawdown, rule violations.
+
+Tech:
+- Next.js + TypeScript
+- Node/Next API routes for streaming + strategy engine
+- WebSocket connection to pluggable market data provider (implement one first; keep interface swappable)
+- PostgreSQL + Prisma for users, alerts, trades, metrics, logs
+- Auth (email/password)
+- Paper-mode account simulator
+- Clear disclaimer + settings panel for thresholds
+
+Deliver a working project with README, setup steps, default configs, and clean UI (dashboard + scanner + signal feed + trade-plan cards).

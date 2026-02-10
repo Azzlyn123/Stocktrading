@@ -40,6 +40,22 @@ export const users = pgTable("users", {
   volumeMultiplier: real("volume_multiplier").default(1.5),
   atrPeriod: integer("atr_period").default(14),
   trailingAtrMultiplier: real("trailing_atr_multiplier").default(1.5),
+  minPrice: real("min_price").default(15),
+  minAvgVolume: integer("min_avg_volume").default(2000000),
+  minDollarVolume: real("min_dollar_volume").default(50000000),
+  avoidEarnings: boolean("avoid_earnings").default(true),
+  lunchChopFilter: boolean("lunch_chop_filter").default(true),
+  lunchChopStart: text("lunch_chop_start").default("11:30"),
+  lunchChopEnd: text("lunch_chop_end").default("13:30"),
+  timeStopEnabled: boolean("time_stop_enabled").default(true),
+  timeStopMinutes: integer("time_stop_minutes").default(30),
+  timeStopR: real("time_stop_r").default(0.5),
+  partialExitPct: real("partial_exit_pct").default(50),
+  partialExitR: real("partial_exit_r").default(1),
+  mainTargetRMin: real("main_target_r_min").default(2),
+  mainTargetRMax: real("main_target_r_max").default(3),
+  earningsGapPct: real("earnings_gap_pct").default(10),
+  earningsRvolMin: real("earnings_rvol_min").default(5),
 });
 
 export const watchlistItems = pgTable("watchlist_items", {
@@ -50,6 +66,9 @@ export const watchlistItems = pgTable("watchlist_items", {
   sector: text("sector"),
   addedAt: timestamp("added_at").defaultNow(),
   isActive: boolean("is_active").default(true),
+  avgVolume: integer("avg_volume"),
+  avgPrice: real("avg_price"),
+  dollarVolume: real("dollar_volume"),
 });
 
 export const signals = pgTable("signals", {
@@ -77,6 +96,9 @@ export const signals = pgTable("signals", {
   atrExpansion: boolean("atr_expansion").default(false),
   candlePattern: text("candle_pattern"),
   notes: text("notes"),
+  rvol: real("rvol"),
+  atrValue: real("atr_value"),
+  rejectionCount: integer("rejection_count"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
   closedAt: timestamp("closed_at"),
@@ -104,6 +126,7 @@ export const paperTrades = pgTable("paper_trades", {
   entryPrice: real("entry_price").notNull(),
   exitPrice: real("exit_price"),
   stopPrice: real("stop_price").notNull(),
+  originalStopPrice: real("original_stop_price"),
   target1: real("target_1"),
   target2: real("target_2"),
   shares: integer("shares").notNull(),
@@ -114,6 +137,14 @@ export const paperTrades = pgTable("paper_trades", {
   enteredAt: timestamp("entered_at").defaultNow(),
   exitedAt: timestamp("exited_at"),
   exitReason: text("exit_reason"),
+  isPartiallyExited: boolean("is_partially_exited").default(false),
+  partialExitPrice: real("partial_exit_price"),
+  partialExitShares: integer("partial_exit_shares"),
+  stopMovedToBE: boolean("stop_moved_to_be").default(false),
+  runnerShares: integer("runner_shares"),
+  trailingStopPrice: real("trailing_stop_price"),
+  timeStopAt: timestamp("time_stop_at"),
+  dollarRisk: real("dollar_risk"),
 });
 
 export const dailySummaries = pgTable("daily_summaries", {
@@ -128,6 +159,7 @@ export const dailySummaries = pgTable("daily_summaries", {
   totalPnl: real("total_pnl").default(0),
   maxDrawdown: real("max_drawdown"),
   ruleViolations: integer("rule_violations").default(0),
+  ruleViolationDetails: jsonb("rule_violation_details"),
   accountBalance: real("account_balance"),
 });
 
@@ -177,6 +209,22 @@ export const settingsUpdateSchema = z.object({
   volumeMultiplier: z.number().min(1).max(5).optional(),
   atrPeriod: z.number().min(5).max(50).optional(),
   trailingAtrMultiplier: z.number().min(0.5).max(5).optional(),
+  minPrice: z.number().min(1).max(500).optional(),
+  minAvgVolume: z.number().min(100000).max(50000000).optional(),
+  minDollarVolume: z.number().min(1000000).max(500000000).optional(),
+  avoidEarnings: z.boolean().optional(),
+  lunchChopFilter: z.boolean().optional(),
+  lunchChopStart: z.string().optional(),
+  lunchChopEnd: z.string().optional(),
+  timeStopEnabled: z.boolean().optional(),
+  timeStopMinutes: z.number().min(5).max(120).optional(),
+  timeStopR: z.number().min(0.1).max(2).optional(),
+  partialExitPct: z.number().min(10).max(90).optional(),
+  partialExitR: z.number().min(0.5).max(3).optional(),
+  mainTargetRMin: z.number().min(1).max(5).optional(),
+  mainTargetRMax: z.number().min(1.5).max(10).optional(),
+  earningsGapPct: z.number().min(5).max(30).optional(),
+  earningsRvolMin: z.number().min(2).max(20).optional(),
 });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;

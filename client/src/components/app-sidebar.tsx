@@ -8,6 +8,7 @@ import {
   TrendingUp,
   Zap,
   Activity,
+  ScanSearch,
 } from "lucide-react";
 import { useLocation, Link } from "wouter";
 import {
@@ -30,6 +31,7 @@ import type { Alert } from "@shared/schema";
 
 const navItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
+  { title: "Scanner", url: "/scanner", icon: ScanSearch },
   { title: "Watchlist", url: "/watchlist", icon: ListChecks },
   { title: "Signals", url: "/signals", icon: Radio },
   { title: "Trade Plans", url: "/trades", icon: FileText },

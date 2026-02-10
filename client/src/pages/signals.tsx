@@ -16,6 +16,7 @@ import {
   Clock,
   ArrowUpRight,
   Eye,
+  BarChart3,
 } from "lucide-react";
 import type { Signal, Alert } from "@shared/schema";
 
@@ -30,9 +31,9 @@ const STATE_COLORS: Record<string, string> = {
 
 const STATE_LABELS: Record<string, string> = {
   IDLE: "Scanning",
-  BREAKOUT: "Breakout Detected",
+  BREAKOUT: "SETUP forming",
   RETEST: "Retest in Progress",
-  TRIGGERED: "Trigger Hit",
+  TRIGGERED: "TRIGGER hit",
   MANAGED: "Position Managed",
   CLOSED: "Closed",
 };
@@ -41,8 +42,8 @@ function SignalCard({ signal }: { signal: Signal }) {
   const riskReward = signal.riskReward ?? 0;
   const confirmations = [
     { label: "1H Trend", met: signal.trendConfirmed },
-    { label: "Volume", met: signal.volumeConfirmed },
-    { label: "ATR Expansion", met: signal.atrExpansion },
+    { label: `RVOL ${signal.rvol?.toFixed(1) ?? "—"}x`, met: signal.volumeConfirmed },
+    { label: "ATR Exp.", met: signal.atrExpansion },
   ];
 
   return (
@@ -79,6 +80,9 @@ function SignalCard({ signal }: { signal: Signal }) {
             <p className="text-xs font-medium mt-0.5">
               ${signal.resistanceLevel?.toFixed(2) ?? "—"}
             </p>
+            {signal.rejectionCount && (
+              <p className="text-[8px] text-muted-foreground">{signal.rejectionCount} rejections</p>
+            )}
           </div>
           <div className="p-2 rounded-md bg-accent/50 text-center">
             <p className="text-[9px] text-muted-foreground uppercase">Entry</p>
@@ -96,13 +100,13 @@ function SignalCard({ signal }: { signal: Signal }) {
 
         <div className="grid grid-cols-2 gap-2">
           <div className="p-2 rounded-md bg-accent/50 text-center">
-            <p className="text-[9px] text-muted-foreground uppercase">Target 1 (1R)</p>
+            <p className="text-[9px] text-muted-foreground uppercase">T1 (+1R partial 50%)</p>
             <p className="text-xs font-medium mt-0.5 text-emerald-500">
               ${signal.target1?.toFixed(2) ?? "—"}
             </p>
           </div>
           <div className="p-2 rounded-md bg-accent/50 text-center">
-            <p className="text-[9px] text-muted-foreground uppercase">Target 2 (2-3R)</p>
+            <p className="text-[9px] text-muted-foreground uppercase">T2 (2-3R runner)</p>
             <p className="text-xs font-medium mt-0.5 text-emerald-500">
               ${signal.target2?.toFixed(2) ?? "—"}
             </p>
@@ -130,10 +134,13 @@ function SignalCard({ signal }: { signal: Signal }) {
         </div>
 
         {signal.positionSize && (
-          <div className="flex items-center justify-between text-xs text-muted-foreground pt-1 border-t border-border">
+          <div className="flex items-center justify-between text-xs text-muted-foreground pt-1 border-t border-border flex-wrap gap-1">
             <span>
               Size: {signal.positionSize} shares (${((signal.positionSize ?? 0) * (signal.entryPrice ?? 0)).toFixed(0)})
             </span>
+            {signal.dollarRisk && (
+              <span>Risk: ${signal.dollarRisk.toFixed(0)}</span>
+            )}
             <span>R:R {riskReward.toFixed(1)}</span>
           </div>
         )}
@@ -141,6 +148,12 @@ function SignalCard({ signal }: { signal: Signal }) {
         {signal.candlePattern && (
           <p className="text-[10px] text-muted-foreground">
             Pattern: {signal.candlePattern}
+          </p>
+        )}
+
+        {signal.notes && (
+          <p className="text-[10px] text-muted-foreground/70 italic">
+            {signal.notes}
           </p>
         )}
       </CardContent>
@@ -180,7 +193,7 @@ export default function Signals() {
             Signal Feed
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Live breakout + retest signals
+            Live breakout + retest signals (long only)
           </p>
         </div>
         {unreadAlerts.length > 0 && (
@@ -231,6 +244,7 @@ export default function Signals() {
                 <p className="text-xs text-muted-foreground/60 mt-1 max-w-sm">
                   The scanner is monitoring your watchlist for breakout + retest setups.
                   Signals appear during US market hours (9:30 AM - 4:00 PM ET).
+                  No new setups during lunch chop (11:30 AM - 1:30 PM ET).
                 </p>
               </CardContent>
             </Card>
@@ -279,7 +293,6 @@ export default function Signals() {
               {alerts.map((alert) => (
                 <Card
                   key={alert.id}
-                  className={!alert.isRead ? "border-l-2 border-l-primary" : ""}
                   data-testid={`alert-log-${alert.id}`}
                 >
                   <CardContent className="p-3 flex items-start gap-3">
@@ -298,6 +311,11 @@ export default function Signals() {
                         <Badge variant="outline" className="text-[9px] px-1.5 min-h-5">
                           {alert.type}
                         </Badge>
+                        {!alert.isRead && (
+                          <Badge variant="default" className="text-[8px] px-1 min-h-4">
+                            NEW
+                          </Badge>
+                        )}
                         <span className="text-[10px] text-muted-foreground ml-auto">
                           {alert.createdAt
                             ? new Date(alert.createdAt).toLocaleString("en-US", {

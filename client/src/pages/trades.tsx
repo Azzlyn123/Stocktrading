@@ -8,22 +8,16 @@ import {
   TrendingUp,
   TrendingDown,
   Target,
-  DollarSign,
+  Shield,
+  CheckCircle,
   Clock,
+  ArrowRightLeft,
 } from "lucide-react";
 import type { PaperTrade } from "@shared/schema";
 
-function formatCurrency(val: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-  }).format(val);
-}
-
 function TradeCard({ trade }: { trade: PaperTrade }) {
-  const isWin = (trade.pnl ?? 0) > 0;
   const isOpen = trade.status === "open";
+  const isProfitable = (trade.pnl ?? 0) >= 0;
 
   return (
     <Card data-testid={`trade-card-${trade.id}`}>
@@ -32,92 +26,117 @@ function TradeCard({ trade }: { trade: PaperTrade }) {
           <div className="flex items-center gap-2">
             <span className="text-base font-semibold">{trade.ticker}</span>
             <Badge
-              variant={isOpen ? "default" : isWin ? "default" : "destructive"}
-              className="text-[9px] px-1.5 min-h-5 gap-1"
+              variant={isOpen ? "default" : "secondary"}
+              className="text-[9px] px-1.5 min-h-5"
             >
-              {isOpen ? (
-                <>
-                  <Clock className="w-2.5 h-2.5" /> Open
-                </>
-              ) : isWin ? (
-                <>
-                  <TrendingUp className="w-2.5 h-2.5" /> Win
-                </>
-              ) : (
-                <>
-                  <TrendingDown className="w-2.5 h-2.5" /> Loss
-                </>
-              )}
+              {isOpen ? "Open" : "Closed"}
+            </Badge>
+            <Badge variant="outline" className="text-[9px] px-1.5 min-h-5 uppercase">
+              {trade.side}
             </Badge>
           </div>
           {trade.pnl != null && (
             <div className="text-right">
               <p
-                className={`text-sm font-semibold ${
-                  trade.pnl >= 0 ? "text-emerald-500" : "text-red-500"
+                className={`text-sm font-medium ${
+                  isProfitable ? "text-emerald-500" : "text-red-500"
                 }`}
               >
-                {trade.pnl >= 0 ? "+" : ""}
-                {formatCurrency(trade.pnl)}
+                {isProfitable ? "+" : ""}${trade.pnl.toFixed(2)}
               </p>
               {trade.rMultiple != null && (
                 <p className="text-[10px] text-muted-foreground">
-                  {trade.rMultiple >= 0 ? "+" : ""}
-                  {trade.rMultiple.toFixed(2)}R
+                  {trade.rMultiple >= 0 ? "+" : ""}{trade.rMultiple.toFixed(2)}R
                 </p>
               )}
             </div>
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
-          <div className="p-2 rounded-md bg-accent/50">
+        <div className="grid grid-cols-4 gap-2">
+          <div className="p-2 rounded-md bg-accent/50 text-center">
             <p className="text-[9px] text-muted-foreground uppercase">Entry</p>
             <p className="text-xs font-medium mt-0.5">
-              ${trade.entryPrice.toFixed(2)}
+              ${trade.entryPrice?.toFixed(2) ?? "—"}
             </p>
           </div>
-          <div className="p-2 rounded-md bg-accent/50">
-            <p className="text-[9px] text-muted-foreground uppercase">
-              {isOpen ? "Stop" : "Exit"}
+          <div className="p-2 rounded-md bg-accent/50 text-center">
+            <p className="text-[9px] text-muted-foreground uppercase">Stop</p>
+            <p className="text-xs font-medium mt-0.5 text-red-500">
+              ${trade.stopPrice?.toFixed(2) ?? "—"}
             </p>
-            <p className="text-xs font-medium mt-0.5">
-              ${(isOpen ? trade.stopPrice : trade.exitPrice)?.toFixed(2) ?? "—"}
+            {trade.stopMovedToBE && (
+              <p className="text-[8px] text-emerald-500">at BE</p>
+            )}
+          </div>
+          <div className="p-2 rounded-md bg-accent/50 text-center">
+            <p className="text-[9px] text-muted-foreground uppercase">T1 (+1R)</p>
+            <p className="text-xs font-medium mt-0.5 text-emerald-500">
+              ${trade.target1?.toFixed(2) ?? "—"}
+            </p>
+          </div>
+          <div className="p-2 rounded-md bg-accent/50 text-center">
+            <p className="text-[9px] text-muted-foreground uppercase">T2 (runner)</p>
+            <p className="text-xs font-medium mt-0.5 text-emerald-500">
+              ${trade.target2?.toFixed(2) ?? "—"}
             </p>
           </div>
         </div>
 
-        {(trade.target1 || trade.target2) && (
-          <div className="grid grid-cols-2 gap-2">
-            <div className="p-2 rounded-md bg-accent/50">
-              <p className="text-[9px] text-muted-foreground uppercase">T1 (1R)</p>
-              <p className="text-xs font-medium mt-0.5 text-emerald-500">
-                ${trade.target1?.toFixed(2) ?? "—"}
-              </p>
-            </div>
-            <div className="p-2 rounded-md bg-accent/50">
-              <p className="text-[9px] text-muted-foreground uppercase">T2 (2-3R)</p>
-              <p className="text-xs font-medium mt-0.5 text-emerald-500">
-                ${trade.target2?.toFixed(2) ?? "—"}
-              </p>
-            </div>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
+          <span>{trade.shares} shares</span>
+          {trade.dollarRisk && (
+            <>
+              <span className="text-muted-foreground/30">|</span>
+              <span>Risk: ${trade.dollarRisk.toFixed(0)}</span>
+            </>
+          )}
+          {trade.exitPrice != null && (
+            <>
+              <span className="text-muted-foreground/30">|</span>
+              <span>Exit: ${trade.exitPrice.toFixed(2)}</span>
+            </>
+          )}
+        </div>
+
+        {(trade.isPartiallyExited || trade.stopMovedToBE || trade.runnerShares) && (
+          <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-border">
+            {trade.isPartiallyExited && (
+              <div className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-500">
+                <ArrowRightLeft className="w-2.5 h-2.5" />
+                Partial: {trade.partialExitShares} @ ${trade.partialExitPrice?.toFixed(2)}
+              </div>
+            )}
+            {trade.stopMovedToBE && (
+              <div className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-500">
+                <Shield className="w-2.5 h-2.5" />
+                Stop at BE
+              </div>
+            )}
+            {trade.runnerShares && (
+              <div className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-full bg-accent text-muted-foreground">
+                <TrendingUp className="w-2.5 h-2.5" />
+                Runner: {trade.runnerShares} shares
+              </div>
+            )}
           </div>
         )}
 
-        <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1 border-t border-border flex-wrap gap-1">
-          <span>{trade.shares} shares</span>
-          <span>
-            {trade.enteredAt
-              ? new Date(trade.enteredAt).toLocaleString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  hour: "numeric",
-                  minute: "2-digit",
-                })
-              : ""}
-          </span>
-          {trade.exitReason && <span className="capitalize">{trade.exitReason}</span>}
-        </div>
+        {trade.timeStopAt && isOpen && (
+          <div className="flex items-center gap-1.5 text-[10px] text-amber-500">
+            <Clock className="w-3 h-3" />
+            Time stop: {new Date(trade.timeStopAt).toLocaleTimeString("en-US", {
+              hour: "numeric",
+              minute: "2-digit",
+            })} (exit if not +0.5R)
+          </div>
+        )}
+
+        {trade.exitReason && (
+          <p className="text-[10px] text-muted-foreground/70 italic">
+            {trade.exitReason}
+          </p>
+        )}
       </CardContent>
     </Card>
   );
@@ -126,18 +145,19 @@ function TradeCard({ trade }: { trade: PaperTrade }) {
 export default function Trades() {
   const { data: trades, isLoading } = useQuery<PaperTrade[]>({
     queryKey: ["/api/trades"],
-    refetchInterval: 5000,
+    refetchInterval: 3000,
   });
 
   const openTrades = trades?.filter((t) => t.status === "open") ?? [];
   const closedTrades = trades?.filter((t) => t.status === "closed") ?? [];
 
   const totalPnl = closedTrades.reduce((sum, t) => sum + (t.pnl ?? 0), 0);
-  const winCount = closedTrades.filter((t) => (t.pnl ?? 0) > 0).length;
-  const avgR =
-    closedTrades.length > 0
-      ? closedTrades.reduce((sum, t) => sum + (t.rMultiple ?? 0), 0) / closedTrades.length
-      : 0;
+  const wins = closedTrades.filter((t) => (t.pnl ?? 0) > 0);
+  const losses = closedTrades.filter((t) => (t.pnl ?? 0) <= 0);
+  const winRate = closedTrades.length > 0 ? ((wins.length / closedTrades.length) * 100).toFixed(0) : "—";
+  const avgR = closedTrades.length > 0
+    ? (closedTrades.reduce((sum, t) => sum + (t.rMultiple ?? 0), 0) / closedTrades.length).toFixed(2)
+    : "—";
 
   return (
     <div className="p-4 md:p-6 space-y-6 max-w-5xl mx-auto overflow-y-auto h-full">
@@ -146,57 +166,54 @@ export default function Trades() {
           Trade Plans
         </h1>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Paper trading positions and history
+          Paper trading with managed exits and trailing stops
         </p>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Card>
-          <CardContent className="p-3 text-center">
-            <p className="text-[9px] text-muted-foreground uppercase">Open</p>
-            <p className="text-lg font-semibold mt-0.5">{openTrades.length}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3 text-center">
-            <p className="text-[9px] text-muted-foreground uppercase">Total P&L</p>
-            <p
-              className={`text-lg font-semibold mt-0.5 ${
-                totalPnl >= 0 ? "text-emerald-500" : "text-red-500"
-              }`}
-            >
-              {totalPnl >= 0 ? "+" : ""}
-              {formatCurrency(totalPnl)}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3 text-center">
-            <p className="text-[9px] text-muted-foreground uppercase">Win Rate</p>
-            <p className="text-lg font-semibold mt-0.5">
-              {closedTrades.length > 0
-                ? `${((winCount / closedTrades.length) * 100).toFixed(0)}%`
-                : "—"}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3 text-center">
-            <p className="text-[9px] text-muted-foreground uppercase">Avg R</p>
-            <p className="text-lg font-semibold mt-0.5">
-              {closedTrades.length > 0 ? `${avgR.toFixed(2)}R` : "—"}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+      {closedTrades.length > 0 && (
+        <div className="grid grid-cols-4 gap-3">
+          <Card>
+            <CardContent className="p-3 text-center">
+              <p className="text-[9px] text-muted-foreground uppercase">Total P&L</p>
+              <p
+                className={`text-sm font-semibold ${
+                  totalPnl >= 0 ? "text-emerald-500" : "text-red-500"
+                }`}
+              >
+                {totalPnl >= 0 ? "+" : ""}${totalPnl.toFixed(0)}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-3 text-center">
+              <p className="text-[9px] text-muted-foreground uppercase">Win Rate</p>
+              <p className="text-sm font-semibold">{winRate}%</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-3 text-center">
+              <p className="text-[9px] text-muted-foreground uppercase">Avg R</p>
+              <p className="text-sm font-semibold">{avgR}</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-3 text-center">
+              <p className="text-[9px] text-muted-foreground uppercase">Trades</p>
+              <p className="text-sm font-semibold">{closedTrades.length}</p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       <Tabs defaultValue="open">
         <TabsList>
-          <TabsTrigger value="open" data-testid="tab-open-trades">
+          <TabsTrigger value="open" className="gap-1" data-testid="tab-open-trades">
+            <TrendingUp className="w-3.5 h-3.5" />
             Open ({openTrades.length})
           </TabsTrigger>
-          <TabsTrigger value="closed" data-testid="tab-closed-trades">
-            History ({closedTrades.length})
+          <TabsTrigger value="closed" className="gap-1" data-testid="tab-closed-trades">
+            <CheckCircle className="w-3.5 h-3.5" />
+            Closed ({closedTrades.length})
           </TabsTrigger>
         </TabsList>
 
@@ -215,9 +232,10 @@ export default function Trades() {
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-16 text-center">
                 <FileText className="w-10 h-10 text-muted-foreground/20 mb-3" />
-                <p className="text-sm text-muted-foreground font-medium">No open positions</p>
-                <p className="text-xs text-muted-foreground/60 mt-1">
-                  Paper trades will appear here when signals are triggered
+                <p className="text-sm text-muted-foreground font-medium">No open trades</p>
+                <p className="text-xs text-muted-foreground/60 mt-1 max-w-sm">
+                  Trades are created automatically when signals trigger.
+                  50% partial at T1, then runner with ATR trailing stop.
                 </p>
               </CardContent>
             </Card>
@@ -235,9 +253,9 @@ export default function Trades() {
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-16 text-center">
                 <Target className="w-10 h-10 text-muted-foreground/20 mb-3" />
-                <p className="text-sm text-muted-foreground font-medium">No trade history</p>
+                <p className="text-sm text-muted-foreground font-medium">No closed trades</p>
                 <p className="text-xs text-muted-foreground/60 mt-1">
-                  Completed paper trades will show here
+                  Trade history will appear here
                 </p>
               </CardContent>
             </Card>
