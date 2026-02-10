@@ -18,6 +18,17 @@ import {
   type StrategyConfig,
 } from "./strategy";
 import { DEFAULT_STRATEGY_CONFIG } from "./strategy/config";
+import {
+  isAlpacaConfigured,
+  fetchHistoricalBars,
+  fetchMultipleHistoricalBars,
+  fetchSnapshots,
+  checkMarketClock,
+  AlpacaStream,
+  type LiveTradeUpdate,
+  type LiveBarUpdate,
+  type LiveQuoteUpdate,
+} from "./alpaca";
 
 interface SimulatedTicker {
   ticker: string;
@@ -139,6 +150,17 @@ interface PriceState {
 }
 
 const priceStates = new Map<string, PriceState>();
+let currentDataSource: "live" | "simulated" = "simulated";
+let alpacaStream: AlpacaStream | null = null;
+let marketIsOpen = false;
+
+export function getDataSource(): "live" | "simulated" {
+  return currentDataSource;
+}
+
+export function isLiveConnected(): boolean {
+  return alpacaStream?.isConnected() ?? false;
+}
 
 function initializePriceState(ticker: SimulatedTicker): PriceState {
   const variance = (Math.random() - 0.5) * ticker.basePrice * 0.02;
@@ -391,7 +413,166 @@ export function getScannerData(filters: {
   return items.sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct));
 }
 
-export function startSimulatedDataFeed(
+async function initializeLiveData(): Promise<boolean> {
+  if (!isAlpacaConfigured()) {
+    log("Alpaca not configured, using simulated data", "alpaca");
+    return false;
+  }
+
+  try {
+    const clock = await checkMarketClock();
+    marketIsOpen = clock.isOpen;
+    log(`Market is ${marketIsOpen ? "OPEN" : "CLOSED"}. Next open: ${clock.nextOpen}`, "alpaca");
+
+    const allSymbols = SIMULATED_TICKERS.map((t) => t.ticker);
+
+    log("Fetching historical 5m bars from Alpaca...", "alpaca");
+    const bars5mMap = await fetchMultipleHistoricalBars(allSymbols, "5Min", 100);
+
+    log("Fetching historical 15m bars from Alpaca...", "alpaca");
+    const bars15mMap = await fetchMultipleHistoricalBars(allSymbols, "15Min", 50);
+
+    log("Fetching snapshots from Alpaca...", "alpaca");
+    const snapshots = await fetchSnapshots(allSymbols);
+
+    let liveCount = 0;
+    for (const tickerConfig of SIMULATED_TICKERS) {
+      const sym = tickerConfig.ticker;
+      const bars5m = bars5mMap.get(sym) || [];
+      const bars15m = bars15mMap.get(sym) || [];
+      const snap = snapshots.get(sym);
+
+      if (bars5m.length === 0 && !snap) continue;
+
+      const state = priceStates.get(sym);
+      if (!state) continue;
+
+      if (bars5m.length > 0) {
+        state.bars5m = bars5m.slice(-200);
+        const lastBar = bars5m[bars5m.length - 1];
+        state.price = lastBar.close;
+        state.high = Math.max(...bars5m.slice(-20).map((b) => b.high));
+        state.low = Math.min(...bars5m.slice(-20).map((b) => b.low));
+        state.open = bars5m.length >= 78 ? bars5m[bars5m.length - 78].open : bars5m[0].open;
+        state.atr14 = calculateATR(state.bars5m, 14);
+        state.vwap = calculateVWAP(state.bars5m);
+        state.dayVolume = bars5m.slice(-78).reduce((s, b) => s + b.volume, 0);
+        state.changePct = ((state.price - state.open) / state.open) * 100;
+      }
+
+      if (bars15m.length > 0) {
+        state.bars15m = bars15m.slice(-100);
+      }
+
+      if (snap) {
+        if (snap.latestTrade) {
+          state.price = snap.latestTrade.p;
+        }
+        if (snap.latestQuote) {
+          const mid = (snap.latestQuote.bp + snap.latestQuote.ap) / 2;
+          state.spreadPct = mid > 0 ? ((snap.latestQuote.ap - snap.latestQuote.bp) / mid) * 100 : 0.02;
+        }
+        if (snap.prevDailyBar) {
+          state.prevDayHigh = snap.prevDailyBar.h;
+          state.yesterdayRange = snap.prevDailyBar.h - snap.prevDailyBar.l;
+          state.dailyATRbaseline = state.yesterdayRange * 0.15;
+        }
+        if (snap.dailyBar) {
+          state.dayVolume = snap.dailyBar.v;
+        }
+      }
+
+      const expectedVolSoFar = tickerConfig.avgDailyVolume * 0.4;
+      state.rvol = expectedVolSoFar > 0 ? state.dayVolume / expectedVolSoFar : 1.5;
+
+      liveCount++;
+    }
+
+    if (liveCount > 0) {
+      log(`Loaded live data for ${liveCount}/${allSymbols.length} symbols`, "alpaca");
+      return true;
+    } else {
+      log("No live data available from Alpaca, falling back to simulator", "alpaca");
+      return false;
+    }
+  } catch (e: any) {
+    log(`Alpaca initialization failed: ${e.message}`, "alpaca");
+    return false;
+  }
+}
+
+function startAlpacaStream(broadcast: (type: string, data: any) => void) {
+  const symbols = SIMULATED_TICKERS.map((t) => t.ticker);
+  alpacaStream = new AlpacaStream(symbols);
+
+  alpacaStream.setTradeHandler((trade: LiveTradeUpdate) => {
+    const state = priceStates.get(trade.symbol);
+    if (!state) return;
+
+    state.price = trade.price;
+    state.high = Math.max(state.high, trade.price);
+    state.low = Math.min(state.low, trade.price);
+    state.dayVolume += trade.size;
+
+    const tickerConfig = SIMULATED_TICKERS.find((t) => t.ticker === trade.symbol);
+    if (tickerConfig) {
+      state.changePct = ((trade.price - state.open) / state.open) * 100;
+      const expectedVolSoFar = tickerConfig.avgDailyVolume * 0.4;
+      state.rvol = expectedVolSoFar > 0 ? state.dayVolume / expectedVolSoFar : 1.5;
+    }
+  });
+
+  alpacaStream.setBarHandler((bar: LiveBarUpdate) => {
+    const state = priceStates.get(bar.symbol);
+    if (!state) return;
+
+    const candle: Candle = {
+      open: bar.open,
+      high: bar.high,
+      low: bar.low,
+      close: bar.close,
+      volume: bar.volume,
+      timestamp: bar.timestamp,
+    };
+
+    state.bars5m.push(candle);
+    if (state.bars5m.length > 200) state.bars5m.shift();
+    state.barCount++;
+
+    if (state.barCount % 3 === 0 && state.bars5m.length >= 3) {
+      const last3 = state.bars5m.slice(-3);
+      const bar15m: Candle = {
+        open: last3[0].open,
+        high: Math.max(...last3.map((b) => b.high)),
+        low: Math.min(...last3.map((b) => b.low)),
+        close: last3[2].close,
+        volume: last3.reduce((s, b) => s + b.volume, 0),
+        timestamp: last3[0].timestamp,
+      };
+      state.bars15m.push(bar15m);
+      if (state.bars15m.length > 100) state.bars15m.shift();
+    }
+
+    state.atr14 = calculateATR(state.bars5m, 14);
+    state.vwap = calculateVWAP(state.bars5m);
+    state.price = bar.close;
+  });
+
+  alpacaStream.setQuoteHandler((quote: LiveQuoteUpdate) => {
+    const state = priceStates.get(quote.symbol);
+    if (!state) return;
+
+    const mid = (quote.bidPrice + quote.askPrice) / 2;
+    if (mid > 0) {
+      state.spreadPct = ((quote.askPrice - quote.bidPrice) / mid) * 100;
+    }
+  });
+
+  alpacaStream.connect();
+  log("Alpaca live stream started", "alpaca");
+}
+
+export async function startSimulatedDataFeed(
   broadcast: (type: string, data: any) => void,
   storage: IStorage
 ) {
@@ -405,6 +586,36 @@ export function startSimulatedDataFeed(
     state.vwap = calculateVWAP(state.bars5m);
     priceStates.set(ticker.ticker, state);
   }
+
+  const liveDataLoaded = await initializeLiveData();
+  if (liveDataLoaded) {
+    currentDataSource = "live";
+    startAlpacaStream(broadcast);
+    log("Running with LIVE market data from Alpaca", "alpaca");
+  } else {
+    currentDataSource = "simulated";
+    log("Running with SIMULATED market data", "simulator");
+  }
+
+  setInterval(async () => {
+    const clock = await checkMarketClock().catch(() => ({ isOpen: false, nextOpen: null, nextClose: null }));
+    const wasOpen = marketIsOpen;
+    marketIsOpen = clock.isOpen;
+
+    if (marketIsOpen && !wasOpen && isAlpacaConfigured()) {
+      const loaded = await initializeLiveData();
+      if (loaded) {
+        currentDataSource = "live";
+        if (!alpacaStream?.isConnected()) {
+          startAlpacaStream(broadcast);
+        }
+        log("Market opened - switched to LIVE data", "alpaca");
+      }
+    } else if (!marketIsOpen && wasOpen) {
+      currentDataSource = "simulated";
+      log("Market closed - switched to SIMULATED data", "simulator");
+    }
+  }, 60000);
 
   let tickCount = 0;
 
@@ -428,7 +639,9 @@ export function startSimulatedDataFeed(
       const state = priceStates.get(tickerConfig.ticker);
       if (!state) continue;
 
-      simulatePriceMove(state, tickerConfig);
+      if (currentDataSource === "simulated") {
+        simulatePriceMove(state, tickerConfig);
+      }
 
       priceUpdates.push({
         ticker: state.ticker,
@@ -436,23 +649,30 @@ export function startSimulatedDataFeed(
         change: Number(state.changePct.toFixed(2)),
         volume: state.dayVolume,
         rvol: Number(state.rvol.toFixed(2)),
+        dataSource: currentDataSource,
       });
 
       if (tickCount % 5 === 0) {
-        state.trendPhaseBars++;
+        let candle: Candle;
 
-        if (state.trendPhase === "rally" && state.trendPhaseBars > 1 + Math.floor(Math.random() * 2)) {
-          state.trendPhase = "pullback";
-          state.trendPhaseBars = 0;
-        } else if (state.trendPhase === "pullback" && state.trendPhaseBars > 1) {
-          state.trendPhase = Math.random() > 0.2 ? "rally" : "consolidation";
-          state.trendPhaseBars = 0;
-        } else if (state.trendPhase === "consolidation" && state.trendPhaseBars > 1) {
-          state.trendPhase = "rally";
-          state.trendPhaseBars = 0;
+        if (currentDataSource === "simulated") {
+          state.trendPhaseBars++;
+
+          if (state.trendPhase === "rally" && state.trendPhaseBars > 1 + Math.floor(Math.random() * 2)) {
+            state.trendPhase = "pullback";
+            state.trendPhaseBars = 0;
+          } else if (state.trendPhase === "pullback" && state.trendPhaseBars > 1) {
+            state.trendPhase = Math.random() > 0.2 ? "rally" : "consolidation";
+            state.trendPhaseBars = 0;
+          } else if (state.trendPhase === "consolidation" && state.trendPhaseBars > 1) {
+            state.trendPhase = "rally";
+            state.trendPhaseBars = 0;
+          }
+
+          candle = create5mCandle(state);
+        } else {
+          candle = state.bars5m.length > 0 ? state.bars5m[state.bars5m.length - 1] : create5mCandle(state);
         }
-
-        const candle = create5mCandle(state);
 
         if (tickerConfig.ticker === "SPY" || tickerConfig.ticker === "QQQ") continue;
 
@@ -500,16 +720,31 @@ export function startSimulatedDataFeed(
         }
 
         if (state.signalState === "IDLE" && state.resistanceLevel && timeSinceLastBreakout > cooldownMs && !hasOpenTrade) {
-          const nearResistance = state.price >= state.resistanceLevel * 0.998;
-          const shouldForceBreakout = nearResistance || (state.trendPhase === "rally" && Math.random() > 0.2) || Math.random() > 0.6;
+          let shouldBreakout = false;
+          let boCandle: Candle;
 
-          if (shouldForceBreakout) {
-            const boCandle = createBreakoutCandle(state, state.resistanceLevel);
-            state.bars5m.push(boCandle);
-            if (state.bars5m.length > 200) state.bars5m.shift();
-            state.barCount++;
-            state.vwap = calculateVWAP(state.bars5m);
-            state.atr14 = calculateATR(state.bars5m, 14);
+          if (currentDataSource === "live") {
+            const recentCandle = state.bars5m.length > 0 ? state.bars5m[state.bars5m.length - 1] : null;
+            if (recentCandle && recentCandle.close > state.resistanceLevel) {
+              shouldBreakout = true;
+              boCandle = recentCandle;
+            } else {
+              boCandle = candle;
+            }
+          } else {
+            const nearResistance = state.price >= state.resistanceLevel * 0.998;
+            shouldBreakout = nearResistance || (state.trendPhase === "rally" && Math.random() > 0.2) || Math.random() > 0.6;
+            boCandle = createBreakoutCandle(state, state.resistanceLevel);
+          }
+
+          if (shouldBreakout) {
+            if (currentDataSource === "simulated") {
+              state.bars5m.push(boCandle);
+              if (state.bars5m.length > 200) state.bars5m.shift();
+              state.barCount++;
+              state.vwap = calculateVWAP(state.bars5m);
+              state.atr14 = calculateATR(state.bars5m, 14);
+            }
 
             const breakoutResult = checkBreakoutQualification(
               boCandle,
@@ -589,12 +824,18 @@ export function startSimulatedDataFeed(
         }
 
         if (state.signalState === "BREAKOUT" && state.resistanceLevel && state.breakoutCandle) {
-          const retCandle = createRetestCandle(state, state.resistanceLevel);
-          state.bars5m.push(retCandle);
-          if (state.bars5m.length > 200) state.bars5m.shift();
-          state.barCount++;
-          state.vwap = calculateVWAP(state.bars5m);
-          state.atr14 = calculateATR(state.bars5m, 14);
+          let retCandle: Candle;
+
+          if (currentDataSource === "live") {
+            retCandle = state.bars5m.length > 0 ? state.bars5m[state.bars5m.length - 1] : candle;
+          } else {
+            retCandle = createRetestCandle(state, state.resistanceLevel);
+            state.bars5m.push(retCandle);
+            if (state.bars5m.length > 200) state.bars5m.shift();
+            state.barCount++;
+            state.vwap = calculateVWAP(state.bars5m);
+            state.atr14 = calculateATR(state.bars5m, 14);
+          }
 
           state.signalState = "RETEST";
           state.retestSwingLow = retCandle.low;
@@ -882,11 +1123,13 @@ export function startSimulatedDataFeed(
     const regimeResult2 = checkMarketRegime(spyState2?.bars5m ?? [], DEMO_CONFIG.marketRegime);
 
     broadcast("market_status", {
-      isOpen: isOpen || true,
+      isOpen: isOpen || currentDataSource === "simulated",
       isLunchChop: isLunch,
       time: est.toISOString(),
       spyAligned: regimeResult2.aligned,
       spyChopping: regimeResult2.chopping,
+      dataSource: currentDataSource,
+      liveConnected: alpacaStream?.isConnected() ?? false,
     });
   }, 30000);
 

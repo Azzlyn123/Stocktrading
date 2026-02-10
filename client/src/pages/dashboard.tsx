@@ -16,6 +16,8 @@ import {
   BarChart3,
   Target,
   Shield,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import {
   AreaChart,
@@ -109,6 +111,11 @@ export default function Dashboard() {
     queryKey: ["/api/summaries"],
   });
 
+  const { data: dataSource } = useQuery<{ source: string; liveConnected: boolean }>({
+    queryKey: ["/api/data-source"],
+    refetchInterval: 15000,
+  });
+
   useEffect(() => {
     const now = new Date();
     const est = new Date(
@@ -196,6 +203,20 @@ export default function Dashboard() {
             />
             {isConnected ? "Live" : "Offline"}
           </Badge>
+          {dataSource && (
+            <Badge
+              variant={dataSource.source === "live" ? "default" : "outline"}
+              className="gap-1"
+              data-testid="badge-data-source"
+            >
+              {dataSource.source === "live" ? (
+                <Wifi className="w-3 h-3" />
+              ) : (
+                <WifiOff className="w-3 h-3" />
+              )}
+              {dataSource.source === "live" ? "Alpaca Live" : "Simulated"}
+            </Badge>
+          )}
           {isLunchChop && (
             <Badge variant="outline" className="gap-1 text-amber-500 border-amber-500/30" data-testid="badge-lunch-chop">
               <Clock className="w-3 h-3" />

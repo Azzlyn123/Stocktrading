@@ -6,7 +6,7 @@ import { storage } from "./storage";
 import { setupAuth } from "./auth";
 import { insertUserSchema, settingsUpdateSchema } from "@shared/schema";
 import type { User } from "@shared/schema";
-import { startSimulatedDataFeed, registerUser, unregisterUser, getScannerData } from "./simulator";
+import { startSimulatedDataFeed, registerUser, unregisterUser, getScannerData, getDataSource, isLiveConnected } from "./simulator";
 import { seedDemoData } from "./seed";
 
 declare global {
@@ -169,7 +169,7 @@ export async function registerRoutes(
   });
 
   app.delete("/api/watchlist/:id", requireAuth, async (req, res) => {
-    await storage.removeWatchlistItem(req.params.id, req.user!.id);
+    await storage.removeWatchlistItem(req.params.id as string, req.user!.id);
     res.json({ ok: true });
   });
 
@@ -213,6 +213,14 @@ export async function registerRoutes(
     res.json(data);
   });
 
+  // Data source status
+  app.get("/api/data-source", requireAuth, (_req, res) => {
+    res.json({
+      source: getDataSource(),
+      liveConnected: isLiveConnected(),
+    });
+  });
+
   // WebSocket setup
   const wss = new WebSocketServer({ noServer: true });
   const clients = new Set<WebSocket>();
@@ -247,11 +255,11 @@ export async function registerRoutes(
 
   function broadcast(type: string, data: any) {
     const msg = JSON.stringify({ type, data });
-    for (const client of clients) {
+    clients.forEach((client) => {
       if (client.readyState === WebSocket.OPEN) {
         client.send(msg);
       }
-    }
+    });
   }
 
   // Start simulated market data feed
