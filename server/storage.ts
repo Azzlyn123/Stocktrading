@@ -1,38 +1,142 @@
-import { type User, type InsertUser } from "@shared/schema";
-import { randomUUID } from "crypto";
-
-// modify the interface with any CRUD methods
-// you might need
+import { eq, and, desc } from "drizzle-orm";
+import { db } from "./db";
+import {
+  users,
+  watchlistItems,
+  signals,
+  alerts,
+  paperTrades,
+  dailySummaries,
+  type User,
+  type InsertUser,
+  type WatchlistItem,
+  type InsertWatchlistItem,
+  type Signal,
+  type InsertSignal,
+  type Alert,
+  type InsertAlert,
+  type PaperTrade,
+  type InsertPaperTrade,
+  type DailySummary,
+  type InsertDailySummary,
+  type SettingsUpdate,
+} from "@shared/schema";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  updateUserSettings(id: string, settings: SettingsUpdate): Promise<User | undefined>;
+
+  getWatchlist(userId: string): Promise<WatchlistItem[]>;
+  addWatchlistItem(item: InsertWatchlistItem): Promise<WatchlistItem>;
+  removeWatchlistItem(id: string, userId: string): Promise<void>;
+
+  getSignals(userId: string): Promise<Signal[]>;
+  getSignalById(id: string): Promise<Signal | undefined>;
+  createSignal(signal: InsertSignal): Promise<Signal>;
+  updateSignal(id: string, updates: Partial<Signal>): Promise<Signal | undefined>;
+
+  getAlerts(userId: string): Promise<Alert[]>;
+  createAlert(alert: InsertAlert): Promise<Alert>;
+  markAlertsRead(userId: string): Promise<void>;
+
+  getTrades(userId: string): Promise<PaperTrade[]>;
+  createTrade(trade: InsertPaperTrade): Promise<PaperTrade>;
+  updateTrade(id: string, updates: Partial<PaperTrade>): Promise<PaperTrade | undefined>;
+
+  getSummaries(userId: string): Promise<DailySummary[]>;
+  createSummary(summary: InsertDailySummary): Promise<DailySummary>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User>;
-
-  constructor() {
-    this.users = new Map();
-  }
-
+export class DatabaseStorage implements IStorage {
   async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user;
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user;
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
+    const [user] = await db.insert(users).values(insertUser).returning();
     return user;
+  }
+
+  async updateUserSettings(id: string, settings: SettingsUpdate): Promise<User | undefined> {
+    const [user] = await db.update(users).set(settings).where(eq(users.id, id)).returning();
+    return user;
+  }
+
+  async getWatchlist(userId: string): Promise<WatchlistItem[]> {
+    return db.select().from(watchlistItems).where(eq(watchlistItems.userId, userId)).orderBy(desc(watchlistItems.addedAt));
+  }
+
+  async addWatchlistItem(item: InsertWatchlistItem): Promise<WatchlistItem> {
+    const [result] = await db.insert(watchlistItems).values(item).returning();
+    return result;
+  }
+
+  async removeWatchlistItem(id: string, userId: string): Promise<void> {
+    await db.delete(watchlistItems).where(and(eq(watchlistItems.id, id), eq(watchlistItems.userId, userId)));
+  }
+
+  async getSignals(userId: string): Promise<Signal[]> {
+    return db.select().from(signals).where(eq(signals.userId, userId)).orderBy(desc(signals.createdAt));
+  }
+
+  async getSignalById(id: string): Promise<Signal | undefined> {
+    const [signal] = await db.select().from(signals).where(eq(signals.id, id));
+    return signal;
+  }
+
+  async createSignal(signal: InsertSignal): Promise<Signal> {
+    const [result] = await db.insert(signals).values(signal).returning();
+    return result;
+  }
+
+  async updateSignal(id: string, updates: Partial<Signal>): Promise<Signal | undefined> {
+    const [result] = await db.update(signals).set({ ...updates, updatedAt: new Date() }).where(eq(signals.id, id)).returning();
+    return result;
+  }
+
+  async getAlerts(userId: string): Promise<Alert[]> {
+    return db.select().from(alerts).where(eq(alerts.userId, userId)).orderBy(desc(alerts.createdAt));
+  }
+
+  async createAlert(alert: InsertAlert): Promise<Alert> {
+    const [result] = await db.insert(alerts).values(alert).returning();
+    return result;
+  }
+
+  async markAlertsRead(userId: string): Promise<void> {
+    await db.update(alerts).set({ isRead: true }).where(eq(alerts.userId, userId));
+  }
+
+  async getTrades(userId: string): Promise<PaperTrade[]> {
+    return db.select().from(paperTrades).where(eq(paperTrades.userId, userId)).orderBy(desc(paperTrades.enteredAt));
+  }
+
+  async createTrade(trade: InsertPaperTrade): Promise<PaperTrade> {
+    const [result] = await db.insert(paperTrades).values(trade).returning();
+    return result;
+  }
+
+  async updateTrade(id: string, updates: Partial<PaperTrade>): Promise<PaperTrade | undefined> {
+    const [result] = await db.update(paperTrades).set(updates).where(eq(paperTrades.id, id)).returning();
+    return result;
+  }
+
+  async getSummaries(userId: string): Promise<DailySummary[]> {
+    return db.select().from(dailySummaries).where(eq(dailySummaries.userId, userId)).orderBy(desc(dailySummaries.date));
+  }
+
+  async createSummary(summary: InsertDailySummary): Promise<DailySummary> {
+    const [result] = await db.insert(dailySummaries).values(summary).returning();
+    return result;
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
