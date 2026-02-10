@@ -23,7 +23,7 @@ function TradeCard({ trade }: { trade: PaperTrade }) {
     <Card data-testid={`trade-card-${trade.id}`}>
       <CardContent className="p-4 space-y-3">
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-base font-semibold">{trade.ticker}</span>
             <Badge
               variant={isOpen ? "default" : "secondary"}
@@ -34,6 +34,19 @@ function TradeCard({ trade }: { trade: PaperTrade }) {
             <Badge variant="outline" className="text-[9px] px-1.5 min-h-5 uppercase">
               {trade.side}
             </Badge>
+            {trade.score != null && (
+              <span
+                className={`text-[9px] font-semibold px-1.5 py-0.5 rounded ${
+                  trade.scoreTier === "full"
+                    ? "text-emerald-500 bg-emerald-500/10"
+                    : trade.scoreTier === "half"
+                    ? "text-amber-500 bg-amber-500/10"
+                    : "text-muted-foreground bg-accent"
+                }`}
+              >
+                Score {trade.score} ({trade.scoreTier})
+              </span>
+            )}
           </div>
           {trade.pnl != null && (
             <div className="text-right">
@@ -132,10 +145,36 @@ function TradeCard({ trade }: { trade: PaperTrade }) {
           </div>
         )}
 
+        {trade.entryMode && (
+          <span className="text-[9px] text-muted-foreground">
+            Entry: {trade.entryMode}
+          </span>
+        )}
+
         {trade.exitReason && (
-          <p className="text-[10px] text-muted-foreground/70 italic">
-            {trade.exitReason}
-          </p>
+          <div className="flex items-center gap-1.5 text-[10px]">
+            <span
+              className={`px-1.5 py-0.5 rounded ${
+                trade.exitReason === "target" || trade.exitReason === "trailing_stop"
+                  ? "bg-emerald-500/10 text-emerald-500"
+                  : trade.exitReason === "stop_loss" || trade.exitReason === "two_red_candles"
+                  ? "bg-red-500/10 text-red-500"
+                  : "bg-amber-500/10 text-amber-500"
+              }`}
+            >
+              {trade.exitReason === "two_red_candles"
+                ? "2 Red Candles Exit"
+                : trade.exitReason === "trailing_stop"
+                ? "Trailing Stop Hit"
+                : trade.exitReason === "time_stop"
+                ? "Time Stop"
+                : trade.exitReason === "stop_loss"
+                ? "Stop Loss Hit"
+                : trade.exitReason === "target"
+                ? "Target Reached"
+                : trade.exitReason}
+            </span>
+          </div>
         )}
       </CardContent>
     </Card>

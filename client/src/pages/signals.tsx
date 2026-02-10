@@ -17,6 +17,7 @@ import {
   ArrowUpRight,
   Eye,
   BarChart3,
+  Zap,
 } from "lucide-react";
 import type { Signal, Alert } from "@shared/schema";
 
@@ -38,19 +39,67 @@ const STATE_LABELS: Record<string, string> = {
   CLOSED: "Closed",
 };
 
+function ScoreBadge({ score, tier }: { score?: number | null; tier?: string | null }) {
+  if (!score && score !== 0) return null;
+  const color =
+    tier === "full"
+      ? "text-emerald-500 bg-emerald-500/10"
+      : tier === "half"
+      ? "text-amber-500 bg-amber-500/10"
+      : "text-muted-foreground bg-accent";
+  return (
+    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${color}`}>
+      {score}/100 ({tier})
+    </span>
+  );
+}
+
+function ScoreBreakdown({ breakdown }: { breakdown: any }) {
+  if (!breakdown) return null;
+  const items = [
+    { label: "RVOL", value: breakdown.rvol, max: 20 },
+    { label: "Trend", value: breakdown.trend, max: 15 },
+    { label: "BO Vol", value: breakdown.breakoutVolume, max: 20 },
+    { label: "Retest Vol", value: breakdown.retestVolume, max: 15 },
+    { label: "SPY", value: breakdown.spyAlignment, max: 15 },
+    { label: "ATR", value: breakdown.atrExpansion, max: 10 },
+    { label: "Catalyst", value: breakdown.catalyst, max: 5 },
+  ];
+  return (
+    <div className="flex items-center gap-1 flex-wrap">
+      {items.map((item) => (
+        <span
+          key={item.label}
+          className={`text-[8px] px-1 py-0.5 rounded ${
+            item.value >= item.max * 0.7
+              ? "bg-emerald-500/10 text-emerald-500"
+              : item.value >= item.max * 0.3
+              ? "bg-amber-500/10 text-amber-500"
+              : "bg-accent text-muted-foreground"
+          }`}
+        >
+          {item.label}: {item.value ?? 0}/{item.max}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function SignalCard({ signal }: { signal: Signal }) {
   const riskReward = signal.riskReward ?? 0;
   const confirmations = [
-    { label: "1H Trend", met: signal.trendConfirmed },
+    { label: "15m Bias", met: signal.trendConfirmed },
     { label: `RVOL ${signal.rvol?.toFixed(1) ?? "—"}x`, met: signal.volumeConfirmed },
     { label: "ATR Exp.", met: signal.atrExpansion },
+    { label: "SPY", met: signal.spyAligned },
+    { label: "Vol Gate", met: signal.volatilityGatePassed },
   ];
 
   return (
     <Card data-testid={`signal-detail-${signal.id}`}>
       <CardContent className="p-4 space-y-3">
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-base font-semibold">{signal.ticker}</span>
             <Badge
               variant={STATE_COLORS[signal.state ?? "IDLE"] as any}
@@ -58,6 +107,7 @@ function SignalCard({ signal }: { signal: Signal }) {
             >
               {STATE_LABELS[signal.state ?? "IDLE"]}
             </Badge>
+            <ScoreBadge score={signal.score} tier={signal.scoreTier} />
           </div>
           <div className="text-right">
             <p className="text-sm font-medium">${signal.currentPrice?.toFixed(2) ?? "—"}</p>
@@ -74,6 +124,34 @@ function SignalCard({ signal }: { signal: Signal }) {
           </div>
         </div>
 
+        {(signal.marketRegime || signal.entryMode) && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {signal.marketRegime && (
+              <span
+                className={`text-[9px] px-1.5 py-0.5 rounded ${
+                  signal.marketRegime === "aligned"
+                    ? "bg-emerald-500/10 text-emerald-500"
+                    : signal.marketRegime === "choppy"
+                    ? "bg-amber-500/10 text-amber-500"
+                    : "bg-red-500/10 text-red-500"
+                }`}
+              >
+                SPY: {signal.marketRegime}
+              </span>
+            )}
+            {signal.entryMode && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-accent text-muted-foreground">
+                {signal.entryMode} entry
+              </span>
+            )}
+            {signal.stopBasis && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-accent text-muted-foreground">
+                stop: {signal.stopBasis}
+              </span>
+            )}
+          </div>
+        )}
+
         <div className="grid grid-cols-3 gap-2">
           <div className="p-2 rounded-md bg-accent/50 text-center">
             <p className="text-[9px] text-muted-foreground uppercase">Resistance</p>
@@ -81,7 +159,7 @@ function SignalCard({ signal }: { signal: Signal }) {
               ${signal.resistanceLevel?.toFixed(2) ?? "—"}
             </p>
             {signal.rejectionCount && (
-              <p className="text-[8px] text-muted-foreground">{signal.rejectionCount} rejections</p>
+              <p className="text-[8px] text-muted-foreground">{signal.rejectionCount} rej</p>
             )}
           </div>
           <div className="p-2 rounded-md bg-accent/50 text-center">
@@ -106,7 +184,7 @@ function SignalCard({ signal }: { signal: Signal }) {
             </p>
           </div>
           <div className="p-2 rounded-md bg-accent/50 text-center">
-            <p className="text-[9px] text-muted-foreground uppercase">T2 (2-3R runner)</p>
+            <p className="text-[9px] text-muted-foreground uppercase">T2 (2.5R trail)</p>
             <p className="text-xs font-medium mt-0.5 text-emerald-500">
               ${signal.target2?.toFixed(2) ?? "—"}
             </p>
@@ -132,6 +210,8 @@ function SignalCard({ signal }: { signal: Signal }) {
             </div>
           ))}
         </div>
+
+        <ScoreBreakdown breakdown={signal.scoreBreakdown} />
 
         {signal.positionSize && (
           <div className="flex items-center justify-between text-xs text-muted-foreground pt-1 border-t border-border flex-wrap gap-1">
@@ -193,7 +273,7 @@ export default function Signals() {
             Signal Feed
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Live breakout + retest signals (long only)
+            Momentum breakout + retest signals with scoring
           </p>
         </div>
         {unreadAlerts.length > 0 && (
@@ -242,7 +322,7 @@ export default function Signals() {
                 <Radio className="w-10 h-10 text-muted-foreground/20 mb-3" />
                 <p className="text-sm text-muted-foreground font-medium">No active signals</p>
                 <p className="text-xs text-muted-foreground/60 mt-1 max-w-sm">
-                  The scanner is monitoring your watchlist for breakout + retest setups.
+                  The scanner is monitoring for momentum breakout + retest setups.
                   Signals appear during US market hours (9:30 AM - 4:00 PM ET).
                   No new setups during lunch chop (11:30 AM - 1:30 PM ET).
                 </p>

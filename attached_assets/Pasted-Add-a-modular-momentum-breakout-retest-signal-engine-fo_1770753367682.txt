@@ -1,0 +1,67 @@
+Add a modular momentum breakout + retest signal engine for large-cap stocks and liquid ETFs, focused on 5-minute entries with 15-minute context and optional 1-minute exits.
+
+We already have:
+- average daily dollar volume filter (default $50M, but for this strategy default $100M)
+- breakout + retest tolerance logic (0.15% tolerance allows minor close beyond level)
+- basic liquidity focus
+
+Implement these new components:
+
+1) UniverseFilter:
+- price > $10
+- avgDollarVolume >= 100,000,000
+- spreadPct <= 0.05%
+- dailyATRpct >= 1.2%
+- RVOL >= 1.5 by 9:45 AM
+
+2) Higher timeframe bias (15m):
+Require at least 2 of 3 before allowing breakout setups:
+- above VWAP (15m)
+- EMA9 > EMA20 (15m)
+- breaking previous day high or premarket high
+
+3) Breakout qualification (5m):
+- candle close above resistance (not only wick)
+- bodyPct >= 0.60
+- volume >= 1.8x avg5mVolume
+- candleRange >= 1.2x avgRange(last 5 candles)
+
+4) Retest rules (5m):
+- pullback <= 50% of breakout candle
+- holds breakout level within 0.15% tolerance (allow one close slightly through within tolerance)
+- pullback volume contracts vs breakout
+- disqualify if volume expands while breaking back below level beyond tolerance
+Entry:
+- conservative: break above retest high
+- aggressive: bullish confirmation close
+Stop:
+- below retest low OR below VWAP if tighter
+
+5) Market regime filter:
+- Only take long breakouts if SPY (or QQQ) 5m trend is aligned or above VWAP
+- If chopping (VWAP crosses >3 times in last 20 min), reduce size 50%
+
+6) Volatility expansion gate:
+Trade only if:
+- first 30m range >= 70% of yesterday’s full-day range OR intraday ATR > 1.3x daily ATR baseline
+
+7) Scoring:
+Compute 0-100 points:
+- RVOL >= 2.0 (+20)
+- 15m trend aligned (+15)
+- breakout volume >= 2x (+20)
+- retest volume contraction (+15)
+- SPY aligned (+15)
+- ATR expansion (+10)
+- catalyst present (+5 optional flag)
+Sizing:
+- score >= 80 full size
+- 65-79 half size
+- <65 pass
+
+8) Exits:
+- take partial at 1R
+- trail using 9EMA on 5m OR break of prior 5m low
+- hard exit: 2 red 5m candles with increasing volume
+
+Build this as reusable TypeScript modules. Provide unit-testable pure functions. Keep settings in a single config object. Return signals as structured JSON objects for UI/alerts.

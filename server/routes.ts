@@ -45,6 +45,21 @@ declare global {
       mainTargetRMax: number | null;
       earningsGapPct: number | null;
       earningsRvolMin: number | null;
+      maxSpreadPct: number | null;
+      minDailyATRpct: number | null;
+      minRVOL: number | null;
+      rvolCutoffMinutes: number | null;
+      htfConfirmations: number | null;
+      breakoutMinBodyPct: number | null;
+      breakoutMinRangeMultiplier: number | null;
+      retestMaxPullbackPct: number | null;
+      entryMode: string | null;
+      maxVwapCrosses: number | null;
+      chopSizeReduction: number | null;
+      volGateFirstRangePct: number | null;
+      volGateAtrMultiplier: number | null;
+      scoreFullSizeMin: number | null;
+      scoreHalfSizeMin: number | null;
     }
   }
 }

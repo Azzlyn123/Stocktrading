@@ -8,12 +8,11 @@ import {
   ScanSearch,
   TrendingUp,
   TrendingDown,
-  Volume2,
-  ArrowUpRight,
   CheckCircle,
   XCircle,
-  Activity,
   Filter,
+  Zap,
+  BarChart3,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -32,6 +31,11 @@ interface ScannerItem {
   resistanceLevel: number | null;
   passesFilters: boolean;
   trend1H: boolean;
+  spreadPct: number;
+  dailyATRpct: number;
+  vwap: number;
+  score: number;
+  scoreTier: string;
 }
 
 function formatVolume(vol: number): string {
@@ -46,10 +50,29 @@ function formatDollar(val: number): string {
   return `$${val.toFixed(0)}`;
 }
 
+function ScoreBadge({ score, tier }: { score: number; tier: string }) {
+  const color =
+    tier === "full"
+      ? "text-emerald-500"
+      : tier === "half"
+      ? "text-amber-500"
+      : "text-muted-foreground";
+  return (
+    <span className={`text-xs font-semibold ${color}`} data-testid="text-score">
+      {score}
+    </span>
+  );
+}
+
 export default function Scanner() {
   const { user } = useAuth();
   const { subscribe } = useWebSocket();
-  const [liveState, setLiveState] = useState<{ isOpen: boolean; isLunchChop: boolean }>({
+  const [liveState, setLiveState] = useState<{
+    isOpen: boolean;
+    isLunchChop: boolean;
+    spyAligned?: boolean;
+    spyChopping?: boolean;
+  }>({
     isOpen: false,
     isLunchChop: false,
   });
@@ -61,7 +84,12 @@ export default function Scanner() {
 
   useEffect(() => {
     const unsub = subscribe("market_status", (data: any) => {
-      setLiveState({ isOpen: data.isOpen, isLunchChop: data.isLunchChop });
+      setLiveState({
+        isOpen: data.isOpen,
+        isLunchChop: data.isLunchChop,
+        spyAligned: data.spyAligned,
+        spyChopping: data.spyChopping,
+      });
     });
     return unsub;
   }, [subscribe]);
@@ -77,18 +105,33 @@ export default function Scanner() {
             Scanner
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            In-play movers with hard filter criteria
+            Momentum breakout candidates with scoring
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {liveState.isLunchChop && (
             <Badge variant="outline" className="text-[9px] gap-1" data-testid="badge-lunch-chop">
-              Lunch Chop (no new setups)
+              Lunch Chop
+            </Badge>
+          )}
+          {liveState.spyChopping && (
+            <Badge variant="outline" className="text-[9px] gap-1 text-amber-500" data-testid="badge-spy-chop">
+              <Zap className="w-2.5 h-2.5" />
+              SPY Choppy (50% size)
+            </Badge>
+          )}
+          {liveState.spyAligned !== undefined && (
+            <Badge
+              variant="outline"
+              className={`text-[9px] gap-1 ${liveState.spyAligned ? "text-emerald-500" : "text-red-500"}`}
+              data-testid="badge-spy-regime"
+            >
+              SPY {liveState.spyAligned ? "Aligned" : "Misaligned"}
             </Badge>
           )}
           <Badge variant="outline" className="text-[9px] gap-1" data-testid="badge-filter-summary">
             <Filter className="w-2.5 h-2.5" />
-            &ge;${user?.minPrice ?? 15} | Vol &ge;{formatVolume(user?.minAvgVolume ?? 2000000)} | $Vol &ge;{formatDollar(user?.minDollarVolume ?? 50000000)}
+            &ge;${user?.minPrice ?? 10} | $Vol &ge;{formatDollar(user?.minDollarVolume ?? 100000000)} | ATR &ge;{user?.minDailyATRpct ?? 1.2}%
           </Badge>
         </div>
       </div>
@@ -98,7 +141,7 @@ export default function Scanner() {
           <div>
             <p className="text-sm font-medium">Passing Filters ({passing.length})</p>
             <p className="text-xs text-muted-foreground">
-              Tickers meeting price, volume, and dollar volume criteria
+              Tickers meeting universe filter + volatility gate
             </p>
           </div>
           <ScanSearch className="w-4 h-4 text-muted-foreground" />
@@ -117,20 +160,22 @@ export default function Scanner() {
             </div>
           ) : (
             <div className="space-y-1">
-              <div className="grid grid-cols-8 gap-2 px-2 py-1.5 text-[9px] text-muted-foreground uppercase font-medium">
+              <div className="grid grid-cols-10 gap-2 px-2 py-1.5 text-[9px] text-muted-foreground uppercase font-medium">
                 <span>Ticker</span>
                 <span className="text-right">Price</span>
                 <span className="text-right">Chg%</span>
                 <span className="text-right">RVOL</span>
-                <span className="text-right">Volume</span>
+                <span className="text-right">ATR%</span>
+                <span className="text-right">Spread</span>
                 <span className="text-right">$Volume</span>
-                <span className="text-center">1H Trend</span>
+                <span className="text-center">15m Bias</span>
+                <span className="text-center">Score</span>
                 <span className="text-center">Status</span>
               </div>
               {passing.map((item) => (
                 <div
                   key={item.ticker}
-                  className="grid grid-cols-8 gap-2 px-2 py-2 rounded-md bg-accent/30 items-center"
+                  className="grid grid-cols-10 gap-2 px-2 py-2 rounded-md bg-accent/30 items-center"
                   data-testid={`scanner-row-${item.ticker}`}
                 >
                   <div>
@@ -152,8 +197,19 @@ export default function Scanner() {
                   >
                     {item.rvol.toFixed(1)}x
                   </p>
-                  <p className="text-xs text-right text-muted-foreground">
-                    {formatVolume(item.volume)}
+                  <p
+                    className={`text-xs text-right ${
+                      item.dailyATRpct >= 1.2 ? "text-emerald-500" : "text-muted-foreground"
+                    }`}
+                  >
+                    {item.dailyATRpct.toFixed(1)}%
+                  </p>
+                  <p
+                    className={`text-xs text-right ${
+                      item.spreadPct <= 0.05 ? "text-emerald-500" : "text-amber-500"
+                    }`}
+                  >
+                    {item.spreadPct.toFixed(3)}%
                   </p>
                   <p className="text-xs text-right text-muted-foreground">
                     {formatDollar(item.dollarVolume)}
@@ -164,6 +220,9 @@ export default function Scanner() {
                     ) : (
                       <XCircle className="w-3.5 h-3.5 text-muted-foreground" />
                     )}
+                  </div>
+                  <div className="flex justify-center">
+                    <ScoreBadge score={item.score} tier={item.scoreTier} />
                   </div>
                   <div className="flex justify-center">
                     {item.signalState !== "IDLE" ? (
@@ -194,7 +253,7 @@ export default function Scanner() {
             <div>
               <p className="text-sm font-medium">Filtered Out ({filtered.length})</p>
               <p className="text-xs text-muted-foreground">
-                Tickers not meeting hard filter criteria
+                Tickers not meeting universe filter criteria
               </p>
             </div>
             <XCircle className="w-4 h-4 text-muted-foreground" />

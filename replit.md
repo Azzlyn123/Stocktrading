@@ -1,7 +1,7 @@
 # BreakoutIQ - Intraday Trading Alert Platform
 
 ## Overview
-Full-stack trading alert application implementing a Breakout + Retest intraday strategy for US equities and ETFs. Generates "SETUP forming" and "TRIGGER hit" alerts with multi-timeframe analysis (1H trend filter, 5m entries). Paper trading mode with simulated market data. Hard universe filters (price ≥$15, volume ≥2M, $volume ≥$50M), lunch chop filter (11:30-13:30 ET), and comprehensive trade management (partial exits, trailing stops, time stops).
+Full-stack trading alert application implementing a modular momentum Breakout + Retest intraday strategy for US equities and ETFs. Features multi-timeframe analysis (15m bias filter, 5m entries), enhanced universe filters (price ≥$10, $vol ≥$100M, spread ≤0.05%, ATR ≥1.2%, RVOL ≥1.5), market regime detection with SPY alignment, volatility expansion gates, and a 0-100 scoring system with tiered position sizing (full/half/pass). Includes partial exits at +1R, EMA9/prior-low trailing stops, 2 red candle exits, time stops, and paper trading simulation with WebSocket real-time data.
 
 ## Tech Stack
 - **Frontend**: React 18 + TypeScript + Vite + TailwindCSS + Shadcn UI
@@ -20,13 +20,13 @@ client/src/
   pages/
     auth-page.tsx      - Login/Register page
     dashboard.tsx      - Main dashboard with stats, equity curve, alerts, rule violations
-    scanner.tsx        - In-play movers scanner with hard filters
-    watchlist.tsx       - Ticker watchlist management
-    signals.tsx        - Signal feed with state machine, RVOL, candle patterns
-    trades.tsx         - Paper trade tracking with partial exits, trailing stops
-    settings.tsx       - Risk params, universe filters, trade management config
+    scanner.tsx        - Scanner with score, spread%, ATR%, RVOL, 15m bias, SPY regime
+    watchlist.tsx      - Ticker watchlist management
+    signals.tsx        - Signal feed with scoring, market regime, entry mode, score breakdown
+    trades.tsx         - Paper trades with score tier, entry mode, enhanced exit labels
+    settings.tsx       - Full config: risk, universe, breakout quality, market regime, scoring
   components/
-    app-sidebar.tsx    - Sidebar navigation (Dashboard, Scanner, Watchlist, Signals, Trade Plans, Settings)
+    app-sidebar.tsx    - Sidebar navigation
     theme-provider.tsx - Dark/light mode
     theme-toggle.tsx   - Theme toggle button
   hooks/
@@ -35,57 +35,75 @@ client/src/
 
 server/
   index.ts             - Express server entry
-  routes.ts            - API routes + WebSocket setup + scanner endpoint
+  routes.ts            - API routes + WebSocket + scanner endpoint
   auth.ts              - Passport config
   storage.ts           - Database CRUD operations
   db.ts                - Drizzle database connection
-  simulator.ts         - Strategy engine: lunch chop, RVOL, candle patterns, position sizing, partial exits, trailing stops, time stops, daily risk enforcement
-  seed.ts              - Demo data seeding with new schema fields
+  simulator.ts         - Orchestrator: per-ticker state, 15m bars, SPY context, scoring, exit management
+  seed.ts              - Demo data seeding with scoring fields
+  strategy/
+    index.ts           - Barrel export for all strategy modules
+    config.ts          - DEFAULT_STRATEGY_CONFIG with all sub-configs
+    types.ts           - Candle, StrategyConfig, result types
+    indicators.ts      - Pure functions: EMA, SMA, ATR, VWAP, bodyPct, avgVolume, avgRange, findResistance, detectCandlePattern
+    universeFilter.ts  - Price, $volume, spread, ATR%, RVOL gate
+    higherTimeframeBias.ts - 15m: VWAP, EMA9/20, day high break, premarket high
+    breakoutQualification.ts - Body ≥60%, range ≥1.2x avg, volume ≥1.8x, close above resistance
+    retestRules.ts     - Pullback ≤50%, volume contraction, holding support, entry/stop calc
+    marketRegime.ts    - SPY 5m trend, VWAP position, chop detection (>3 crosses in 20min)
+    volatilityGate.ts  - First 30m range ≥70% prev day, 5m ATR ≥1.3x baseline
+    scoring.ts         - 0-100 composite: RVOL(20) + trend(15) + BO vol(20) + retest vol(15) + SPY(15) + ATR(10) + catalyst(5)
+    exits.ts           - Partial +1R, trailing (EMA9/prior low), 2 red candles, time stop, stop loss, target
 
 shared/
   schema.ts            - Drizzle schema + Zod validation + settingsUpdateSchema
 ```
 
 ## Key Features
-- **Strategy Engine**: Breakout + Retest detection with state machine (IDLE -> BREAKOUT -> RETEST -> TRIGGERED -> MANAGED -> CLOSED)
-- **Hard Universe Filters**: Price ≥$15, Avg Volume ≥2M, Dollar Volume ≥$50M
-- **Lunch Chop Filter**: No new setups/entries 11:30-13:30 ET, manage open positions only
-- **RVOL Tracking**: Relative volume vs expected volume at time of day
-- **Candle Pattern Detection**: Bullish Engulfing, Hammer, Green Candle
-- **Position Sizing**: shares = risk / (entry - stop), capped by maxPositionPct
-- **Stop Placement**: Below retest swing low + 0.05% buffer
-- **Trade Management**: 50% partial at +1R, stop to breakeven, 1.5x ATR trailing on runner, 2R-3R main target
+- **Modular Strategy Engine**: 8 pure TypeScript modules in server/strategy/
+- **State Machine**: IDLE -> BREAKOUT -> RETEST -> TRIGGERED -> MANAGED -> CLOSED
+- **Enhanced Universe Filters**: Price ≥$10, $Volume ≥$100M, Spread ≤0.05%, ATR ≥1.2%, RVOL ≥1.5
+- **15m Higher Timeframe Bias**: VWAP, EMA9/20 slope, day high break, premarket high (need 2/3)
+- **Breakout Qualification**: Body ≥60% range, range ≥1.2x avg, volume ≥1.8x, close above resistance
+- **Retest Rules**: Pullback ≤50% of breakout candle, volume contraction, conservative/aggressive entry
+- **Market Regime**: SPY 5m EMA9 > EMA20 + above VWAP, chop = >3 VWAP crosses in 20min
+- **Volatility Gate**: First 30m range ≥70% prev day range, 5m ATR ≥1.3x daily baseline
+- **Scoring System**: 0-100 with breakdown (RVOL 20, trend 15, BO vol 20, retest vol 15, SPY 15, ATR 10, catalyst 5)
+- **Tiered Sizing**: ≥80 full, 65-79 half, <65 pass. Choppy regime reduces 50%
+- **Exit Management**: Partial 50% at +1R, stop to BE, trail by EMA9 or prior 5m low, hard exit on 2 red candles with increasing volume
 - **Time Stop**: Exit if not +0.5R within 30 minutes
-- **Risk Management**: Daily -2% max loss, 3 losing trades stop, 15-min cooldown, per-trade risk caps
-- **Rule Violation Tracking**: Logged per-day with details
+- **Risk Management**: Daily -2% max loss, 3 losing trades stop, 15-min cooldown
+- **Lunch Chop Filter**: 11:30-13:30 ET
 - **Paper Trading**: Simulated $100k account with P&L tracking
 - **Real-time Data**: WebSocket streaming simulated price updates
 - **Dark Mode**: Default dark theme with toggle
 
 ## Database Schema
-- users (with risk/strategy settings, hard filters, lunch chop, earnings, time stop, partial exit settings)
+- users (risk settings + enhanced strategy: spread, ATR%, RVOL, breakout quality, entry mode, regime, scoring thresholds)
 - watchlist_items
-- signals (with state machine, rvol, rejectionCount, candlePattern, positionSize, dollarRisk)
+- signals (state machine + score, scoreTier, marketRegime, entryMode, stopBasis, spyAligned, volatilityGatePassed, scoreBreakdown JSONB)
 - alerts
-- paper_trades (with originalStopPrice, isPartiallyExited, partialExitPrice/Shares, stopMovedToBE, runnerShares, trailingStopPrice, timeStopAt, dollarRisk)
-- daily_summaries (with ruleViolations, ruleViolationDetails, accountBalance)
+- paper_trades (+ score, scoreTier, entryMode, enhanced exit reasons)
+- daily_summaries (ruleViolations, ruleViolationDetails, accountBalance)
 
 ## API Endpoints
 - POST /api/register, /api/login, /api/logout
 - GET /api/user
-- PATCH /api/settings (validates via settingsUpdateSchema)
+- PATCH /api/settings (validates via settingsUpdateSchema with all new fields)
 - GET/POST/DELETE /api/watchlist
 - GET /api/signals
-- GET /api/scanner (returns filtered/passing tickers with RVOL)
+- GET /api/scanner (returns filtered/passing tickers with score, spread, ATR%, RVOL, SPY regime)
 - GET/POST /api/alerts, POST /api/alerts/mark-read
 - GET /api/trades
 - GET /api/summaries
-- WS /ws - Real-time price updates + market_status (isOpen, isLunchChop)
+- WS /ws - Real-time price updates + market_status (isOpen, isLunchChop, spyAligned, spyChopping)
 
 ## Important Notes
 - Schema changes done via SQL ALTER statements to avoid session table drops
-- Strategy engine in simulator.ts handles full lifecycle from scanning to position management
-- settingsUpdateSchema in shared/schema.ts validates all settings fields with min/max bounds
+- Strategy modules are pure functions for testability (no side effects, no database access)
+- Simulator orchestrates strategy modules and handles DB persistence
+- settingsUpdateSchema validates all settings fields including new enhanced strategy params
+- buildConfigFromUser in strategy/index.ts maps user settings to StrategyConfig
 
 ## User Preferences
 - Default dark mode
