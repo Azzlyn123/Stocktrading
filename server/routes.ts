@@ -231,6 +231,15 @@ export async function registerRoutes(
     clients.add(ws);
     ws.send(JSON.stringify({ type: "connected", data: { timestamp: Date.now() } }));
 
+    ws.on("message", (raw) => {
+      try {
+        const msg = JSON.parse(raw.toString());
+        if (msg.type === "identify" && msg.data?.userId) {
+          registerUser(msg.data.userId);
+        }
+      } catch (e) {}
+    });
+
     ws.on("close", () => {
       clients.delete(ws);
     });

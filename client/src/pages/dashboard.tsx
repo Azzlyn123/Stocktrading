@@ -142,13 +142,25 @@ export default function Dashboard() {
     balance: s.accountBalance ?? accountSize,
   }));
 
-  if (equityCurve.length === 0) {
+  if (equityCurve.length === 0 && closedTrades.length > 0) {
+    let runningBalance = accountSize;
+    const sorted = [...closedTrades].sort((a, b) => {
+      const da = a.exitedAt ? new Date(a.exitedAt).getTime() : 0;
+      const db = b.exitedAt ? new Date(b.exitedAt).getTime() : 0;
+      return da - db;
+    });
+    equityCurve.push({ date: "Start", balance: accountSize });
+    sorted.forEach((t, i) => {
+      runningBalance += t.pnl ?? 0;
+      equityCurve.push({
+        date: `Trade ${i + 1}`,
+        balance: Number(runningBalance.toFixed(2)),
+      });
+    });
+  } else if (equityCurve.length === 0) {
     equityCurve.push(
-      { date: "Day 1", balance: accountSize },
-      { date: "Day 2", balance: accountSize * 1.002 },
-      { date: "Day 3", balance: accountSize * 1.005 },
-      { date: "Day 4", balance: accountSize * 1.003 },
-      { date: "Today", balance: accountSize + todayPnl },
+      { date: "Start", balance: accountSize },
+      { date: "Now", balance: accountSize + todayPnl },
     );
   }
 

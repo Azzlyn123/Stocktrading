@@ -157,12 +157,12 @@ function TradeCard({ trade }: { trade: PaperTrade }) {
               className={`px-1.5 py-0.5 rounded ${
                 trade.exitReason === "target" || trade.exitReason === "trailing_stop"
                   ? "bg-emerald-500/10 text-emerald-500"
-                  : trade.exitReason === "stop_loss" || trade.exitReason === "two_red_candles"
+                  : trade.exitReason === "stop_loss" || trade.exitReason === "hard_exit" || trade.exitReason === "two_red_candles"
                   ? "bg-red-500/10 text-red-500"
                   : "bg-amber-500/10 text-amber-500"
               }`}
             >
-              {trade.exitReason === "two_red_candles"
+              {trade.exitReason === "hard_exit" || trade.exitReason === "two_red_candles"
                 ? "2 Red Candles Exit"
                 : trade.exitReason === "trailing_stop"
                 ? "Trailing Stop Hit"

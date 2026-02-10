@@ -20,6 +20,14 @@ export function useWebSocket() {
 
     ws.onopen = () => {
       setIsConnected(true);
+      fetch("/api/user", { credentials: "include" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((u) => {
+          if (u?.id && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "identify", data: { userId: u.id } }));
+          }
+        })
+        .catch(() => {});
     };
 
     ws.onmessage = (event) => {
