@@ -30,61 +30,61 @@ interface SimulatedTicker {
 }
 
 const SIMULATED_TICKERS: SimulatedTicker[] = [
-  { ticker: "AAPL", name: "Apple Inc.", sector: "Technology", basePrice: 195.0, volatility: 0.025, trend: 0.001, avgDailyVolume: 55000000 },
-  { ticker: "MSFT", name: "Microsoft Corp.", sector: "Technology", basePrice: 420.0, volatility: 0.022, trend: 0.0012, avgDailyVolume: 22000000 },
-  { ticker: "NVDA", name: "NVIDIA Corp.", sector: "Technology", basePrice: 875.0, volatility: 0.035, trend: 0.002, avgDailyVolume: 45000000 },
-  { ticker: "AMZN", name: "Amazon.com Inc.", sector: "Consumer", basePrice: 185.0, volatility: 0.025, trend: 0.001, avgDailyVolume: 38000000 },
-  { ticker: "GOOGL", name: "Alphabet Inc.", sector: "Technology", basePrice: 155.0, volatility: 0.022, trend: 0.0008, avgDailyVolume: 25000000 },
-  { ticker: "META", name: "Meta Platforms", sector: "Technology", basePrice: 505.0, volatility: 0.03, trend: 0.0015, avgDailyVolume: 18000000 },
-  { ticker: "TSLA", name: "Tesla Inc.", sector: "Consumer", basePrice: 245.0, volatility: 0.04, trend: 0.001, avgDailyVolume: 95000000 },
-  { ticker: "SPY", name: "S&P 500 ETF", sector: "ETF", basePrice: 510.0, volatility: 0.008, trend: 0.0005, avgDailyVolume: 75000000 },
-  { ticker: "QQQ", name: "Nasdaq-100 ETF", sector: "ETF", basePrice: 440.0, volatility: 0.01, trend: 0.0006, avgDailyVolume: 40000000 },
-  { ticker: "AMD", name: "AMD Inc.", sector: "Technology", basePrice: 175.0, volatility: 0.035, trend: 0.0015, avgDailyVolume: 48000000 },
-  { ticker: "JPM", name: "JPMorgan Chase", sector: "Finance", basePrice: 195.0, volatility: 0.018, trend: 0.0008, avgDailyVolume: 10000000 },
-  { ticker: "V", name: "Visa Inc.", sector: "Finance", basePrice: 280.0, volatility: 0.015, trend: 0.0007, avgDailyVolume: 7000000 },
-  { ticker: "NFLX", name: "Netflix Inc.", sector: "Technology", basePrice: 620.0, volatility: 0.03, trend: 0.0012, avgDailyVolume: 5500000 },
-  { ticker: "CRM", name: "Salesforce Inc.", sector: "Technology", basePrice: 265.0, volatility: 0.025, trend: 0.001, avgDailyVolume: 6000000 },
-  { ticker: "AVGO", name: "Broadcom Inc.", sector: "Technology", basePrice: 1350.0, volatility: 0.028, trend: 0.0015, avgDailyVolume: 3200000 },
-  { ticker: "LLY", name: "Eli Lilly", sector: "Healthcare", basePrice: 780.0, volatility: 0.022, trend: 0.001, avgDailyVolume: 3000000 },
+  { ticker: "AAPL", name: "Apple Inc.", sector: "Technology", basePrice: 195.0, volatility: 0.08, trend: 0.005, avgDailyVolume: 55000000 },
+  { ticker: "MSFT", name: "Microsoft Corp.", sector: "Technology", basePrice: 420.0, volatility: 0.07, trend: 0.006, avgDailyVolume: 22000000 },
+  { ticker: "NVDA", name: "NVIDIA Corp.", sector: "Technology", basePrice: 875.0, volatility: 0.12, trend: 0.01, avgDailyVolume: 45000000 },
+  { ticker: "AMZN", name: "Amazon.com Inc.", sector: "Consumer", basePrice: 185.0, volatility: 0.09, trend: 0.005, avgDailyVolume: 38000000 },
+  { ticker: "GOOGL", name: "Alphabet Inc.", sector: "Technology", basePrice: 155.0, volatility: 0.08, trend: 0.004, avgDailyVolume: 25000000 },
+  { ticker: "META", name: "Meta Platforms", sector: "Technology", basePrice: 505.0, volatility: 0.1, trend: 0.007, avgDailyVolume: 18000000 },
+  { ticker: "TSLA", name: "Tesla Inc.", sector: "Consumer", basePrice: 245.0, volatility: 0.15, trend: 0.008, avgDailyVolume: 95000000 },
+  { ticker: "SPY", name: "S&P 500 ETF", sector: "ETF", basePrice: 510.0, volatility: 0.04, trend: 0.002, avgDailyVolume: 75000000 },
+  { ticker: "QQQ", name: "Nasdaq-100 ETF", sector: "ETF", basePrice: 440.0, volatility: 0.05, trend: 0.003, avgDailyVolume: 40000000 },
+  { ticker: "AMD", name: "AMD Inc.", sector: "Technology", basePrice: 175.0, volatility: 0.12, trend: 0.008, avgDailyVolume: 48000000 },
+  { ticker: "JPM", name: "JPMorgan Chase", sector: "Finance", basePrice: 195.0, volatility: 0.06, trend: 0.004, avgDailyVolume: 10000000 },
+  { ticker: "V", name: "Visa Inc.", sector: "Finance", basePrice: 280.0, volatility: 0.05, trend: 0.003, avgDailyVolume: 7000000 },
+  { ticker: "NFLX", name: "Netflix Inc.", sector: "Technology", basePrice: 620.0, volatility: 0.1, trend: 0.006, avgDailyVolume: 5500000 },
+  { ticker: "CRM", name: "Salesforce Inc.", sector: "Technology", basePrice: 265.0, volatility: 0.08, trend: 0.005, avgDailyVolume: 6000000 },
+  { ticker: "AVGO", name: "Broadcom Inc.", sector: "Technology", basePrice: 1350.0, volatility: 0.09, trend: 0.007, avgDailyVolume: 3200000 },
+  { ticker: "LLY", name: "Eli Lilly", sector: "Healthcare", basePrice: 780.0, volatility: 0.07, trend: 0.005, avgDailyVolume: 3000000 },
 ];
 
 const DEMO_CONFIG: StrategyConfig = {
   universe: {
     minPrice: 5,
-    minAvgDollarVolume: 10_000_000,
-    maxSpreadPct: 0.5,
-    minDailyATRpct: 0.3,
-    minRVOL: 0.5,
+    minAvgDollarVolume: 1_000_000,
+    maxSpreadPct: 1.0,
+    minDailyATRpct: 0.1,
+    minRVOL: 0.1,
     rvolCutoffMinutes: 60,
   },
   higherTimeframe: {
-    requiredConfirmations: 1,
+    requiredConfirmations: 0,
   },
   breakout: {
-    minBodyPct: 0.30,
-    minVolumeMultiplier: 0.8,
-    minRangeMultiplier: 0.6,
-    bufferPct: 0.10,
+    minBodyPct: 0.10,
+    minVolumeMultiplier: 0.1,
+    minRangeMultiplier: 0.1,
+    bufferPct: 0.01,
   },
   retest: {
-    maxPullbackPct: 80,
-    tolerancePct: 0.5,
+    maxPullbackPct: 95,
+    tolerancePct: 2.0,
     entryMode: "aggressive" as const,
   },
   marketRegime: {
-    maxVwapCrosses: 10,
-    vwapCrossWindowMinutes: 30,
-    chopSizeReduction: 0.25,
+    maxVwapCrosses: 50,
+    vwapCrossWindowMinutes: 60,
+    chopSizeReduction: 1.0,
   },
   volatilityGate: {
-    firstRangeMinPct: 20,
-    atrExpansionMultiplier: 0.5,
+    firstRangeMinPct: 1,
+    atrExpansionMultiplier: 0.1,
   },
   scoring: {
-    rvolThreshold: 1.0,
-    breakoutVolumeThreshold: 0.8,
-    fullSizeMin: 50,
-    halfSizeMin: 30,
+    rvolThreshold: 0.1,
+    breakoutVolumeThreshold: 0.1,
+    fullSizeMin: 10,
+    halfSizeMin: 5,
   },
   exits: {
     partialAtR: 1.0,
@@ -96,11 +96,11 @@ const DEMO_CONFIG: StrategyConfig = {
   risk: {
     perTradeRiskPct: 1.0,
     maxPositionPct: 10,
-    maxDailyLossPct: 2,
-    maxLosingTrades: 5,
-    cooldownMinutes: 5,
-    timeStopMinutes: 15,
-    timeStopR: 0.3,
+    maxDailyLossPct: 10,
+    maxLosingTrades: 20,
+    cooldownMinutes: 0.1,
+    timeStopMinutes: 5,
+    timeStopR: 0.1,
   },
 };
 
@@ -184,18 +184,18 @@ function simulatePriceMove(state: PriceState, ticker: SimulatedTicker): void {
   let volScale = 1.0;
 
   if (state.trendPhase === "rally") {
-    drift = Math.abs(ticker.trend) * 3;
-    volScale = 1.5;
+    drift = Math.abs(ticker.trend) * 10;
+    volScale = 4.0;
   } else if (state.trendPhase === "pullback") {
-    drift = -Math.abs(ticker.trend) * 2;
-    volScale = 0.8;
+    drift = -Math.abs(ticker.trend) * 8;
+    volScale = 3.0;
   } else {
-    drift = ticker.trend * 0.5;
-    volScale = 0.6;
+    drift = ticker.trend * 2;
+    volScale = 2.0;
   }
 
   const vol = ticker.volatility * volScale;
-  const rand = (Math.random() - 0.5) * 2;
+  const rand = (Math.random() - 0.5) * 4;
   const change = state.price * (drift + vol * rand);
   state.price = Math.max(state.price + change, 1);
   state.high = Math.max(state.high, state.price);
@@ -485,7 +485,7 @@ export function startSimulatedDataFeed(
         if (!universeResult.passes) continue;
 
         const timeSinceLastBreakout = Date.now() - state.lastBreakoutTime;
-        const cooldownMs = 25000;
+        const cooldownMs = 2000;
 
         let hasOpenTrade = false;
         const userIds = Array.from(activeUserIds);
