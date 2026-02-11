@@ -138,10 +138,20 @@ export default function Dashboard() {
   const accountSize = user?.accountSize ?? 100000;
   const activeSignals = signals?.filter((s) => s.state !== "CLOSED" && s.state !== "IDLE") ?? [];
   const openTrades = trades?.filter((t) => t.status === "open") ?? [];
-  const closedTrades = trades?.filter((t) => t.status === "closed") ?? [];
-  const todayPnl = closedTrades.reduce((sum, t) => sum + (t.pnl ?? 0), 0);
-  const winCount = closedTrades.filter((t) => (t.pnl ?? 0) > 0).length;
-  const winRate = closedTrades.length > 0 ? (winCount / closedTrades.length) * 100 : 0;
+  const allClosedTrades = trades?.filter((t) => t.status === "closed") ?? [];
+
+  const todayET = new Date().toLocaleDateString("en-US", { timeZone: "America/New_York" });
+  const todayClosedTrades = allClosedTrades.filter((t) => {
+    if (!t.exitedAt) return false;
+    const tradeDate = new Date(t.exitedAt).toLocaleDateString("en-US", { timeZone: "America/New_York" });
+    return tradeDate === todayET;
+  });
+
+  const todayPnl = todayClosedTrades.reduce((sum, t) => sum + (t.pnl ?? 0), 0);
+  const todayTradeCount = todayClosedTrades.length;
+  const winCount = todayClosedTrades.filter((t) => (t.pnl ?? 0) > 0).length;
+  const winRate = todayTradeCount > 0 ? (winCount / todayTradeCount) * 100 : 0;
+  const totalPnl = allClosedTrades.reduce((sum, t) => sum + (t.pnl ?? 0), 0);
   const recentAlerts = (alerts ?? []).slice(0, 6);
 
   const equityCurve: { date: string; balance: number }[] = [];
@@ -157,9 +167,9 @@ export default function Dashboard() {
         balance: s.accountBalance ?? accountSize,
       });
     });
-  } else if (closedTrades.length > 0) {
+  } else if (allClosedTrades.length > 0) {
     let runningBalance = accountSize;
-    const sorted = [...closedTrades].sort((a, b) => {
+    const sorted = [...allClosedTrades].sort((a, b) => {
       const da = a.exitedAt ? new Date(a.exitedAt).getTime() : a.enteredAt ? new Date(a.enteredAt).getTime() : 0;
       const dbTime = b.exitedAt ? new Date(b.exitedAt).getTime() : b.enteredAt ? new Date(b.enteredAt).getTime() : 0;
       return da - dbTime;
@@ -266,15 +276,15 @@ export default function Dashboard() {
           <>
             <StatCard
               label="Account Balance"
-              value={formatCurrency(accountSize + todayPnl)}
-              subValue={formatPct((todayPnl / accountSize) * 100)}
+              value={formatCurrency(accountSize + totalPnl)}
+              subValue={formatPct((totalPnl / accountSize) * 100)}
               icon={DollarSign}
-              trend={todayPnl >= 0 ? "up" : "down"}
+              trend={totalPnl >= 0 ? "up" : "down"}
             />
             <StatCard
               label="Today's P&L"
               value={formatCurrency(todayPnl)}
-              subValue={`${closedTrades.length} trades`}
+              subValue={`${todayTradeCount} trades today`}
               icon={todayPnl >= 0 ? TrendingUp : TrendingDown}
               trend={todayPnl >= 0 ? "up" : "down"}
             />
@@ -286,9 +296,9 @@ export default function Dashboard() {
               trend="neutral"
             />
             <StatCard
-              label="Win Rate"
+              label="Win Rate (Today)"
               value={`${winRate.toFixed(0)}%`}
-              subValue={`${winCount}W / ${closedTrades.length - winCount}L`}
+              subValue={todayTradeCount > 0 ? `${winCount}W / ${todayTradeCount - winCount}L` : "No trades yet"}
               icon={Target}
               trend={winRate >= 50 ? "up" : "down"}
             />
@@ -514,7 +524,7 @@ export default function Dashboard() {
                 <div className="p-2.5 rounded-md bg-accent/50">
                   <p className="text-[10px] text-muted-foreground">Losing Trades</p>
                   <p className="text-sm font-medium mt-0.5">
-                    {closedTrades.filter((t) => (t.pnl ?? 0) < 0).length} /{" "}
+                    {todayClosedTrades.filter((t) => (t.pnl ?? 0) < 0).length} /{" "}
                     {user?.maxLosingTrades ?? 3}
                   </p>
                 </div>

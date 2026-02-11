@@ -146,9 +146,12 @@ export async function seedDemoData(userId: string) {
     await storage.createAlert({ userId, ...alert });
   }
 
-  const timeStopAt = new Date(Date.now() + 30 * 60 * 1000);
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+  const yesterdayDate = yesterday.toISOString().split("T")[0];
+  const twoDaysAgoDate = twoDaysAgo.toISOString().split("T")[0];
 
-  await storage.createTrade({
+  const amdTrade = await storage.createTrade({
     userId,
     ticker: "AMD",
     side: "long",
@@ -160,13 +163,13 @@ export async function seedDemoData(userId: string) {
     shares: 285,
     status: "open",
     dollarRisk: 456,
-    timeStopAt,
     score: 88,
     scoreTier: "full",
     entryMode: "conservative",
   });
+  await storage.updateTrade(amdTrade.id, { enteredAt: yesterday });
 
-  await storage.createTrade({
+  const msftTrade = await storage.createTrade({
     userId,
     ticker: "MSFT",
     side: "long",
@@ -191,8 +194,9 @@ export async function seedDemoData(userId: string) {
     scoreTier: "half",
     entryMode: "conservative",
   });
+  await storage.updateTrade(msftTrade.id, { enteredAt: twoDaysAgo, exitedAt: twoDaysAgo });
 
-  await storage.createTrade({
+  const googlTrade = await storage.createTrade({
     userId,
     ticker: "GOOGL",
     side: "long",
@@ -213,17 +217,32 @@ export async function seedDemoData(userId: string) {
     scoreTier: "half",
     entryMode: "aggressive",
   });
+  await storage.updateTrade(googlTrade.id, { enteredAt: yesterday, exitedAt: yesterday });
 
-  const today = new Date().toISOString().split("T")[0];
   await storage.createSummary({
     userId,
-    date: today,
-    totalTrades: 2,
+    date: twoDaysAgoDate,
+    totalTrades: 1,
     winningTrades: 1,
+    losingTrades: 0,
+    winRate: 100,
+    avgRMultiple: 1.79,
+    totalPnl: 516,
+    maxDrawdown: 0,
+    ruleViolations: 0,
+    ruleViolationDetails: [],
+    accountBalance: 100516,
+  });
+
+  await storage.createSummary({
+    userId,
+    date: yesterdayDate,
+    totalTrades: 1,
+    winningTrades: 0,
     losingTrades: 1,
-    winRate: 50,
-    avgRMultiple: 0.44,
-    totalPnl: 132,
+    winRate: 0,
+    avgRMultiple: -0.92,
+    totalPnl: -384,
     maxDrawdown: -384,
     ruleViolations: 0,
     ruleViolationDetails: [],
