@@ -7,6 +7,73 @@ export interface Candle {
   timestamp: number;
 }
 
+export type TradeTier = "A" | "B" | "C";
+export type TradeDirection = "LONG" | "SHORT";
+export type SignalState = "IDLE" | "BREAKOUT_DETECTED" | "RETESTING" | "ENTRY_READY" | "IN_TRADE" | "DONE";
+
+export interface TierConfig {
+  volumeRatioMin: number;
+  atrRatioMin: number;
+  tolerancePct: number;
+  maxClosesAgainstLevel: number;
+  retestTimeoutCandles: number;
+  riskPct: number;
+  stopBufferPct: number;
+}
+
+export interface TieredStrategyConfig {
+  filters: {
+    minPrice: number;
+    minDollarVolume: number;
+    maxSpreadPct: number;
+    blacklist: string[];
+  };
+  sessions: {
+    open: [string, string];
+    mid: [string, string];
+    power: [string, string];
+  };
+  marketFilter: {
+    marketSymbol: string;
+    tierABypass: boolean;
+    requireAboveVWAPForLong: boolean;
+    requireBelowVWAPForShort: boolean;
+  };
+  strategy: {
+    timeframe: string;
+    volumeLookback: number;
+    atrLen: number;
+    atrMaLen: number;
+    minBreakoutClosePct: number;
+    minBodyPct: number;
+  };
+  tiers: {
+    A: TierConfig;
+    B: TierConfig;
+    C: TierConfig;
+  };
+  exits: {
+    partialAtR: number;
+    partialPct: number;
+    finalTargetR: number;
+    moveStopToBE: boolean;
+    useEMA9Trail: boolean;
+    usePriorLowTrail: boolean;
+    hardExitRedCandles: number;
+  };
+  daily: {
+    maxLosingTrades: number;
+    maxDailyLossR: number;
+  };
+  risk: {
+    maxPositionPct: number;
+    timeStopMinutes: number;
+    timeStopR: number;
+    cooldownMinutes: number;
+  };
+}
+
+/** @deprecated Use TieredStrategyConfig instead. Kept for backward compatibility with existing strategy modules. */
 export interface StrategyConfig {
   universe: {
     minPrice: number;
@@ -134,7 +201,7 @@ export interface VolatilityGateResult {
 
 export interface ScoreResult {
   score: number;
-  tier: "full" | "half" | "pass";
+  tier: TradeTier | "pass";
   sizeMultiplier: number;
   breakdown: {
     rvol: number;
@@ -149,7 +216,7 @@ export interface ScoreResult {
 
 export interface ExitDecision {
   shouldExit: boolean;
-  exitType: "partial" | "trailing_stop" | "hard_exit" | "time_stop" | "target" | null;
+  exitType: "partial" | "trailing_stop" | "hard_exit" | "time_stop" | "target" | "stop_loss" | null;
   exitPrice: number | null;
   reason: string;
   partialShares: number | null;

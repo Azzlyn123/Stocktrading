@@ -86,6 +86,40 @@ function StatCard({
   );
 }
 
+function TierAnalytics({ trades }: { trades: PaperTrade[] }) {
+  const closedTrades = trades.filter(t => t.status === "closed");
+  const tiers = ["A", "B", "C"] as const;
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2 p-4">
+        <h3 className="text-sm font-medium">Tier Analytics</h3>
+        <BarChart3 className="w-4 h-4 text-muted-foreground" />
+      </CardHeader>
+      <CardContent className="p-4 pt-0">
+        <div className="grid grid-cols-3 gap-3">
+          {tiers.map(tier => {
+            const tierTrades = closedTrades.filter(t => (t.tier ?? t.scoreTier) === tier);
+            const wins = tierTrades.filter(t => (t.pnl ?? 0) > 0).length;
+            const winRate = tierTrades.length > 0 ? (wins / tierTrades.length * 100) : 0;
+            const avgR = tierTrades.length > 0 ? tierTrades.reduce((s, t) => s + (t.realizedR ?? 0), 0) / tierTrades.length : 0;
+            const colors = { A: "border-emerald-500/30", B: "border-amber-500/30", C: "border-blue-400/30" };
+
+            return (
+              <div key={tier} data-testid={`tier-analytics-${tier}`} className={`p-3 rounded-md bg-accent/50 border ${colors[tier]}`}>
+                <p className="text-xs font-bold mb-1">Tier {tier}</p>
+                <p className="text-[10px] text-muted-foreground">{tierTrades.length} trades</p>
+                <p className="text-[10px] text-muted-foreground">Win: {winRate.toFixed(0)}%</p>
+                <p className="text-[10px] text-muted-foreground">Avg R: {avgR.toFixed(2)}</p>
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function Dashboard() {
   const { user } = useAuth();
   const { isConnected, subscribe } = useWebSocket();
@@ -308,6 +342,10 @@ export default function Dashboard() {
           </>
         )}
       </div>
+
+      {allClosedTrades.length > 0 && (
+        <TierAnalytics trades={trades ?? []} />
+      )}
 
       <div className="grid lg:grid-cols-3 gap-4">
         <Card className="lg:col-span-2">

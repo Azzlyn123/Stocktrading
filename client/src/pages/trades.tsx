@@ -15,6 +15,20 @@ import {
 } from "lucide-react";
 import type { PaperTrade } from "@shared/schema";
 
+function TierBadge({ tier }: { tier?: string | null }) {
+  if (!tier) return null;
+  const colors: Record<string, string> = {
+    A: "text-emerald-500 bg-emerald-500/10 border-emerald-500/30",
+    B: "text-amber-500 bg-amber-500/10 border-amber-500/30",
+    C: "text-blue-400 bg-blue-400/10 border-blue-400/30",
+  };
+  return (
+    <span data-testid={`tier-badge-${tier}`} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${colors[tier] ?? "text-muted-foreground bg-accent"}`}>
+      Tier {tier}
+    </span>
+  );
+}
+
 function TradeCard({ trade }: { trade: PaperTrade }) {
   const isOpen = trade.status === "open";
   const isProfitable = (trade.pnl ?? 0) >= 0;
@@ -34,18 +48,13 @@ function TradeCard({ trade }: { trade: PaperTrade }) {
             <Badge variant="outline" className="text-[9px] px-1.5 min-h-5 uppercase">
               {trade.side}
             </Badge>
-            {trade.score != null && (
-              <span
-                className={`text-[9px] font-semibold px-1.5 py-0.5 rounded ${
-                  trade.scoreTier === "full"
-                    ? "text-emerald-500 bg-emerald-500/10"
-                    : trade.scoreTier === "half"
-                    ? "text-amber-500 bg-amber-500/10"
-                    : "text-muted-foreground bg-accent"
-                }`}
-              >
-                Score {trade.score} ({trade.scoreTier})
-              </span>
+            {(trade.tier ?? trade.scoreTier) && (
+              <TierBadge tier={trade.tier ?? trade.scoreTier} />
+            )}
+            {trade.direction && (
+              <Badge variant="outline" className="text-[9px] px-1.5 min-h-5">
+                {trade.direction}
+              </Badge>
             )}
           </div>
           {trade.pnl != null && (

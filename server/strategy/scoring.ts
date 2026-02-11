@@ -1,4 +1,4 @@
-import type { StrategyConfig, ScoreResult, HigherTimeframeBiasResult, MarketRegimeResult, BreakoutQualification } from "./types";
+import type { StrategyConfig, ScoreResult, HigherTimeframeBiasResult, MarketRegimeResult, BreakoutQualification, TradeTier } from "./types";
 
 export function computeScore(
   rvol: number,
@@ -40,13 +40,13 @@ export function computeScore(
 
   if (isPowerSetup) score = Math.min(100, score + 10);
 
-  let tier: "full" | "half" | "pass";
+  let tier: TradeTier | "pass";
   let sizeMultiplier: number;
   if (score >= config.fullSizeMin) {
-    tier = "full";
+    tier = "A";
     sizeMultiplier = isPowerSetup ? 1.25 : 1.0;
   } else if (score >= config.halfSizeMin) {
-    tier = "half";
+    tier = "B";
     sizeMultiplier = 0.5;
   } else {
     tier = "pass";

@@ -1,0 +1,318 @@
+# Trading App: Breakout + Retest Momentum (5-min) — Tiered System Spec (Paste into Replit)
+
+## 0) Objective
+Increase trade frequency WITHOUT destroying edge by using a tiered system:
+- Tier A (strict / best setups)
+- Tier B (slightly relaxed / more trades)
+- Tier C (exploratory / data collection, tiny risk)
+
+Core requirements:
+- Large-cap stocks & liquid ETFs only
+- 5-min timeframe for signals (levels may come from 15m/1h)
+- Risk-based sizing (R-multiple tracking)
+- Daily stop after 3 losing trades (hard lockout)
+- Log every trade + stats (win rate, avg R, expectancy, drawdown)
+
+---
+
+## 1) Global Filters (Universe)
+Symbol is tradable only if:
+- price >= CONFIG.filters.minPrice
+- avgDailyDollarVolume >= CONFIG.filters.minDollarVolume (ADV * price)
+- spreadPct <= CONFIG.filters.maxSpreadPct
+- exclude tickers in CONFIG.filters.blacklist
+Default values:
+- minPrice = 10
+- minDollarVolume = 50_000_000   (50M)
+- maxSpreadPct = 0.10            (0.10%)
+- blacklist = ["low_float", "penny", "otc"] (implementation-defined)
+
+---
+
+## 2) Time Windows (when to trade)
+Only allow trades in these sessions (local exchange time):
+- session.open: 09:35 to 11:00
+- session.mid: 11:00 to 13:30
+- session.power: 13:30 to 15:55
+(These are configurable.)
+
+---
+
+## 3) Market Condition Filter (reduces chop losses)
+Expanded tiers (B/C) only trade when market is favorable:
+- marketSymbol = "SPY"
+- Favorable = (SPY above VWAP) for LONGS, (SPY below VWAP) for SHORTS
+- Optional: ATR regime filter (SPY ATR(14) > ATR_MA(20))
+
+Tier A can optionally ignore market filter (CONFIG.marketFilter.tierABypass = true)
+
+---
+
+## 4) Strategy Overview (State Machine)
+For each symbol, maintain state:
+
+STATE = "IDLE"
+-> "BREAKOUT_DETECTED"
+-> "RETESTING"
+-> "ENTRY_READY"
+-> "IN_TRADE"
+-> "DONE"
+
+Direction:
+- LONG: breakout above resistance
+- SHORT: breakout below support
+
+---
+
+## 5) Levels (Support/Resistance)
+Levels can come from:
+- prior day high/low
+- premarket high/low (optional)
+- 15m/1h swing highs/lows
+Implementation note:
+- Level detection is a separate module and returns:
+  levelPrice, levelType ("RESISTANCE"/"SUPPORT"), confidenceScore
+
+---
+
+## 6) Breakout Rules (per tier)
+Common breakout requirements:
+- Breakout candle CLOSE beyond level by at least CONFIG.strategy.minBreakoutClosePct
+- Breakout candle bodyPct >= CONFIG.strategy.minBodyPct (optional)
+- Confirm volume and volatility depending on tier
+
+Definitions:
+- volRatio = currentVolume / SMA(volume, lookback)
+- atr = ATR(atrLen)
+- atrRatio = atr / SMA(atr, atrMaLen)
+
+### Tier A (Strict)
+- volRatio >= tierA.volumeRatioMin (default 1.5)
+- atrRatio >= tierA.atrRatioMin (default 1.1)
+- breakout close beyond level >= 0.05% (default minBreakoutClosePct=0.05)
+
+### Tier B (More trades, controlled risk)
+Relax ONE thing:
+- volRatio >= 1.2 (default)
+- atrRatio optional (can be ignored) OR lowered to 1.0
+Keep breakout close requirement.
+
+### Tier C (Exploratory, tiny risk)
+- volRatio >= 1.0
+- atr filter ignored
+- Still must be liquid & within time window
+- Used for data collection ONLY (small risk)
+
+---
+
+## 7) Retest Rules (per tier)
+After breakout, wait for retest to the level.
+
+Definitions:
+- tolerancePct = tier.tolerancePct (default 0.15% = 0.0015)
+- "within tolerance" means abs(price - level)/level <= tolerancePct
+
+Valid retest:
+- Price returns to within tolerance of level
+- Retest "holds" level overall
+
+Allowable noise:
+- Tier A: allow 1 candle CLOSE slightly back through the level if within tolerance
+- Tier B: allow up to 2 closes within tolerance
+- Tier C: allow up to 3 closes within tolerance
+
+Invalidation:
+- If price closes beyond tolerance against breakout direction, retest fails:
+  LONG invalid if close < level * (1 - tolerancePct)
+  SHORT invalid if close > level * (1 + tolerancePct)
+
+Retest timeout:
+- If retest doesn’t occur within N candles after breakout, reset to IDLE
+  Tier A: 6 candles (30 min)
+  Tier B: 8 candles (40 min)
+  Tier C: 10 candles (50 min)
+
+---
+
+## 8) Entry Trigger (per tier)
+Entry occurs only AFTER a valid retest.
+
+Default entry trigger (simple and robust):
+- LONG: enter when price breaks ABOVE the high of the "retest confirmation candle"
+- SHORT: enter when price breaks BELOW the low of the "retest confirmation candle"
+
+Retest confirmation candle:
+- first candle that rejects the level and closes back in breakout direction
+
+Optional extra confirmation:
+- reclaim VWAP for longs / lose VWAP for shorts (tier-specific flag)
+
+---
+
+## 9) Stop Loss (per tier)
+Stops must be defined at entry.
+
+Default stop logic:
+- LONG: stop = min(retest swing low, level * (1 - stopBufferPct))
+- SHORT: stop = max(retest swing high, level * (1 + stopBufferPct))
+
+stopBufferPct defaults:
+- Tier A: 0.05%
+- Tier B: 0.07%
+- Tier C: 0.10%
+
+Hard rule:
+- Stop distance must be >= minStopCents (avoid too tight)
+- Stop distance must be <= maxStopATR * ATR (avoid too wide)
+
+---
+
+## 10) Position Sizing + Risk (R-based)
+Risk per trade:
+- Tier A riskPct = 1.00% of equity (default)
+- Tier B riskPct = 0.50%
+- Tier C riskPct = 0.25%
+
+Position sizing:
+- riskDollars = equity * riskPct
+- stopDistance = abs(entry - stop)
+- shares = floor(riskDollars / stopDistance)
+
+R tracking:
+- R = PnL / riskDollars
+
+---
+
+## 11) Exits (default plan)
+Partial + runner style:
+- Take partial at +1R: close CONFIG.exits.partialPct (default 50%)
+- After partial, optional move stop to breakeven (CONFIG.exits.moveStopToBE = true)
+- Final exit:
+  - target at +2R OR
+  - trailing stop under last higher low / above last lower high OR
+  - VWAP/EMA exit (configurable)
+
+Always record:
+- entryTime, entryPrice
+- stopPrice
+- partial fill info
+- final exit info
+- total R
+
+---
+
+## 12) Daily Risk Guardrails (hard enforcement)
+Rules:
+- Stop trading after CONFIG.daily.maxLosingTrades = 3
+- Also stop if dailyRealizedR <= CONFIG.daily.maxDailyLossR (optional, default -3R)
+Lockout behavior:
+- If locked out, ignore signals and show UI warning: "DAILY LOCKOUT ACTIVE"
+
+---
+
+## 13) Journaling + Analytics (MVP required fields)
+For each trade store:
+- id, symbol, tier, direction
+- timestamp entry/exit
+- levelPrice, breakoutTime, retestTime
+- entryPrice, stopPrice
+- riskDollars, shares
+- partialExitPrice, partialExitR
+- finalExitPrice, totalPnL, totalR
+- tags: ["A+", "B", "C", "chop", "lateEntry", ...]
+- notes (optional)
+
+Analytics:
+- winRate by tier
+- avgR by tier
+- expectancy by tier
+- profitFactor
+- maxDrawdown (equity curve)
+
+---
+
+## 14) CONFIG (Single source of truth)
+Implement a config file (JSON) that controls everything — NO hardcoded values.
+
+Example CONFIG:
+
+{
+  "filters": {
+    "minPrice": 10,
+    "minDollarVolume": 50000000,
+    "maxSpreadPct": 0.10,
+    "blacklist": []
+  },
+  "sessions": {
+    "open": ["09:35", "11:00"],
+    "mid": ["11:00", "13:30"],
+    "power": ["13:30", "15:55"]
+  },
+  "marketFilter": {
+    "marketSymbol": "SPY",
+    "tierABypass": true,
+    "requireAboveVWAPForLong": true,
+    "requireBelowVWAPForShort": true
+  },
+  "strategy": {
+    "timeframe": "5m",
+    "volumeLookback": 20,
+    "atrLen": 14,
+    "atrMaLen": 20,
+    "minBreakoutClosePct": 0.0005
+  },
+  "tiers": {
+    "A": {
+      "volumeRatioMin": 1.5,
+      "atrRatioMin": 1.1,
+      "tolerancePct": 0.0015,
+      "maxClosesAgainstLevel": 1,
+      "retestTimeoutCandles": 6,
+      "riskPct": 0.01,
+      "stopBufferPct": 0.0005
+    },
+    "B": {
+      "volumeRatioMin": 1.2,
+      "atrRatioMin": 1.0,
+      "tolerancePct": 0.0015,
+      "maxClosesAgainstLevel": 2,
+      "retestTimeoutCandles": 8,
+      "riskPct": 0.005,
+      "stopBufferPct": 0.0007
+    },
+    "C": {
+      "volumeRatioMin": 1.0,
+      "atrRatioMin": 0.0,
+      "tolerancePct": 0.0015,
+      "maxClosesAgainstLevel": 3,
+      "retestTimeoutCandles": 10,
+      "riskPct": 0.0025,
+      "stopBufferPct": 0.0010
+    }
+  },
+  "exits": {
+    "partialAtR": 1.0,
+    "partialPct": 0.5,
+    "finalTargetR": 2.0,
+    "moveStopToBE": true
+  },
+  "daily": {
+    "maxLosingTrades": 3,
+    "maxDailyLossR": -3.0
+  }
+}
+
+---
+
+## 15) Implementation Checklist (Dev)
+- [ ] Build data pipeline (candles, ATR, VWAP, volume SMA)
+- [ ] Universe filter module
+- [ ] Level detection module
+- [ ] State machine per symbol
+- [ ] Tier selection logic
+- [ ] Risk engine + daily lockout
+- [ ] Order simulator (paper) first
+- [ ] Journal DB + analytics calculations
+- [ ] UI: signal states + lockout warnings + tier label
+
+END SPEC

@@ -36,6 +36,9 @@ interface ScannerItem {
   vwap: number;
   score: number;
   scoreTier: string;
+  tier: string | null;
+  volRatio: number | null;
+  atrRatio: number | null;
 }
 
 function formatVolume(vol: number): string {
@@ -50,16 +53,16 @@ function formatDollar(val: number): string {
   return `$${val.toFixed(0)}`;
 }
 
-function ScoreBadge({ score, tier }: { score: number; tier: string }) {
-  const color =
-    tier === "full"
-      ? "text-emerald-500"
-      : tier === "half"
-      ? "text-amber-500"
-      : "text-muted-foreground";
+function TierBadge({ tier }: { tier?: string | null }) {
+  if (!tier) return null;
+  const colors: Record<string, string> = {
+    A: "text-emerald-500 bg-emerald-500/10 border-emerald-500/30",
+    B: "text-amber-500 bg-amber-500/10 border-amber-500/30",
+    C: "text-blue-400 bg-blue-400/10 border-blue-400/30",
+  };
   return (
-    <span className={`text-xs font-semibold ${color}`} data-testid="text-score">
-      {score}
+    <span data-testid={`tier-badge-${tier}`} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${colors[tier] ?? "text-muted-foreground bg-accent"}`}>
+      Tier {tier}
     </span>
   );
 }
@@ -169,7 +172,7 @@ export default function Scanner() {
                 <span className="text-right">Spread</span>
                 <span className="text-right">$Volume</span>
                 <span className="text-center">15m Bias</span>
-                <span className="text-center">Score</span>
+                <span className="text-center">Tier</span>
                 <span className="text-center">Status</span>
               </div>
               {passing.map((item) => (
@@ -222,7 +225,7 @@ export default function Scanner() {
                     )}
                   </div>
                   <div className="flex justify-center">
-                    <ScoreBadge score={item.score} tier={item.scoreTier} />
+                    <TierBadge tier={item.tier ?? item.scoreTier} />
                   </div>
                   <div className="flex justify-center">
                     {item.signalState !== "IDLE" ? (

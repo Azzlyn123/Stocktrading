@@ -1,4 +1,4 @@
-import type { Candle, StrategyConfig, RetestResult } from "./types";
+import type { Candle, StrategyConfig, RetestResult, TierConfig } from "./types";
 import { calculateVWAP, isGreenCandle } from "./indicators";
 
 export function checkRetestRules(
@@ -68,6 +68,119 @@ export function checkRetestRules(
       holdsLevel,
       volumeContracting,
       expandingBelowLevel: expandingBelow,
+    },
+  };
+}
+
+export function checkTieredRetest(
+  currentCandle: Candle,
+  breakoutCandle: Candle,
+  retestBars: Candle[],
+  levelPrice: number,
+  levelType: "RESISTANCE" | "SUPPORT",
+  bars5m: Candle[],
+  tier: TierConfig,
+  direction: "LONG" | "SHORT"
+): RetestResult {
+  const reasons: string[] = [];
+  const isLong = direction === "LONG";
+
+  const withinTolerance = (price: number): boolean =>
+    Math.abs(price - levelPrice) / levelPrice <= tier.tolerancePct;
+
+  const currentWithinTolerance = withinTolerance(currentCandle.close);
+  let retestTouched = currentWithinTolerance;
+  if (!retestTouched) {
+    for (const bar of retestBars) {
+      if (withinTolerance(bar.close) || withinTolerance(bar.low) || withinTolerance(bar.high)) {
+        retestTouched = true;
+        break;
+      }
+    }
+  }
+  if (!retestTouched) {
+    reasons.push("Price never returned to within tolerance of level");
+  }
+
+  let closesAgainst = 0;
+  for (const bar of retestBars) {
+    if (withinTolerance(bar.close)) {
+      if (isLong && bar.close < levelPrice) closesAgainst++;
+      if (!isLong && bar.close > levelPrice) closesAgainst++;
+    }
+  }
+  if (withinTolerance(currentCandle.close)) {
+    if (isLong && currentCandle.close < levelPrice) closesAgainst++;
+    if (!isLong && currentCandle.close > levelPrice) closesAgainst++;
+  }
+  const closesAgainstOk = closesAgainst <= tier.maxClosesAgainstLevel;
+  if (!closesAgainstOk) {
+    reasons.push(`${closesAgainst} closes against direction > max ${tier.maxClosesAgainstLevel}`);
+  }
+
+  let invalidated = false;
+  if (isLong && currentCandle.close < levelPrice * (1 - tier.tolerancePct)) {
+    invalidated = true;
+    reasons.push(`LONG invalidated: close ${currentCandle.close.toFixed(2)} < level ${levelPrice.toFixed(2)} beyond tolerance`);
+  }
+  if (!isLong && currentCandle.close > levelPrice * (1 + tier.tolerancePct)) {
+    invalidated = true;
+    reasons.push(`SHORT invalidated: close ${currentCandle.close.toFixed(2)} > level ${levelPrice.toFixed(2)} beyond tolerance`);
+  }
+  for (const bar of retestBars) {
+    if (isLong && bar.close < levelPrice * (1 - tier.tolerancePct)) {
+      invalidated = true;
+      reasons.push(`LONG invalidated during retest: bar close ${bar.close.toFixed(2)} broke below tolerance`);
+      break;
+    }
+    if (!isLong && bar.close > levelPrice * (1 + tier.tolerancePct)) {
+      invalidated = true;
+      reasons.push(`SHORT invalidated during retest: bar close ${bar.close.toFixed(2)} broke above tolerance`);
+      break;
+    }
+  }
+
+  const valid = retestTouched && closesAgainstOk && !invalidated;
+
+  let entryPrice: number | null = null;
+  let stopPrice: number | null = null;
+
+  if (valid) {
+    const isConfirmation = isLong
+      ? currentCandle.close > levelPrice && withinTolerance(currentCandle.low)
+      : currentCandle.close < levelPrice && withinTolerance(currentCandle.high);
+
+    if (isConfirmation || isGreenCandle(currentCandle) === isLong) {
+      entryPrice = isLong ? currentCandle.high : currentCandle.low;
+    }
+
+    const allRetestBars = [...retestBars, currentCandle];
+    const swingLow = Math.min(...allRetestBars.map((c) => c.low));
+    const swingHigh = Math.max(...allRetestBars.map((c) => c.high));
+
+    if (isLong) {
+      const levelStop = levelPrice * (1 - tier.stopBufferPct);
+      stopPrice = Math.min(swingLow, levelStop);
+    } else {
+      const levelStop = levelPrice * (1 + tier.stopBufferPct);
+      stopPrice = Math.max(swingHigh, levelStop);
+    }
+  }
+
+  const breakoutRange = breakoutCandle.high - breakoutCandle.low;
+  const pullbackFromHigh = breakoutCandle.high - currentCandle.low;
+  const pullbackPct = breakoutRange > 0 ? (pullbackFromHigh / breakoutRange) * 100 : 0;
+
+  return {
+    valid,
+    entryPrice,
+    stopPrice,
+    reasons,
+    metrics: {
+      pullbackPct,
+      holdsLevel: !invalidated,
+      volumeContracting: true,
+      expandingBelowLevel: false,
     },
   };
 }

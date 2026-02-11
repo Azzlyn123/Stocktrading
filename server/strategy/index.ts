@@ -1,5 +1,5 @@
-export { DEFAULT_STRATEGY_CONFIG, buildConfigFromUser } from "./config";
-export type { StrategyConfig } from "./types";
+export { DEFAULT_STRATEGY_CONFIG, DEFAULT_TIERED_CONFIG, buildConfigFromUser, buildTieredConfigFromUser, tieredToLegacy, selectTier } from "./config";
+export type { StrategyConfig, TieredStrategyConfig, TierConfig, TradeTier, TradeDirection, SignalState } from "./types";
 export type {
   Candle,
   UniverseFilterResult,
@@ -32,9 +32,9 @@ export {
 } from "./indicators";
 export { checkUniverseFilter } from "./universeFilter";
 export { checkHigherTimeframeBias } from "./higherTimeframeBias";
-export { checkBreakoutQualification } from "./breakoutQualification";
-export { checkRetestRules } from "./retestRules";
+export { checkBreakoutQualification, checkTieredBreakout } from "./breakoutQualification";
+export { checkRetestRules, checkTieredRetest } from "./retestRules";
 export { checkMarketRegime } from "./marketRegime";
 export { checkVolatilityGate } from "./volatilityGate";
 export { computeScore } from "./scoring";
-export { checkExitRules } from "./exits";
+export { checkExitRules, checkTieredExitRules } from "./exits";

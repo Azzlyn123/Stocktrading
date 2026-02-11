@@ -126,6 +126,8 @@ export const signals = pgTable("signals", {
   scoreBreakdown: jsonb("score_breakdown"),
   relStrengthVsSpy: real("rel_strength_vs_spy"),
   isPowerSetup: boolean("is_power_setup").default(false),
+  tier: text("tier"),
+  direction: text("direction").default("LONG"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
   closedAt: timestamp("closed_at"),
@@ -177,6 +179,8 @@ export const paperTrades = pgTable("paper_trades", {
   entryMode: text("entry_mode"),
   isPowerSetup: boolean("is_power_setup").default(false),
   realizedR: real("realized_r").default(0),
+  tier: text("tier"),
+  direction: text("direction").default("LONG"),
 });
 
 export const dailySummaries = pgTable("daily_summaries", {
@@ -193,6 +197,8 @@ export const dailySummaries = pgTable("daily_summaries", {
   ruleViolations: integer("rule_violations").default(0),
   ruleViolationDetails: jsonb("rule_violation_details"),
   accountBalance: real("account_balance"),
+  dailyR: real("daily_r").default(0),
+  isLockedOut: boolean("is_locked_out").default(false),
 });
 
 export const insertUserSchema = createInsertSchema(users).pick({

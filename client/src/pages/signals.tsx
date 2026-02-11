@@ -39,17 +39,17 @@ const STATE_LABELS: Record<string, string> = {
   CLOSED: "Closed",
 };
 
-function ScoreBadge({ score, tier }: { score?: number | null; tier?: string | null }) {
-  if (!score && score !== 0) return null;
-  const color =
-    tier === "full"
-      ? "text-emerald-500 bg-emerald-500/10"
-      : tier === "half"
-      ? "text-amber-500 bg-amber-500/10"
-      : "text-muted-foreground bg-accent";
+function TierBadge({ tier, score }: { tier?: string | null; score?: number | null }) {
+  if (!tier) return null;
+  const colors: Record<string, string> = {
+    A: "text-emerald-500 bg-emerald-500/10 border-emerald-500/30",
+    B: "text-amber-500 bg-amber-500/10 border-amber-500/30",
+    C: "text-blue-400 bg-blue-400/10 border-blue-400/30",
+  };
+  const color = colors[tier] ?? "text-muted-foreground bg-accent";
   return (
-    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${color}`}>
-      {score}/100 ({tier})
+    <span data-testid={`tier-badge-${tier}`} className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${color}`}>
+      Tier {tier}{score != null ? ` (${score})` : ""}
     </span>
   );
 }
@@ -57,28 +57,15 @@ function ScoreBadge({ score, tier }: { score?: number | null; tier?: string | nu
 function ScoreBreakdown({ breakdown }: { breakdown: any }) {
   if (!breakdown) return null;
   const items = [
-    { label: "RVOL", value: breakdown.rvol, max: 20 },
-    { label: "Trend", value: breakdown.trend, max: 15 },
-    { label: "BO Vol", value: breakdown.breakoutVolume, max: 20 },
-    { label: "Retest Vol", value: breakdown.retestVolume, max: 15 },
-    { label: "SPY", value: breakdown.spyAlignment, max: 15 },
-    { label: "ATR", value: breakdown.atrExpansion, max: 10 },
-    { label: "Catalyst", value: breakdown.catalyst, max: 5 },
+    { label: "Vol Ratio", value: breakdown.volRatio?.toFixed(1) ?? "—" },
+    { label: "ATR Ratio", value: breakdown.atrRatio?.toFixed(1) ?? "—" },
+    { label: "Tier", value: breakdown.tier ?? "—" },
   ];
   return (
     <div className="flex items-center gap-1 flex-wrap">
       {items.map((item) => (
-        <span
-          key={item.label}
-          className={`text-[8px] px-1 py-0.5 rounded ${
-            item.value >= item.max * 0.7
-              ? "bg-emerald-500/10 text-emerald-500"
-              : item.value >= item.max * 0.3
-              ? "bg-amber-500/10 text-amber-500"
-              : "bg-accent text-muted-foreground"
-          }`}
-        >
-          {item.label}: {item.value ?? 0}/{item.max}
+        <span key={item.label} className="text-[8px] px-1 py-0.5 rounded bg-accent text-muted-foreground">
+          {item.label}: {item.value}
         </span>
       ))}
     </div>
@@ -107,7 +94,12 @@ function SignalCard({ signal }: { signal: Signal }) {
             >
               {STATE_LABELS[signal.state ?? "IDLE"]}
             </Badge>
-            <ScoreBadge score={signal.score} tier={signal.scoreTier} />
+            <TierBadge tier={signal.tier ?? signal.scoreTier} score={signal.score} />
+            {signal.direction && (
+              <Badge variant="outline" className="text-[9px] px-1.5 min-h-5">
+                {signal.direction}
+              </Badge>
+            )}
           </div>
           <div className="text-right">
             <p className="text-sm font-medium">${signal.currentPrice?.toFixed(2) ?? "—"}</p>
