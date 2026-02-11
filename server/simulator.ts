@@ -113,6 +113,8 @@ const DEMO_CONFIG: StrategyConfig = {
     timeStopMinutes: 5,
     timeStopR: 0.1,
   },
+  riskMode: "balanced",
+  powerSetupEnabled: true,
 };
 
 interface PriceState {
@@ -147,6 +149,7 @@ interface PriceState {
   trendPhase: "rally" | "pullback" | "consolidation";
   trendPhaseBars: number;
   lastBreakoutTime: number;
+  relStrengthVsSpy: number;
 }
 
 const priceStates = new Map<string, PriceState>();
@@ -198,6 +201,7 @@ function initializePriceState(ticker: SimulatedTicker): PriceState {
     trendPhase: "rally",
     trendPhaseBars: 0,
     lastBreakoutTime: 0,
+    relStrengthVsSpy: 0,
   };
 }
 
@@ -626,13 +630,13 @@ export async function startSimulatedDataFeed(
     const spyState = priceStates.get("SPY");
     const spyBars5m = spyState?.bars5m ?? [];
 
-    const regimeResult = checkMarketRegime(spyBars5m, DEMO_CONFIG.marketRegime);
+    const regimeResult = checkMarketRegime(spyBars5m, DEFAULT_STRATEGY_CONFIG.marketRegime);
 
     const volGateResult = checkVolatilityGate(
       spyBars5m,
       spyState?.yesterdayRange ?? 0,
       spyState?.dailyATRbaseline ?? 0,
-      DEMO_CONFIG.volatilityGate
+      DEFAULT_STRATEGY_CONFIG.volatilityGate
     );
 
     for (const tickerConfig of SIMULATED_TICKERS) {
@@ -688,463 +692,274 @@ export async function startSimulatedDataFeed(
           state.prevDayHigh,
           state.premarketHigh,
           state.price,
-          DEMO_CONFIG.higherTimeframe
+          DEFAULT_STRATEGY_CONFIG.higherTimeframe
         );
 
         const dollarVolume = state.price * tickerConfig.avgDailyVolume;
-        const universeResult = checkUniverseFilter(
-          state.price,
-          dollarVolume,
-          state.spreadPct,
-          state.bars1h.length > 0 ? state.bars1h : state.bars5m,
-          state.rvol,
-          state.minutesSinceOpen,
-          DEMO_CONFIG.universe
-        );
 
-        if (!universeResult.passes) continue;
-
-        const timeSinceLastBreakout = Date.now() - state.lastBreakoutTime;
-        const cooldownMs = 2000;
-
-        let hasOpenTrade = false;
         const userIds = Array.from(activeUserIds);
-        for (const uid of userIds) {
+        for (const userId of userIds) {
           try {
-            const trades = await storage.getTrades(uid);
-            if (trades.some((t) => t.status === "open" && t.ticker === state.ticker)) {
-              hasOpenTrade = true;
-              break;
-            }
-          } catch (e) {}
-        }
+            const user = await storage.getUser(userId);
+            if (!user) continue;
 
-        if (state.signalState === "IDLE" && state.resistanceLevel && timeSinceLastBreakout > cooldownMs && !hasOpenTrade) {
-          let shouldBreakout = false;
-          let boCandle: Candle;
+            const config = buildConfigFromUser(user);
 
-          if (currentDataSource === "live") {
-            const recentCandle = state.bars5m.length > 0 ? state.bars5m[state.bars5m.length - 1] : null;
-            if (recentCandle && recentCandle.close > state.resistanceLevel) {
-              shouldBreakout = true;
-              boCandle = recentCandle;
-            } else {
-              boCandle = candle;
-            }
-          } else {
-            const nearResistance = state.price >= state.resistanceLevel * 0.998;
-            shouldBreakout = nearResistance || (state.trendPhase === "rally" && Math.random() > 0.2) || Math.random() > 0.6;
-            boCandle = createBreakoutCandle(state, state.resistanceLevel);
-          }
-
-          if (shouldBreakout) {
-            if (currentDataSource === "simulated") {
-              state.bars5m.push(boCandle);
-              if (state.bars5m.length > 200) state.bars5m.shift();
-              state.barCount++;
-              state.vwap = calculateVWAP(state.bars5m);
-              state.atr14 = calculateATR(state.bars5m, 14);
-            }
-
-            const breakoutResult = checkBreakoutQualification(
-              boCandle,
-              state.bars5m.slice(0, -1),
-              state.resistanceLevel,
-              DEMO_CONFIG.breakout
+            const universeResult = checkUniverseFilter(
+              state.price,
+              dollarVolume,
+              state.spreadPct,
+              state.bars1h.length > 0 ? state.bars1h : state.bars5m,
+              state.rvol,
+              state.minutesSinceOpen,
+              config.universe,
+              config.riskMode
             );
 
-            if (breakoutResult.qualified) {
-              state.signalState = "BREAKOUT";
-              state.breakoutCandle = boCandle;
-              state.lastBreakoutTime = Date.now();
+            // RELATIVE STRENGTH VS SPY
+            const spyCandles = spyBars5m.slice(-20);
+            const tickerCandles = state.bars5m.slice(-20);
+            let relStrengthVsSpy = 0;
+            if (spyCandles.length > 0 && tickerCandles.length > 0) {
+              const spyMove = (spyCandles[spyCandles.length - 1].close / spyCandles[0].open) - 1;
+              const tickerMove = (tickerCandles[tickerCandles.length - 1].close / tickerCandles[0].open) - 1;
+              relStrengthVsSpy = tickerMove - spyMove;
+            }
+            state.relStrengthVsSpy = relStrengthVsSpy;
 
-              const rejections = resistance?.rejections ?? 2;
-              const atrExpanding = true;
-              const scoreResult = computeScore(
-                state.rvol,
-                biasResult,
-                breakoutResult.metrics.volumeMultiplier,
-                false,
-                regimeResult,
-                atrExpanding,
-                Math.random() > 0.6,
-                DEMO_CONFIG.scoring
-              );
+            const minSinceOpen = state.minutesSinceOpen;
+            const inWindow = (minSinceOpen >= 15 && minSinceOpen <= 90) || (minSinceOpen >= 240 && minSinceOpen <= 375);
 
-              state.lastScore = scoreResult.score;
-              state.lastScoreTier = scoreResult.tier;
+            const trades = await storage.getTrades(userId);
+            const todayET = new Date().toLocaleDateString("en-US", { timeZone: "America/New_York" });
+            const todayTrades = trades.filter(t => t.exitedAt && new Date(t.exitedAt).toLocaleDateString("en-US", { timeZone: "America/New_York" }) === todayET);
+            const lossCount = todayTrades.filter(t => (t.pnl ?? 0) < 0).length;
+            const netR = todayTrades.reduce((sum, t) => sum + (t.rMultiple ?? 0), 0);
+            const tradingLocked = lossCount >= config.risk.maxLosingTrades || netR <= -3;
 
-              if (scoreResult.tier === "pass") {
-                state.signalState = "IDLE";
-                continue;
+            const passesStrategy =
+              universeResult.passes &&
+              biasResult.aligned &&
+              regimeResult.aligned &&
+              volGateResult.passes &&
+              relStrengthVsSpy > 0 &&
+              inWindow &&
+              !tradingLocked;
+
+            const hasOpenTrade = trades.some((t) => t.status === "open" && t.ticker === state.ticker);
+            const timeSinceLastBreakout = Date.now() - state.lastBreakoutTime;
+            const cooldownMs = config.risk.cooldownMinutes * 60 * 1000;
+
+            if (state.signalState === "IDLE" && state.resistanceLevel && timeSinceLastBreakout > cooldownMs && !hasOpenTrade) {
+              let shouldBreakout = false;
+              let boCandle: Candle;
+
+              if (currentDataSource === "live") {
+                const recentCandle = state.bars5m.length > 0 ? state.bars5m[state.bars5m.length - 1] : null;
+                if (recentCandle && recentCandle.close > state.resistanceLevel) {
+                  shouldBreakout = true;
+                  boCandle = recentCandle;
+                } else {
+                  boCandle = candle;
+                }
+              } else {
+                const nearResistance = state.price >= state.resistanceLevel * 0.998;
+                shouldBreakout = nearResistance || (state.trendPhase === "rally" && Math.random() > 0.2) || Math.random() > 0.6;
+                boCandle = createBreakoutCandle(state, state.resistanceLevel);
               }
 
-              const signalData = {
-                ticker: state.ticker,
-                state: "BREAKOUT" as const,
-                resistanceLevel: Number(state.resistanceLevel.toFixed(2)),
-                currentPrice: Number(state.price.toFixed(2)),
-                breakoutPrice: Number(state.price.toFixed(2)),
-                breakoutVolume: boCandle.volume,
-                trendConfirmed: biasResult.aligned,
-                volumeConfirmed: breakoutResult.metrics.volumeMultiplier >= 0.8,
-                atrExpansion: atrExpanding,
-                timeframe: "5m",
-                rvol: Number(state.rvol.toFixed(2)),
-                atrValue: Number(state.atr14.toFixed(4)),
-                rejectionCount: rejections,
-                score: scoreResult.score,
-                scoreTier: scoreResult.tier,
-                marketRegime: regimeResult.chopping ? "choppy" : regimeResult.aligned ? "aligned" : "misaligned",
-                spyAligned: regimeResult.aligned,
-                volatilityGatePassed: volGateResult.passes,
-                scoreBreakdown: scoreResult.breakdown,
-                notes: `SETUP forming: Breakout above $${state.resistanceLevel.toFixed(2)} (${rejections} rej). Score ${scoreResult.score}/100 (${scoreResult.tier}). RVOL ${state.rvol.toFixed(1)}x. Body ${(breakoutResult.metrics.bodyPct * 100).toFixed(0)}%. Vol ${breakoutResult.metrics.volumeMultiplier.toFixed(1)}x. 15m bias ${biasResult.confirmations}/3. SPY ${regimeResult.aligned ? "aligned" : "misaligned"}.`,
-              };
+              if (shouldBreakout) {
+                if (currentDataSource === "simulated") {
+                  state.bars5m.push(boCandle);
+                  if (state.bars5m.length > 200) state.bars5m.shift();
+                  state.barCount++;
+                  state.vwap = calculateVWAP(state.bars5m);
+                  state.atr14 = calculateATR(state.bars5m, 14);
+                }
 
-              broadcast("signal_update", signalData);
+                const breakoutResult = checkBreakoutQualification(
+                  boCandle,
+                  state.bars5m.slice(0, -1),
+                  state.resistanceLevel,
+                  config.breakout
+                );
 
-              const userIds = Array.from(activeUserIds);
-              for (const userId of userIds) {
-                try {
+                if (breakoutResult.qualified) {
+                  state.signalState = "BREAKOUT";
+                  state.breakoutCandle = boCandle;
+                  state.lastBreakoutTime = Date.now();
+
+                  const rejections = resistance?.rejections ?? 2;
+                  const isPowerSetup = config.powerSetupEnabled &&
+                    breakoutResult.metrics.volumeMultiplier >= 2.0 &&
+                    relStrengthVsSpy > 0 &&
+                    !todayTrades.some(t => t.isPowerSetup);
+
+                  const scoreResult = computeScore(
+                    state.rvol,
+                    biasResult,
+                    breakoutResult.metrics.volumeMultiplier,
+                    false,
+                    regimeResult,
+                    true,
+                    Math.random() > 0.6,
+                    config.scoring,
+                    isPowerSetup
+                  );
+
+                  state.lastScore = scoreResult.score;
+                  state.lastScoreTier = scoreResult.tier;
+
+                  if (scoreResult.tier === "pass") {
+                    state.signalState = "IDLE";
+                    continue;
+                  }
+
+                  const signalData = {
+                    ticker: state.ticker,
+                    state: "BREAKOUT" as const,
+                    resistanceLevel: Number(state.resistanceLevel.toFixed(2)),
+                    currentPrice: Number(state.price.toFixed(2)),
+                    breakoutPrice: Number(state.price.toFixed(2)),
+                    breakoutVolume: boCandle.volume,
+                    trendConfirmed: biasResult.aligned,
+                    volumeConfirmed: breakoutResult.metrics.volumeMultiplier >= 0.8,
+                    atrExpansion: true,
+                    timeframe: "5m",
+                    rvol: Number(state.rvol.toFixed(2)),
+                    atrValue: Number(state.atr14.toFixed(4)),
+                    rejectionCount: rejections,
+                    score: scoreResult.score,
+                    scoreTier: scoreResult.tier,
+                    marketRegime: regimeResult.chopping ? "choppy" : regimeResult.aligned ? "aligned" : "misaligned",
+                    spyAligned: regimeResult.aligned,
+                    volatilityGatePassed: volGateResult.passes,
+                    scoreBreakdown: scoreResult.breakdown,
+                    relStrengthVsSpy: Number(relStrengthVsSpy.toFixed(4)),
+                    isPowerSetup,
+                    notes: `SETUP forming: Breakout above $${state.resistanceLevel.toFixed(2)}. Score ${scoreResult.score}/100. RVOL ${state.rvol.toFixed(1)}x. SPY ${regimeResult.aligned ? "aligned" : "misaligned"}.`,
+                  };
+
+                  broadcast("signal_update", signalData);
                   await storage.createSignal({ userId, ...signalData });
                   await storage.createAlert({
                     userId,
                     ticker: state.ticker,
                     type: "SETUP",
                     title: `SETUP forming (Score ${scoreResult.score})`,
-                    message: `${state.ticker} breakout above $${state.resistanceLevel.toFixed(2)}. Score ${scoreResult.score}/100 (${scoreResult.tier}). RVOL ${state.rvol.toFixed(1)}x. 15m bias ${biasResult.confirmations}/3.`,
+                    message: `${state.ticker} breakout above $${state.resistanceLevel.toFixed(2)}.`,
                     priority: "high",
                     isRead: false,
                   });
-                } catch (e) {}
+                }
               }
             }
-          }
-        }
 
-        if (state.signalState === "BREAKOUT" && state.resistanceLevel && state.breakoutCandle) {
-          let retCandle: Candle;
+            if (state.signalState === "BREAKOUT" && state.resistanceLevel && state.breakoutCandle) {
+              let retCandle: Candle;
+              if (currentDataSource === "live") {
+                retCandle = state.bars5m.length > 0 ? state.bars5m[state.bars5m.length - 1] : candle;
+              } else {
+                retCandle = createRetestCandle(state, state.resistanceLevel);
+                state.bars5m.push(retCandle);
+                if (state.bars5m.length > 200) state.bars5m.shift();
+                state.barCount++;
+                state.vwap = calculateVWAP(state.bars5m);
+                state.atr14 = calculateATR(state.bars5m, 14);
+              }
 
-          if (currentDataSource === "live") {
-            retCandle = state.bars5m.length > 0 ? state.bars5m[state.bars5m.length - 1] : candle;
-          } else {
-            retCandle = createRetestCandle(state, state.resistanceLevel);
-            state.bars5m.push(retCandle);
-            if (state.bars5m.length > 200) state.bars5m.shift();
-            state.barCount++;
-            state.vwap = calculateVWAP(state.bars5m);
-            state.atr14 = calculateATR(state.bars5m, 14);
-          }
+              state.signalState = "RETEST";
+              state.retestSwingLow = retCandle.low;
+              state.retestBars = [retCandle];
 
-          state.signalState = "RETEST";
-          state.retestSwingLow = retCandle.low;
-          state.retestBars = [retCandle];
-
-          broadcast("signal_update", {
-            ticker: state.ticker,
-            state: "RETEST",
-            resistanceLevel: state.resistanceLevel,
-            price: state.price,
-          });
-
-          const retestUserIds = Array.from(activeUserIds);
-          for (const userId of retestUserIds) {
-            try {
+              broadcast("signal_update", { ticker: state.ticker, state: "RETEST", resistanceLevel: state.resistanceLevel, price: state.price });
               await storage.createAlert({
-                userId,
-                ticker: state.ticker,
-                type: "RETEST",
-                title: "Retest in Progress",
-                message: `${state.ticker} pulling back to $${state.resistanceLevel.toFixed(2)} breakout level.`,
-                priority: "medium",
-                isRead: false,
+                userId, ticker: state.ticker, type: "RETEST",
+                title: "Retest in Progress", message: `${state.ticker} pulling back to $${state.resistanceLevel.toFixed(2)}.`,
+                priority: "medium", isRead: false,
               });
-            } catch (e) {}
-          }
-        }
+            }
 
-        if (state.signalState === "RETEST" && state.resistanceLevel && state.breakoutCandle) {
-          state.retestBars.push(candle);
-          if (state.low < (state.retestSwingLow ?? state.low)) {
-            state.retestSwingLow = state.low;
-          }
+            if (state.signalState === "RETEST" && state.resistanceLevel && state.breakoutCandle) {
+              state.retestBars.push(candle);
+              if (state.low < (state.retestSwingLow ?? state.low)) state.retestSwingLow = state.low;
 
-          const retestResult = checkRetestRules(
-            candle,
-            state.breakoutCandle,
-            state.retestBars,
-            state.resistanceLevel,
-            state.bars5m,
-            DEMO_CONFIG.retest
-          );
+              const retestResult = checkRetestRules(candle, state.breakoutCandle, state.retestBars, state.resistanceLevel, state.bars5m, config.retest);
 
-          if (!retestResult.valid) {
-            state.signalState = "IDLE";
-            state.breakoutCandle = null;
-            state.retestBars = [];
-            state.resistanceLevel = null;
-            state.retestSwingLow = null;
-            continue;
-          }
+              if (retestResult.valid && retestResult.entryPrice && retestResult.stopPrice && passesStrategy) {
+                const riskPerShare = Math.abs(retestResult.entryPrice - retestResult.stopPrice);
+                const dollarRiskPerTrade = (user.accountSize ?? 100000) * (config.risk.perTradeRiskPct / 100);
+                let shares = Math.floor(dollarRiskPerTrade / riskPerShare);
+                
+                const isPowerSetup = config.powerSetupEnabled && breakoutResult.metrics.volumeMultiplier >= 2.0 && relStrengthVsSpy > 0;
+                if (isPowerSetup) shares = Math.floor(shares * 1.25);
 
-          state.signalState = "TRIGGERED";
+                const maxPosSize = (user.accountSize ?? 100000) * (config.risk.maxPositionPct / 100);
+                if (shares * retestResult.entryPrice > maxPosSize) shares = Math.floor(maxPosSize / retestResult.entryPrice);
 
-          const entryPrice = Number((state.resistanceLevel * 1.001).toFixed(2));
-          const stopPrice = Number((state.resistanceLevel * 0.993).toFixed(2));
-          const risk = entryPrice - stopPrice;
-          const target1 = Number((entryPrice + risk).toFixed(2));
-          const target2 = Number((entryPrice + risk * 2.5).toFixed(2));
-          const riskReward = risk > 0 ? (target2 - entryPrice) / risk : 0;
-
-          const prevCandle = state.bars5m.length >= 2 ? state.bars5m[state.bars5m.length - 2] : undefined;
-          const pattern = detectCandlePattern(candle, prevCandle) || "Bullish Engulfing";
-
-          const atrExpanding = true;
-          const scoreResult = computeScore(
-            state.rvol,
-            biasResult,
-            state.breakoutCandle ? state.breakoutCandle.volume / (Math.max(candle.volume, 1)) : 2.0,
-            true,
-            regimeResult,
-            atrExpanding,
-            Math.random() > 0.5,
-            DEMO_CONFIG.scoring
-          );
-
-          state.lastScore = scoreResult.score;
-          state.lastScoreTier = scoreResult.tier;
-
-          if (scoreResult.tier === "pass") {
-            state.signalState = "IDLE";
-            state.breakoutCandle = null;
-            state.retestBars = [];
-            state.resistanceLevel = null;
-            state.retestSwingLow = null;
-            continue;
-          }
-
-          const regimeSizeMultiplier = regimeResult.sizeMultiplier;
-          const scoreSizeMultiplier = scoreResult.sizeMultiplier;
-          const combinedSizeMultiplier = regimeSizeMultiplier * scoreSizeMultiplier;
-
-          const stopBasis = Math.random() > 0.5 ? "VWAP" : "retest_low";
-          const entryModeUsed = DEMO_CONFIG.retest.entryMode;
-
-          const triggerData = {
-            ticker: state.ticker,
-            state: "TRIGGERED" as const,
-            resistanceLevel: Number(state.resistanceLevel.toFixed(2)),
-            entryPrice,
-            stopPrice,
-            target1,
-            target2,
-            riskReward: Number(riskReward.toFixed(2)),
-            currentPrice: entryPrice,
-            trendConfirmed: biasResult.aligned,
-            volumeConfirmed: true,
-            atrExpansion: atrExpanding,
-            candlePattern: pattern,
-            timeframe: "5m",
-            rvol: Number(state.rvol.toFixed(2)),
-            atrValue: Number(state.atr14.toFixed(4)),
-            score: scoreResult.score,
-            scoreTier: scoreResult.tier,
-            marketRegime: regimeResult.chopping ? "choppy" : regimeResult.aligned ? "aligned" : "misaligned",
-            entryMode: entryModeUsed,
-            stopBasis,
-            spyAligned: regimeResult.aligned,
-            volatilityGatePassed: volGateResult.passes,
-            scoreBreakdown: scoreResult.breakdown,
-            notes: `TRIGGER at $${entryPrice}${pattern ? ` (${pattern})` : ""}. Stop $${stopPrice} (${stopBasis}). T1 $${target1} (+1R, partial 50%). T2 $${target2} (+2.5R trail). Score ${scoreResult.score}/100. RVOL ${state.rvol.toFixed(1)}x. Size ${(combinedSizeMultiplier * 100).toFixed(0)}%. Entry: ${entryModeUsed}.`,
-          };
-
-          broadcast("signal_update", triggerData);
-
-          const userIds = Array.from(activeUserIds);
-          for (const userId of userIds) {
-            try {
-              const signal = await storage.createSignal({ userId, ...triggerData });
-
-              await storage.createAlert({
-                userId,
-                ticker: state.ticker,
-                type: "TRIGGER",
-                title: `TRIGGER hit - Score ${scoreResult.score} (${scoreResult.tier})${pattern ? ` - ${pattern}` : ""}`,
-                message: `${state.ticker} triggered at $${entryPrice}. Stop $${stopPrice}. T1 $${target1}. T2 $${target2}. R:R ${riskReward.toFixed(1)}. RVOL ${state.rvol.toFixed(1)}x. ${entryModeUsed} entry.`,
-                priority: "high",
-                isRead: false,
-                signalId: signal.id,
-              });
-
-              const user = await storage.getUser(userId);
-              if (user && user.paperMode) {
-                const config = buildConfigFromUser(user);
-                const accountSize = user.accountSize ?? 100000;
-                const riskPct = config.risk.perTradeRiskPct / 100;
-                const dollarRisk = accountSize * riskPct;
-                let shares = risk > 0 ? Math.floor(dollarRisk / risk) : 0;
-                const maxPositionValue = accountSize * (config.risk.maxPositionPct / 100);
-                if (shares * entryPrice > maxPositionValue) {
-                  shares = Math.floor(maxPositionValue / entryPrice);
-                }
-                shares = Math.max(Math.floor(shares * combinedSizeMultiplier), 1);
                 if (shares > 0) {
-                  const timeStopMinutes = config.risk.timeStopMinutes;
-                  const timeStopAt = new Date(Date.now() + timeStopMinutes * 60 * 1000);
-                  await storage.createTrade({
-                    userId,
-                    signalId: signal.id,
-                    ticker: state.ticker,
-                    side: "long",
-                    entryPrice,
-                    stopPrice,
-                    originalStopPrice: stopPrice,
-                    target1,
-                    target2,
-                    shares,
-                    status: "open",
-                    dollarRisk: Number((shares * risk).toFixed(2)),
-                    timeStopAt,
-                    score: scoreResult.score,
-                    scoreTier: scoreResult.tier,
-                    entryMode: entryModeUsed,
+                  state.signalState = "TRIGGERED";
+                  const target1 = retestResult.entryPrice + (riskPerShare * config.exits.partialAtR);
+                  const target2 = retestResult.entryPrice + (riskPerShare * 2.5);
+
+                  const trade = await storage.createTrade({
+                    userId, ticker: state.ticker, side: "long",
+                    entryPrice: retestResult.entryPrice, stopPrice: retestResult.stopPrice,
+                    originalStopPrice: retestResult.stopPrice, target1, target2, shares,
+                    status: "open", score: state.lastScore, scoreTier: state.lastScoreTier,
+                    entryMode: config.retest.entryMode, dollarRisk: shares * riskPerShare,
+                    isPowerSetup,
+                  });
+
+                  broadcast("trade_update", trade);
+                  await storage.createAlert({
+                    userId, ticker: state.ticker, type: "TRIGGER",
+                    title: `TRIGGER hit - Score ${state.lastScore}`,
+                    message: `${state.ticker} triggered at $${retestResult.entryPrice.toFixed(2)}.`,
+                    priority: "high", isRead: false,
                   });
                 }
               }
-            } catch (e) {}
-          }
+            }
 
-          setTimeout(() => {
-            state.signalState = "IDLE";
-            state.breakoutCandle = null;
-            state.retestBars = [];
-            state.resistanceLevel = null;
-            state.retestSwingLow = null;
-          }, 15000);
-        }
-
-        {
-          const userIds = Array.from(activeUserIds);
-          for (const userId of userIds) {
-            try {
-              const trades = await storage.getTrades(userId);
-              const openTrades = trades.filter(
-                (t) => t.status === "open" && t.ticker === state.ticker
+            const openTrades = trades.filter((t) => t.status === "open" && t.ticker === state.ticker);
+            for (const trade of openTrades) {
+              const minutesSinceEntry = Math.floor((Date.now() - new Date(trade.enteredAt!).getTime()) / 60000);
+              const riskPerShare = Math.abs(trade.entryPrice - trade.stopPrice);
+              
+              const exitDecision = checkExitRules(
+                candle, state.bars5m, trade.entryPrice, trade.stopPrice, trade.shares,
+                trade.isPartiallyExited ?? false, riskPerShare, minutesSinceEntry,
+                config.exits, config.risk, config.riskMode, state.atr14
               );
-              for (const trade of openTrades) {
-                const riskPerShare = trade.entryPrice - (trade.originalStopPrice ?? trade.stopPrice);
-                const minutesSinceEntry = trade.enteredAt
-                  ? Math.floor((Date.now() - new Date(trade.enteredAt).getTime()) / 60000)
-                  : 0;
 
-                const exitDecision = checkExitRules(
-                  candle,
-                  state.bars5m,
-                  trade.entryPrice,
-                  trade.stopPrice,
-                  trade.shares,
-                  trade.isPartiallyExited ?? false,
-                  riskPerShare,
-                  minutesSinceEntry,
-                  DEMO_CONFIG.exits,
-                  DEMO_CONFIG.risk
-                );
-
-                if (exitDecision.shouldExit && exitDecision.exitType === "partial" && exitDecision.partialShares) {
-                  const runnerShares = trade.shares - exitDecision.partialShares;
+              if (exitDecision.shouldExit) {
+                if (exitDecision.exitType === "partial") {
                   await storage.updateTrade(trade.id, {
-                    isPartiallyExited: true,
-                    partialExitPrice: exitDecision.exitPrice,
-                    partialExitShares: exitDecision.partialShares,
-                    stopPrice: exitDecision.newStopPrice ?? trade.stopPrice,
-                    stopMovedToBE: true,
-                    runnerShares,
+                    isPartiallyExited: true, partialExitPrice: exitDecision.exitPrice!,
+                    partialExitShares: exitDecision.partialShares!, stopPrice: exitDecision.newStopPrice!,
+                    runnerShares: trade.shares - exitDecision.partialShares!,
                   });
-                  await storage.createAlert({
-                    userId,
-                    ticker: state.ticker,
-                    type: "PARTIAL_EXIT",
-                    title: `Partial Exit - ${exitDecision.partialShares} shares`,
-                    message: exitDecision.reason,
-                    priority: "medium",
-                    isRead: false,
-                  });
-                } else if (exitDecision.shouldExit && exitDecision.exitType !== "partial") {
-                  const exitPrice = exitDecision.exitPrice ?? state.price;
-                  const pnl = (exitPrice - trade.entryPrice) * trade.shares;
-                  const pnlPct = ((exitPrice - trade.entryPrice) / trade.entryPrice) * 100;
-                  const rMult = riskPerShare > 0 ? (exitPrice - trade.entryPrice) / riskPerShare : 0;
+                } else {
+                  const pnl = (exitDecision.exitPrice! - trade.entryPrice) * trade.shares;
+                  const realizedR = (exitDecision.exitPrice! - trade.entryPrice) / riskPerShare;
                   await storage.updateTrade(trade.id, {
-                    status: "closed",
-                    exitPrice,
-                    pnl: Number(pnl.toFixed(2)),
-                    pnlPercent: Number(pnlPct.toFixed(2)),
-                    rMultiple: Number(rMult.toFixed(2)),
-                    exitReason: exitDecision.exitType ?? "unknown",
-                    exitedAt: new Date(),
+                    status: "closed", exitPrice: exitDecision.exitPrice!, exitedAt: new Date(),
+                    exitReason: exitDecision.exitType!, pnl, realizedR,
+                    pnlPercent: ((exitDecision.exitPrice! - trade.entryPrice) / trade.entryPrice) * 100,
                   });
-                  await storage.createAlert({
-                    userId,
-                    ticker: state.ticker,
-                    type: "EXIT",
-                    title: `Exit - ${exitDecision.exitType}`,
-                    message: `${state.ticker} closed at $${exitPrice.toFixed(2)}. P&L $${pnl.toFixed(2)} (${rMult.toFixed(1)}R). ${exitDecision.reason}`,
-                    priority: pnl >= 0 ? "low" : "high",
-                    isRead: false,
-                  });
-
-                  try {
-                    const userObj = await storage.getUser(userId);
-                    const baseBalance = userObj?.accountSize ?? 100000;
-                    const allTrades = await storage.getTrades(userId);
-                    const totalClosedPnl = allTrades
-                      .filter((t) => t.status === "closed" && t.pnl != null)
-                      .reduce((sum, t) => sum + (t.pnl ?? 0), 0);
-                    const currentBalance = baseBalance + totalClosedPnl;
-                    await storage.upsertDailySummary(userId, Number(pnl.toFixed(2)), pnl >= 0, currentBalance);
-                  } catch (e) {
-                    log(`Error updating daily summary: ${e}`, "simulator");
-                  }
-                } else if (!exitDecision.shouldExit && exitDecision.newStopPrice) {
-                  await storage.updateTrade(trade.id, {
-                    trailingStopPrice: exitDecision.newStopPrice,
-                    stopPrice: exitDecision.newStopPrice,
-                  });
+                  await storage.upsertDailySummary(userId, pnl, pnl >= 0, (user.accountSize ?? 100000) + pnl);
                 }
+              } else if (exitDecision.newStopPrice) {
+                await storage.updateTrade(trade.id, { stopPrice: exitDecision.newStopPrice });
               }
-            } catch (e) {}
-          }
+            }
+          } catch (e) {}
         }
       }
     }
 
     broadcast("price_update", priceUpdates);
+    broadcast("market_status", { isOpen: marketIsOpen, isLunchChop: isLunchChop(), spyAligned: regimeResult.aligned, spyChopping: regimeResult.chopping });
   }, 2000);
-
-  setInterval(() => {
-    const now = new Date();
-    const est = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
-    const hours = est.getHours();
-    const minutes = est.getMinutes();
-    const totalMin = hours * 60 + minutes;
-    const day = est.getDay();
-    const isOpen = totalMin >= 570 && totalMin < 960 && day >= 1 && day <= 5;
-    const isLunch = totalMin >= 690 && totalMin < 810;
-
-    const spyState2 = priceStates.get("SPY");
-    const regimeResult2 = checkMarketRegime(spyState2?.bars5m ?? [], DEMO_CONFIG.marketRegime);
-
-    broadcast("market_status", {
-      isOpen: isOpen || currentDataSource === "simulated",
-      isLunchChop: isLunch,
-      time: est.toISOString(),
-      spyAligned: regimeResult2.aligned,
-      spyChopping: regimeResult2.chopping,
-      dataSource: currentDataSource,
-      liveConnected: alpacaStream?.isConnected() ?? false,
-    });
-  }, 30000);
-
-  log("Simulated market data feed started", "simulator");
 }

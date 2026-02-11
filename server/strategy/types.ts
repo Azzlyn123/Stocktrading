@@ -61,6 +61,8 @@ export interface StrategyConfig {
     timeStopMinutes: number;
     timeStopR: number;
   };
+  riskMode: "conservative" | "balanced" | "aggressive";
+  powerSetupEnabled: boolean;
 }
 
 export interface UniverseFilterResult {
@@ -171,4 +173,9 @@ export interface SignalDecision {
   target2: number | null;
   shares: number | null;
   notes: string;
+  isPowerSetup: boolean;
+  relStrengthVsSpy: number;
+  createdAt: Date | null;
+  updatedAt: Date | null;
+  closedAt: Date | null;
 }

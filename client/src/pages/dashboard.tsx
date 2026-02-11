@@ -149,9 +149,12 @@ export default function Dashboard() {
 
   const todayPnl = todayClosedTrades.reduce((sum, t) => sum + (t.pnl ?? 0), 0);
   const todayTradeCount = todayClosedTrades.length;
+  const todayNetR = todayClosedTrades.reduce((sum, t) => sum + (t.realizedR ?? 0), 0);
   const winCount = todayClosedTrades.filter((t) => (t.pnl ?? 0) > 0).length;
+  const lossCount = todayClosedTrades.filter((t) => (t.pnl ?? 0) < 0).length;
   const winRate = todayTradeCount > 0 ? (winCount / todayTradeCount) * 100 : 0;
   const totalPnl = allClosedTrades.reduce((sum, t) => sum + (t.pnl ?? 0), 0);
+  const tradingLocked = lossCount >= (user?.maxLosingTrades ?? 3) || todayNetR <= -3;
   const recentAlerts = (alerts ?? []).slice(0, 6);
 
   const equityCurve: { date: string; balance: number }[] = [];
@@ -212,18 +215,18 @@ export default function Dashboard() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Badge
-            variant={marketOpen ? "default" : "secondary"}
-            className="gap-1"
-            data-testid="badge-market-status"
-          >
-            <span
-              className={`w-1.5 h-1.5 rounded-full ${
-                marketOpen ? "bg-emerald-400" : "bg-muted-foreground"
-              }`}
-            />
-            {marketOpen ? "Market Open" : "Market Closed"}
-          </Badge>
+            <Badge
+              variant={marketOpen && !tradingLocked ? "default" : "secondary"}
+              className="gap-1"
+              data-testid="badge-market-status"
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  marketOpen && !tradingLocked ? "bg-emerald-400" : "bg-muted-foreground"
+                }`}
+              />
+              {tradingLocked ? "Trading Locked" : marketOpen ? "Market Open" : "Market Closed"}
+            </Badge>
           <Badge variant={isConnected ? "default" : "destructive"} className="gap-1">
             <span
               className={`w-1.5 h-1.5 rounded-full ${
@@ -284,7 +287,7 @@ export default function Dashboard() {
             <StatCard
               label="Today's P&L"
               value={formatCurrency(todayPnl)}
-              subValue={`${todayTradeCount} trades today`}
+              subValue={`${todayTradeCount} trades | ${todayNetR.toFixed(1)}R`}
               icon={todayPnl >= 0 ? TrendingUp : TrendingDown}
               trend={todayPnl >= 0 ? "up" : "down"}
             />

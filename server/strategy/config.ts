@@ -54,6 +54,8 @@ export const DEFAULT_STRATEGY_CONFIG: StrategyConfig = {
     timeStopMinutes: 30,
     timeStopR: 0.5,
   },
+  riskMode: "balanced",
+  powerSetupEnabled: true,
 };
 
 export function buildConfigFromUser(user: any): StrategyConfig {
@@ -95,6 +97,8 @@ export function buildConfigFromUser(user: any): StrategyConfig {
       fullSizeMin: user.scoreFullSizeMin ?? 80,
       halfSizeMin: user.scoreHalfSizeMin ?? 65,
     },
+    riskMode: (user.riskMode as "conservative" | "balanced" | "aggressive") ?? "balanced",
+    powerSetupEnabled: user.powerSetupEnabled ?? true,
     exits: {
       partialAtR: user.partialExitR ?? 1.0,
       partialPct: user.partialExitPct ?? 50,

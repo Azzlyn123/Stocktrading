@@ -1,4 +1,4 @@
-import type { Candle, StrategyConfig, ExitDecision } from "./types";
+import type { StrategyConfig, ExitDecision, Candle } from "./types";
 import { lastEMA, isRedCandle } from "./indicators";
 
 export function checkExitRules(
@@ -11,12 +11,42 @@ export function checkExitRules(
   riskPerShare: number,
   minutesSinceEntry: number,
   config: StrategyConfig["exits"],
-  riskConfig: StrategyConfig["risk"]
+  riskConfig: StrategyConfig["risk"],
+  riskMode: StrategyConfig["riskMode"],
+  currentAtr: number
 ): ExitDecision {
   const currentPrice = currentCandle.close;
   const pnlR = riskPerShare > 0 ? (currentPrice - entryPrice) / riskPerShare : 0;
 
-  if (!isPartiallyExited && pnlR >= config.partialAtR) {
+  // Mode-based targets
+  let firstTP = config.partialAtR;
+  let runnerTargetR = 2.5; // Balanced default
+
+  if (riskMode === "conservative") {
+    firstTP = 1.5;
+    runnerTargetR = 2.0;
+  } else if (riskMode === "balanced") {
+    firstTP = 1.5;
+    runnerTargetR = 2.5;
+  } else if (riskMode === "aggressive") {
+    firstTP = 1.25;
+    runnerTargetR = 3.0;
+  }
+
+  // 1. Target Reached
+  if (pnlR >= runnerTargetR) {
+    return {
+      shouldExit: true,
+      exitType: "target",
+      exitPrice: currentPrice,
+      reason: `Final target reached at +${pnlR.toFixed(1)}R`,
+      partialShares: null,
+      newStopPrice: null,
+    };
+  }
+
+  // 2. Partial Exit
+  if (!isPartiallyExited && pnlR >= firstTP) {
     const partialShares = Math.floor(shares * (config.partialPct / 100));
     return {
       shouldExit: true,
@@ -24,23 +54,25 @@ export function checkExitRules(
       exitPrice: currentPrice,
       reason: `Partial exit at +${pnlR.toFixed(1)}R`,
       partialShares,
-      newStopPrice: entryPrice,
+      newStopPrice: entryPrice, // Move to Breakeven
     };
   }
 
+  // 3. Time Stop
   if (riskConfig.timeStopMinutes > 0 && minutesSinceEntry >= riskConfig.timeStopMinutes) {
     if (pnlR < riskConfig.timeStopR) {
       return {
         shouldExit: true,
         exitType: "time_stop",
         exitPrice: currentPrice,
-        reason: `Time stop: ${minutesSinceEntry}min elapsed, only +${pnlR.toFixed(1)}R (need +${riskConfig.timeStopR}R)`,
+        reason: `Time stop: ${minutesSinceEntry}min elapsed, only +${pnlR.toFixed(1)}R`,
         partialShares: null,
         newStopPrice: null,
       };
     }
   }
 
+  // 4. Hard Stop
   if (currentPrice <= stopPrice) {
     return {
       shouldExit: true,
@@ -52,6 +84,7 @@ export function checkExitRules(
     };
   }
 
+  // 5. 2 Red Candle Exit (if not aggressive or per config)
   if (config.hardExitRedCandles > 0 && recentBars5m.length >= config.hardExitRedCandles) {
     const lastN = recentBars5m.slice(-config.hardExitRedCandles);
     const allRed = lastN.every(isRedCandle);
@@ -62,7 +95,7 @@ export function checkExitRules(
           shouldExit: true,
           exitType: "hard_exit",
           exitPrice: currentPrice,
-          reason: `Hard exit: ${config.hardExitRedCandles} red 5m candles with increasing volume`,
+          reason: `Hard exit: ${config.hardExitRedCandles} red candles with volume`,
           partialShares: null,
           newStopPrice: null,
         };
@@ -70,23 +103,30 @@ export function checkExitRules(
     }
   }
 
+  // 6. Trailing Stop
   let newTrailingStop: number | null = null;
 
   if (isPartiallyExited) {
+    // Mode specific trailing
+    if (riskMode === "aggressive" && pnlR >= firstTP) {
+      const atrTrail = currentPrice - 2 * currentAtr;
+      if (atrTrail > stopPrice) {
+        newTrailingStop = atrTrail;
+      }
+    }
+
     if (config.useEMA9Trail && recentBars5m.length >= 9) {
       const closes = recentBars5m.map((c) => c.close);
       const ema9 = lastEMA(closes, 9);
       if (ema9 > stopPrice) {
-        newTrailingStop = ema9;
+        newTrailingStop = newTrailingStop ? Math.max(newTrailingStop, ema9) : ema9;
       }
     }
 
     if (config.usePriorLowTrail && recentBars5m.length >= 2) {
       const priorLow = recentBars5m[recentBars5m.length - 2].low;
       if (priorLow > stopPrice) {
-        newTrailingStop = newTrailingStop
-          ? Math.max(newTrailingStop, priorLow)
-          : priorLow;
+        newTrailingStop = newTrailingStop ? Math.max(newTrailingStop, priorLow) : priorLow;
       }
     }
   }

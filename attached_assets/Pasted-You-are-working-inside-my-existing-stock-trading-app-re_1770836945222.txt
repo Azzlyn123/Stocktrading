@@ -1,0 +1,101 @@
+You are working inside my existing stock trading app repo. Do NOT ask me to manually paste code into files. Instead, inspect the repo, find where trades/signals/risk are handled, and implement the following features end-to-end with minimal changes to existing architecture. If multiple approaches exist, choose the simplest that fits the current codebase.
+
+GOAL:
+Add controlled-aggression risk upgrades that increase upside while keeping success rate >50% by using:
+1) Risk Mode (Aggression Dial)
+2) Partial take profit + runner
+3) Daily max loss guardrails using R-multiples
+4) One “Power Setup” per day with small risk boost
+5) Relative strength (vs SPY) filter
+6) Time-of-day trading windows
+
+REQUIREMENTS:
+- Must work even if the system currently tracks only dollars; compute R when possible.
+- For every trade, require/ensure stopPrice exists to compute risk; if missing, block entry and show reason.
+- Add unit tests for the new logic (or the closest equivalent in this repo).
+- Add UI controls if the app has UI; if headless, add config settings + logs.
+
+DEFINITIONS:
+- riskPerShare = abs(entryPrice - stopPrice)
+- riskDollars = riskPerShare * qty
+- R_multiple = pnlDollars / riskDollars
+- Daily guardrail: disable new entries if (lossCount >= 3) OR (netR <= -3). If netR can’t be computed, fallback to netPnL <= -dailyLossDollars (create setting).
+- Relative strength filter (longs): require relStrengthVsSpy > 0 (stock outperforming SPY on the day).
+- Time windows (minutes since market open):
+  - 9:45–11:00 ET  => 15–90 minutes after open
+  - 2:30–3:45 ET  => 240–375 minutes after open
+  Use exchange timezone; if the repo already has a market clock, reuse it.
+
+RISK MODES (configurable):
+- CONSERVATIVE:
+  - minDollarVolume: 100M
+  - requireVolumeSpike: true
+  - requireATRExpansion: true
+  - targets: firstTP=+1.5R (sell 50%), runnerTarget=+2.0R, move stop to breakeven after first TP
+- BALANCED (default):
+  - minDollarVolume: 50M
+  - requireVolumeSpike: true
+  - requireATRExpansion: false
+  - targets: firstTP=+1.5R (sell 50%), runnerTarget=+2.5R, move stop to breakeven
+- AGGRESSIVE:
+  - minDollarVolume: 30M
+  - requireVolumeSpike: true
+  - requireATRExpansion: false
+  - targets: firstTP=+1.25R (sell 50%), runnerTarget=+3.0R, move stop to breakeven
+  - trailing stop after +1.25R using ATR trail (trailStop = lastPrice - 2*ATR for longs)
+
+PARTIAL + RUNNER MANAGEMENT:
+On each price update for an OPEN position:
+- Compute R_now (long):
+  R_now = (lastPrice - entryPrice) / (entryPrice - stopPrice)
+- If firstPartialFilled=false and R_now >= firstTP:
+  - Place/queue order to close 50% (or simulate if paper)
+  - Mark firstPartialFilled=true
+  - Move stop to entryPrice (breakeven)
+- Runner exits at runnerTarget OR trailing stop hit (if enabled in mode).
+- Ensure trade state persists (DB/state store).
+
+POWER SETUP (once/day):
+- Add a boolean “isPowerSetupCandidate” on signals OR compute from score.
+- Criteria (simple if data exists):
+  - volumeSpike=true
+  - relStrengthVsSpy > 0
+  - setupScore >= 80 (if score exists; otherwise skip score requirement)
+- Allow only 1 power setup per trading day:
+  - riskMultiplier=1.25 applied ONLY to position sizing for that entry
+  - Track powerSetupUsedByDate in state (reset each new trading day)
+
+UI/SETTINGS:
+If UI exists, add:
+- Risk Mode selector (Conservative/Balanced/Aggressive)
+- Toggle: “Enable Power Setup”
+- Readout: today’s netR, lossCount, and whether trading is locked due to guardrails
+- In each signal card, show why it was blocked (time window, RS filter, liquidity, etc.)
+
+IMPLEMENTATION STEPS (do these automatically):
+1) Search the repo for trade models and order execution logic. Identify where entry/stop/qty are stored.
+2) Add/extend trade schema with: firstPartialFilled, runnerQty, currentStop, realizedR, dayKey.
+3) Add a RiskManager module that tracks:
+   - netR for the day
+   - lossCount for the day
+   - tradingLocked boolean
+   - powerSetupUsed for the day
+4) Add a SignalFilter module applying:
+   - time windows
+   - minDollarVolume
+   - ATR expansion and/or volume spike (based on mode)
+   - relStrengthVsSpy > 0
+5) Add a TradeManager module for partial/runner/trailing.
+6) Wire these modules into the existing signal -> entry -> order -> position lifecycle.
+7) Add tests for:
+   - R calculation
+   - daily lockout (lossCount and netR)
+   - partial fills and BE stop behavior
+   - power setup one-per-day constraint
+8) Ensure everything runs without breaking existing features.
+
+DELIVERABLE:
+Commit the changes and provide a short summary of:
+- files changed/added
+- how to switch modes
+- where netR/lossCount are computed and displayed

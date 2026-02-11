@@ -71,6 +71,8 @@ export const users = pgTable("users", {
   volGateAtrMultiplier: real("vol_gate_atr_multiplier").default(1.3),
   scoreFullSizeMin: integer("score_full_size_min").default(80),
   scoreHalfSizeMin: integer("score_half_size_min").default(65),
+  riskMode: text("risk_mode").default("balanced"), 
+  powerSetupEnabled: boolean("power_setup_enabled").default(true),
 });
 
 export const watchlistItems = pgTable("watchlist_items", {
@@ -122,6 +124,8 @@ export const signals = pgTable("signals", {
   spyAligned: boolean("spy_aligned").default(false),
   volatilityGatePassed: boolean("volatility_gate_passed").default(false),
   scoreBreakdown: jsonb("score_breakdown"),
+  relStrengthVsSpy: real("rel_strength_vs_spy"),
+  isPowerSetup: boolean("is_power_setup").default(false),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
   closedAt: timestamp("closed_at"),
@@ -171,6 +175,8 @@ export const paperTrades = pgTable("paper_trades", {
   score: integer("score"),
   scoreTier: text("score_tier"),
   entryMode: text("entry_mode"),
+  isPowerSetup: boolean("is_power_setup").default(false),
+  realizedR: real("realized_r").default(0),
 });
 
 export const dailySummaries = pgTable("daily_summaries", {
@@ -266,6 +272,8 @@ export const settingsUpdateSchema = z.object({
   volGateAtrMultiplier: z.number().min(1).max(3).optional(),
   scoreFullSizeMin: z.number().min(50).max(100).optional(),
   scoreHalfSizeMin: z.number().min(30).max(90).optional(),
+  riskMode: z.enum(["conservative", "balanced", "aggressive"]).optional(),
+  powerSetupEnabled: z.boolean().optional(),
 });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;

@@ -8,7 +8,8 @@ export function computeScore(
   regime: MarketRegimeResult,
   atrExpanding: boolean,
   hasCatalyst: boolean,
-  config: StrategyConfig["scoring"]
+  config: StrategyConfig["scoring"],
+  isPowerSetup: boolean = false
 ): ScoreResult {
   let rvolPoints = 0;
   if (rvol >= config.rvolThreshold) rvolPoints = 20;
@@ -28,7 +29,7 @@ export function computeScore(
 
   const catalystPoints = hasCatalyst ? 5 : 0;
 
-  const score =
+  let score =
     rvolPoints +
     trendPoints +
     breakoutVolumePoints +
@@ -37,11 +38,13 @@ export function computeScore(
     atrPoints +
     catalystPoints;
 
+  if (isPowerSetup) score = Math.min(100, score + 10);
+
   let tier: "full" | "half" | "pass";
   let sizeMultiplier: number;
   if (score >= config.fullSizeMin) {
     tier = "full";
-    sizeMultiplier = 1.0;
+    sizeMultiplier = isPowerSetup ? 1.25 : 1.0;
   } else if (score >= config.halfSizeMin) {
     tier = "half";
     sizeMultiplier = 0.5;
