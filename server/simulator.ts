@@ -61,41 +61,41 @@ const SIMULATED_TICKERS: SimulatedTicker[] = [
 
 const DEMO_CONFIG: StrategyConfig = {
   universe: {
-    minPrice: 5,
-    minAvgDollarVolume: 1_000_000,
-    maxSpreadPct: 1.0,
-    minDailyATRpct: 0.1,
-    minRVOL: 0.1,
+    minPrice: 10,
+    minAvgDollarVolume: 100_000_000,
+    maxSpreadPct: 0.05,
+    minDailyATRpct: 1.2,
+    minRVOL: 1.5,
     rvolCutoffMinutes: 60,
   },
   higherTimeframe: {
-    requiredConfirmations: 0,
+    requiredConfirmations: 2,
   },
   breakout: {
-    minBodyPct: 0.10,
-    minVolumeMultiplier: 0.1,
-    minRangeMultiplier: 0.1,
-    bufferPct: 0.01,
+    minBodyPct: 0.55,
+    minVolumeMultiplier: 1.5,
+    minRangeMultiplier: 1.0,
+    bufferPct: 0.02,
   },
   retest: {
-    maxPullbackPct: 95,
-    tolerancePct: 2.0,
-    entryMode: "aggressive" as const,
+    maxPullbackPct: 55,
+    tolerancePct: 1.0,
+    entryMode: "conservative" as const,
   },
   marketRegime: {
-    maxVwapCrosses: 50,
-    vwapCrossWindowMinutes: 60,
-    chopSizeReduction: 1.0,
+    maxVwapCrosses: 3,
+    vwapCrossWindowMinutes: 20,
+    chopSizeReduction: 0.5,
   },
   volatilityGate: {
-    firstRangeMinPct: 1,
-    atrExpansionMultiplier: 0.1,
+    firstRangeMinPct: 70,
+    atrExpansionMultiplier: 1.3,
   },
   scoring: {
-    rvolThreshold: 0.1,
-    breakoutVolumeThreshold: 0.1,
-    fullSizeMin: 10,
-    halfSizeMin: 5,
+    rvolThreshold: 1.5,
+    breakoutVolumeThreshold: 1.8,
+    fullSizeMin: 80,
+    halfSizeMin: 65,
   },
   exits: {
     partialAtR: 1.0,
@@ -106,12 +106,12 @@ const DEMO_CONFIG: StrategyConfig = {
   },
   risk: {
     perTradeRiskPct: 1.0,
-    maxPositionPct: 10,
-    maxDailyLossPct: 10,
-    maxLosingTrades: 20,
-    cooldownMinutes: 0.1,
-    timeStopMinutes: 5,
-    timeStopR: 0.1,
+    maxPositionPct: 5,
+    maxDailyLossPct: 2,
+    maxLosingTrades: 3,
+    cooldownMinutes: 15,
+    timeStopMinutes: 30,
+    timeStopR: 0.5,
   },
   riskMode: "balanced",
   powerSetupEnabled: true,
@@ -210,19 +210,19 @@ function simulatePriceMove(state: PriceState, ticker: SimulatedTicker): void {
   let volScale = 1.0;
 
   if (state.trendPhase === "rally") {
-    drift = Math.abs(ticker.trend) * 10;
-    volScale = 4.0;
+    drift = Math.abs(ticker.trend) * 3;
+    volScale = 1.5;
   } else if (state.trendPhase === "pullback") {
-    drift = -Math.abs(ticker.trend) * 8;
-    volScale = 3.0;
+    drift = -Math.abs(ticker.trend) * 2.5;
+    volScale = 1.2;
   } else {
-    drift = ticker.trend * 2;
-    volScale = 2.0;
+    drift = ticker.trend * 0.5;
+    volScale = 0.8;
   }
 
-  const vol = ticker.volatility * volScale;
-  const rand = (Math.random() - 0.5) * 4;
-  const change = state.price * (drift + vol * rand);
+  const vol = ticker.volatility * volScale * 0.15;
+  const rand = (Math.random() - 0.5) * 2;
+  const change = state.price * (drift * 0.01 + vol * rand);
   state.price = Math.max(state.price + change, 1);
   state.high = Math.max(state.high, state.price);
   state.low = Math.min(state.low, state.price);
@@ -675,13 +675,13 @@ export async function startSimulatedDataFeed(
         if (currentDataSource === "simulated") {
           state.trendPhaseBars++;
 
-          if (state.trendPhase === "rally" && state.trendPhaseBars > 1 + Math.floor(Math.random() * 2)) {
+          if (state.trendPhase === "rally" && state.trendPhaseBars > 4 + Math.floor(Math.random() * 4)) {
             state.trendPhase = "pullback";
             state.trendPhaseBars = 0;
-          } else if (state.trendPhase === "pullback" && state.trendPhaseBars > 1) {
-            state.trendPhase = Math.random() > 0.2 ? "rally" : "consolidation";
+          } else if (state.trendPhase === "pullback" && state.trendPhaseBars > 3 + Math.floor(Math.random() * 3)) {
+            state.trendPhase = Math.random() > 0.3 ? "rally" : "consolidation";
             state.trendPhaseBars = 0;
-          } else if (state.trendPhase === "consolidation" && state.trendPhaseBars > 1) {
+          } else if (state.trendPhase === "consolidation" && state.trendPhaseBars > 5 + Math.floor(Math.random() * 4)) {
             state.trendPhase = "rally";
             state.trendPhaseBars = 0;
           }
@@ -781,7 +781,7 @@ export async function startSimulatedDataFeed(
                 }
               } else {
                 const nearResistance = state.price >= state.resistanceLevel * 0.998;
-                shouldBreakout = nearResistance || (state.trendPhase === "rally" && Math.random() > 0.2) || Math.random() > 0.6;
+                shouldBreakout = nearResistance || (state.trendPhase === "rally" && Math.random() > 0.7);
                 boCandle = createBreakoutCandle(state, state.resistanceLevel);
               }
 
@@ -905,8 +905,10 @@ export async function startSimulatedDataFeed(
 
               if (retestResult.valid && retestResult.entryPrice && retestResult.stopPrice && passesStrategy) {
                 const riskPerShare = Math.abs(retestResult.entryPrice - retestResult.stopPrice);
+                const minRisk = retestResult.entryPrice * 0.003;
+                const effectiveRisk = Math.max(riskPerShare, minRisk);
                 const dollarRiskPerTrade = (user.accountSize ?? 100000) * (config.risk.perTradeRiskPct / 100);
-                let shares = Math.floor(dollarRiskPerTrade / riskPerShare);
+                let shares = Math.floor(dollarRiskPerTrade / effectiveRisk);
                 
                 const boVolMult = state.breakoutCandle ? state.breakoutCandle.volume / (state.bars5m.length > 1 ? state.bars5m.reduce((s, b) => s + b.volume, 0) / state.bars5m.length : 1) : 0;
                 const isPowerSetup = config.powerSetupEnabled && boVolMult >= 2.0 && relStrengthVsSpy > 0;
