@@ -1093,6 +1093,19 @@ export async function startSimulatedDataFeed(
                     priority: pnl >= 0 ? "low" : "high",
                     isRead: false,
                   });
+
+                  try {
+                    const userObj = await storage.getUser(userId);
+                    const baseBalance = userObj?.accountSize ?? 100000;
+                    const allTrades = await storage.getTrades(userId);
+                    const totalClosedPnl = allTrades
+                      .filter((t) => t.status === "closed" && t.pnl != null)
+                      .reduce((sum, t) => sum + (t.pnl ?? 0), 0);
+                    const currentBalance = baseBalance + totalClosedPnl;
+                    await storage.upsertDailySummary(userId, Number(pnl.toFixed(2)), pnl >= 0, currentBalance);
+                  } catch (e) {
+                    log(`Error updating daily summary: ${e}`, "simulator");
+                  }
                 } else if (!exitDecision.shouldExit && exitDecision.newStopPrice) {
                   await storage.updateTrade(trade.id, {
                     trailingStopPrice: exitDecision.newStopPrice,

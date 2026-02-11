@@ -144,17 +144,25 @@ export default function Dashboard() {
   const winRate = closedTrades.length > 0 ? (winCount / closedTrades.length) * 100 : 0;
   const recentAlerts = (alerts ?? []).slice(0, 6);
 
-  const equityCurve = (summaries ?? []).map((s, i) => ({
-    date: s.date,
-    balance: s.accountBalance ?? accountSize,
-  }));
+  const equityCurve: { date: string; balance: number }[] = [];
 
-  if (equityCurve.length === 0 && closedTrades.length > 0) {
+  const sortedSummaries = [...(summaries ?? [])].sort((a, b) => a.date.localeCompare(b.date));
+
+  if (sortedSummaries.length >= 2) {
+    sortedSummaries.forEach((s) => {
+      const parts = s.date.split("-");
+      const shortDate = parts.length === 3 ? `${parseInt(parts[1])}/${parseInt(parts[2])}` : s.date;
+      equityCurve.push({
+        date: shortDate,
+        balance: s.accountBalance ?? accountSize,
+      });
+    });
+  } else if (closedTrades.length > 0) {
     let runningBalance = accountSize;
     const sorted = [...closedTrades].sort((a, b) => {
-      const da = a.exitedAt ? new Date(a.exitedAt).getTime() : 0;
-      const db = b.exitedAt ? new Date(b.exitedAt).getTime() : 0;
-      return da - db;
+      const da = a.exitedAt ? new Date(a.exitedAt).getTime() : a.enteredAt ? new Date(a.enteredAt).getTime() : 0;
+      const dbTime = b.exitedAt ? new Date(b.exitedAt).getTime() : b.enteredAt ? new Date(b.enteredAt).getTime() : 0;
+      return da - dbTime;
     });
     equityCurve.push({ date: "Start", balance: accountSize });
     sorted.forEach((t, i) => {
@@ -164,10 +172,21 @@ export default function Dashboard() {
         balance: Number(runningBalance.toFixed(2)),
       });
     });
-  } else if (equityCurve.length === 0) {
+    if (sortedSummaries.length === 1 && sortedSummaries[0].accountBalance) {
+      const lastPoint = equityCurve[equityCurve.length - 1];
+      if (!lastPoint || Math.abs(lastPoint.balance - sortedSummaries[0].accountBalance) > 0.01) {
+        equityCurve.push({
+          date: "Today",
+          balance: sortedSummaries[0].accountBalance,
+        });
+      }
+    }
+  }
+
+  if (equityCurve.length === 0) {
     equityCurve.push(
       { date: "Start", balance: accountSize },
-      { date: "Now", balance: accountSize + todayPnl },
+      { date: "Now", balance: accountSize },
     );
   }
 
