@@ -2,7 +2,7 @@ import { storage } from "./storage";
 import { log } from "./index";
 
 export async function seedDemoData(userId: string) {
-  const existingWatchlist = await storage.getWatchlist(userId);
+  const existingWatchlist = await storage.getAllWatchlist();
   if (existingWatchlist.length > 0) return;
 
   const defaultTickers = [

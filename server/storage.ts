@@ -25,27 +25,35 @@ import {
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
+  getFirstUser(): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUserSettings(id: string, settings: SettingsUpdate): Promise<User | undefined>;
 
   getWatchlist(userId: string): Promise<WatchlistItem[]>;
+  getAllWatchlist(): Promise<WatchlistItem[]>;
   addWatchlistItem(item: InsertWatchlistItem): Promise<WatchlistItem>;
   removeWatchlistItem(id: string, userId: string): Promise<void>;
+  removeWatchlistItemGlobal(id: string): Promise<void>;
 
   getSignals(userId: string): Promise<Signal[]>;
+  getAllSignals(): Promise<Signal[]>;
   getSignalById(id: string): Promise<Signal | undefined>;
   createSignal(signal: InsertSignal): Promise<Signal>;
   updateSignal(id: string, updates: Partial<Signal>): Promise<Signal | undefined>;
 
   getAlerts(userId: string): Promise<Alert[]>;
+  getAllAlerts(): Promise<Alert[]>;
   createAlert(alert: InsertAlert): Promise<Alert>;
   markAlertsRead(userId: string): Promise<void>;
+  markAllAlertsRead(): Promise<void>;
 
   getTrades(userId: string): Promise<PaperTrade[]>;
+  getAllTrades(): Promise<PaperTrade[]>;
   createTrade(trade: InsertPaperTrade): Promise<PaperTrade>;
   updateTrade(id: string, updates: Partial<PaperTrade>): Promise<PaperTrade | undefined>;
 
   getSummaries(userId: string): Promise<DailySummary[]>;
+  getAllSummaries(): Promise<DailySummary[]>;
   createSummary(summary: InsertDailySummary): Promise<DailySummary>;
   upsertDailySummary(userId: string, pnl: number, isWin: boolean, accountBalance: number): Promise<DailySummary>;
 }
@@ -58,6 +66,11 @@ export class DatabaseStorage implements IStorage {
 
   async getUserByUsername(username: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user;
+  }
+
+  async getFirstUser(): Promise<User | undefined> {
+    const [user] = await db.select().from(users).limit(1);
     return user;
   }
 
@@ -75,6 +88,10 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(watchlistItems).where(eq(watchlistItems.userId, userId)).orderBy(desc(watchlistItems.addedAt));
   }
 
+  async getAllWatchlist(): Promise<WatchlistItem[]> {
+    return db.select().from(watchlistItems).orderBy(desc(watchlistItems.addedAt));
+  }
+
   async addWatchlistItem(item: InsertWatchlistItem): Promise<WatchlistItem> {
     const [result] = await db.insert(watchlistItems).values(item).returning();
     return result;
@@ -84,8 +101,16 @@ export class DatabaseStorage implements IStorage {
     await db.delete(watchlistItems).where(and(eq(watchlistItems.id, id), eq(watchlistItems.userId, userId)));
   }
 
+  async removeWatchlistItemGlobal(id: string): Promise<void> {
+    await db.delete(watchlistItems).where(eq(watchlistItems.id, id));
+  }
+
   async getSignals(userId: string): Promise<Signal[]> {
     return db.select().from(signals).where(eq(signals.userId, userId)).orderBy(desc(signals.createdAt));
+  }
+
+  async getAllSignals(): Promise<Signal[]> {
+    return db.select().from(signals).orderBy(desc(signals.createdAt));
   }
 
   async getSignalById(id: string): Promise<Signal | undefined> {
@@ -107,6 +132,10 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(alerts).where(eq(alerts.userId, userId)).orderBy(desc(alerts.createdAt));
   }
 
+  async getAllAlerts(): Promise<Alert[]> {
+    return db.select().from(alerts).orderBy(desc(alerts.createdAt));
+  }
+
   async createAlert(alert: InsertAlert): Promise<Alert> {
     const [result] = await db.insert(alerts).values(alert).returning();
     return result;
@@ -116,8 +145,16 @@ export class DatabaseStorage implements IStorage {
     await db.update(alerts).set({ isRead: true }).where(eq(alerts.userId, userId));
   }
 
+  async markAllAlertsRead(): Promise<void> {
+    await db.update(alerts).set({ isRead: true });
+  }
+
   async getTrades(userId: string): Promise<PaperTrade[]> {
     return db.select().from(paperTrades).where(eq(paperTrades.userId, userId)).orderBy(desc(paperTrades.enteredAt));
+  }
+
+  async getAllTrades(): Promise<PaperTrade[]> {
+    return db.select().from(paperTrades).orderBy(desc(paperTrades.enteredAt));
   }
 
   async createTrade(trade: InsertPaperTrade): Promise<PaperTrade> {
@@ -132,6 +169,10 @@ export class DatabaseStorage implements IStorage {
 
   async getSummaries(userId: string): Promise<DailySummary[]> {
     return db.select().from(dailySummaries).where(eq(dailySummaries.userId, userId)).orderBy(desc(dailySummaries.date));
+  }
+
+  async getAllSummaries(): Promise<DailySummary[]> {
+    return db.select().from(dailySummaries).orderBy(desc(dailySummaries.date));
   }
 
   async createSummary(summary: InsertDailySummary): Promise<DailySummary> {

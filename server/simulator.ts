@@ -332,14 +332,19 @@ function isLunchChop(): boolean {
   return false;
 }
 
-let activeUserIds: Set<string> = new Set();
+let sharedUserId: string | null = null;
 
 export function registerUser(userId: string) {
-  activeUserIds.add(userId);
+  if (!sharedUserId) {
+    sharedUserId = userId;
+  }
 }
 
 export function unregisterUser(userId: string) {
-  activeUserIds.delete(userId);
+}
+
+export function getSharedUserId(): string | null {
+  return sharedUserId;
 }
 
 export interface ScannerItem {
@@ -591,6 +596,14 @@ export async function startSimulatedDataFeed(
     priceStates.set(ticker.ticker, state);
   }
 
+  if (!sharedUserId) {
+    const firstUser = await storage.getFirstUser();
+    if (firstUser) {
+      sharedUserId = firstUser.id;
+      log(`Shared simulator initialized with user: ${firstUser.username}`, "simulator");
+    }
+  }
+
   const liveDataLoaded = await initializeLiveData();
   if (liveDataLoaded) {
     currentDataSource = "live";
@@ -697,12 +710,16 @@ export async function startSimulatedDataFeed(
 
         const dollarVolume = state.price * tickerConfig.avgDailyVolume;
 
-        const userIds = Array.from(activeUserIds);
-        for (const userId of userIds) {
+        if (!sharedUserId) {
+          const firstUser = await storage.getFirstUser();
+          if (firstUser) sharedUserId = firstUser.id;
+        }
+        const userId = sharedUserId;
+        if (userId) {
           try {
             const user = await storage.getUser(userId);
-            if (!user) continue;
-
+            if (!user) { sharedUserId = null; }
+            if (user) {
             const config = buildConfigFromUser(user);
 
             const universeResult = checkUniverseFilter(
@@ -730,7 +747,7 @@ export async function startSimulatedDataFeed(
             const minSinceOpen = state.minutesSinceOpen;
             const inWindow = (minSinceOpen >= 15 && minSinceOpen <= 90) || (minSinceOpen >= 240 && minSinceOpen <= 375);
 
-            const trades = await storage.getTrades(userId);
+            const trades = await storage.getAllTrades();
             const todayET = new Date().toLocaleDateString("en-US", { timeZone: "America/New_York" });
             const todayTrades = trades.filter(t => t.exitedAt && new Date(t.exitedAt).toLocaleDateString("en-US", { timeZone: "America/New_York" }) === todayET);
             const lossCount = todayTrades.filter(t => (t.pnl ?? 0) < 0).length;
@@ -891,7 +908,8 @@ export async function startSimulatedDataFeed(
                 const dollarRiskPerTrade = (user.accountSize ?? 100000) * (config.risk.perTradeRiskPct / 100);
                 let shares = Math.floor(dollarRiskPerTrade / riskPerShare);
                 
-                const isPowerSetup = config.powerSetupEnabled && breakoutResult.metrics.volumeMultiplier >= 2.0 && relStrengthVsSpy > 0;
+                const boVolMult = state.breakoutCandle ? state.breakoutCandle.volume / (state.bars5m.length > 1 ? state.bars5m.reduce((s, b) => s + b.volume, 0) / state.bars5m.length : 1) : 0;
+                const isPowerSetup = config.powerSetupEnabled && boVolMult >= 2.0 && relStrengthVsSpy > 0;
                 if (isPowerSetup) shares = Math.floor(shares * 1.25);
 
                 const maxPosSize = (user.accountSize ?? 100000) * (config.risk.maxPositionPct / 100);
@@ -953,6 +971,7 @@ export async function startSimulatedDataFeed(
               } else if (exitDecision.newStopPrice) {
                 await storage.updateTrade(trade.id, { stopPrice: exitDecision.newStopPrice });
               }
+            }
             }
           } catch (e) {}
         }

@@ -99,11 +99,13 @@ shared/
 - WS /ws - Real-time price updates + market_status (isOpen, isLunchChop, spyAligned, spyChopping)
 
 ## Important Notes
+- **Shared Data Model**: All trading data (signals, trades, alerts, watchlist, summaries, scanner) is shared across ALL users. The simulator runs as a single shared instance using the first registered user's settings. Auth is still per-user for login purposes.
 - Schema changes done via SQL ALTER statements to avoid session table drops
 - Strategy modules are pure functions for testability (no side effects, no database access)
-- Simulator orchestrates strategy modules and handles DB persistence
+- Simulator orchestrates strategy modules and handles DB persistence via sharedUserId (first registered user)
 - settingsUpdateSchema validates all settings fields including new enhanced strategy params
 - buildConfigFromUser in strategy/index.ts maps user settings to StrategyConfig
+- Storage has both per-user methods (getSignals, getTrades, etc.) and global methods (getAllSignals, getAllTrades, etc.) - routes use global methods
 
 ## User Preferences
 - Default dark mode

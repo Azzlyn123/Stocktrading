@@ -6,7 +6,7 @@ import { storage } from "./storage";
 import { setupAuth } from "./auth";
 import { insertUserSchema, settingsUpdateSchema } from "@shared/schema";
 import type { User } from "@shared/schema";
-import { startSimulatedDataFeed, registerUser, unregisterUser, getScannerData, getDataSource, isLiveConnected } from "./simulator";
+import { startSimulatedDataFeed, registerUser, unregisterUser, getScannerData, getDataSource, isLiveConnected, getSharedUserId } from "./simulator";
 import { seedDemoData } from "./seed";
 
 declare global {
@@ -145,9 +145,9 @@ export async function registerRoutes(
     }
   });
 
-  // Watchlist
+  // Watchlist (shared across all users)
   app.get("/api/watchlist", requireAuth, async (req, res) => {
-    const items = await storage.getWatchlist(req.user!.id);
+    const items = await storage.getAllWatchlist();
     res.json(items);
   });
 
@@ -169,46 +169,48 @@ export async function registerRoutes(
   });
 
   app.delete("/api/watchlist/:id", requireAuth, async (req, res) => {
-    await storage.removeWatchlistItem(req.params.id as string, req.user!.id);
+    await storage.removeWatchlistItemGlobal(req.params.id as string);
     res.json({ ok: true });
   });
 
-  // Signals
+  // Signals (shared across all users)
   app.get("/api/signals", requireAuth, async (req, res) => {
-    const items = await storage.getSignals(req.user!.id);
+    const items = await storage.getAllSignals();
     res.json(items);
   });
 
-  // Alerts
+  // Alerts (shared across all users)
   app.get("/api/alerts", requireAuth, async (req, res) => {
-    const items = await storage.getAlerts(req.user!.id);
+    const items = await storage.getAllAlerts();
     res.json(items);
   });
 
   app.post("/api/alerts/mark-read", requireAuth, async (req, res) => {
-    await storage.markAlertsRead(req.user!.id);
+    await storage.markAllAlertsRead();
     res.json({ ok: true });
   });
 
-  // Paper Trades
+  // Paper Trades (shared across all users)
   app.get("/api/trades", requireAuth, async (req, res) => {
-    const items = await storage.getTrades(req.user!.id);
+    const items = await storage.getAllTrades();
     res.json(items);
   });
 
-  // Daily Summaries
+  // Daily Summaries (shared across all users)
   app.get("/api/summaries", requireAuth, async (req, res) => {
-    const items = await storage.getSummaries(req.user!.id);
+    const items = await storage.getAllSummaries();
     res.json(items);
   });
 
-  // Scanner data
-  app.get("/api/scanner", requireAuth, (req, res) => {
-    const user = req.user!;
+  // Scanner data (shared across all users - uses shared user's settings)
+  app.get("/api/scanner", requireAuth, async (req, res) => {
+    const sharedId = getSharedUserId();
+    const scannerUser = sharedId ? await storage.getUser(sharedId) : null;
+    const su = scannerUser ?? req.user!;
     const data = getScannerData({
-      minPrice: user.minPrice ?? 15,
-      minAvgVolume: user.minAvgVolume ?? 2000000,
-      minDollarVolume: user.minDollarVolume ?? 50000000,
+      minPrice: su.minPrice ?? 15,
+      minAvgVolume: su.minAvgVolume ?? 2000000,
+      minDollarVolume: su.minDollarVolume ?? 50000000,
     });
     res.json(data);
   });
