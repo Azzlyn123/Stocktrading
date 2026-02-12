@@ -227,13 +227,13 @@ function simulatePriceMove(state: PriceState, ticker: SimulatedTicker): void {
   let volScale = 1.0;
 
   if (state.trendPhase === "rally") {
-    drift = Math.abs(ticker.trend) * 3;
-    volScale = 1.5;
+    drift = Math.abs(ticker.trend) * 5;
+    volScale = 1.8;
   } else if (state.trendPhase === "pullback") {
-    drift = -Math.abs(ticker.trend) * 2.5;
+    drift = -Math.abs(ticker.trend) * 2;
     volScale = 1.2;
   } else {
-    drift = ticker.trend * 0.5;
+    drift = ticker.trend * 0.3;
     volScale = 0.8;
   }
 
@@ -666,6 +666,7 @@ function isInTradingSession(config: TieredStrategyConfig): boolean {
 
 function checkMarketCondition(spyBars: Candle[], config: TieredStrategyConfig, tier: TradeTier, direction: "LONG" | "SHORT"): boolean {
   if (tier === "A" && config.marketFilter.tierABypass) return true;
+  if (tier === "B" || tier === "C") return true;
   if (spyBars.length === 0) return false;
   const spyVwap = calculateVWAP(spyBars);
   const spyPrice = spyBars[spyBars.length - 1].close;
@@ -797,13 +798,13 @@ export async function startSimulatedDataFeed(
         if (currentDataSource === "simulated") {
           state.trendPhaseBars++;
 
-          if (state.trendPhase === "rally" && state.trendPhaseBars > 4 + Math.floor(Math.random() * 4)) {
+          if (state.trendPhase === "rally" && state.trendPhaseBars > 3 + Math.floor(Math.random() * 3)) {
             state.trendPhase = "pullback";
             state.trendPhaseBars = 0;
-          } else if (state.trendPhase === "pullback" && state.trendPhaseBars > 3 + Math.floor(Math.random() * 3)) {
-            state.trendPhase = Math.random() > 0.3 ? "rally" : "consolidation";
+          } else if (state.trendPhase === "pullback" && state.trendPhaseBars > 2 + Math.floor(Math.random() * 2)) {
+            state.trendPhase = Math.random() > 0.2 ? "rally" : "consolidation";
             state.trendPhaseBars = 0;
-          } else if (state.trendPhase === "consolidation" && state.trendPhaseBars > 5 + Math.floor(Math.random() * 4)) {
+          } else if (state.trendPhase === "consolidation" && state.trendPhaseBars > 2 + Math.floor(Math.random() * 3)) {
             state.trendPhase = "rally";
             state.trendPhaseBars = 0;
           }
@@ -820,7 +821,13 @@ export async function startSimulatedDataFeed(
           if (resistance) {
             state.resistanceLevel = resistance.level;
           } else if (!state.resistanceLevel) {
-            state.resistanceLevel = state.price * (1 + 0.003 + Math.random() * 0.005);
+            state.resistanceLevel = state.price * (1 + 0.001 + Math.random() * 0.003);
+          }
+          if (state.resistanceLevel && state.price > 0) {
+            const distPct = (state.resistanceLevel - state.price) / state.price;
+            if (distPct > 0.03) {
+              state.resistanceLevel = state.price * (1 + 0.002 + Math.random() * 0.005);
+            }
           }
         }
 
@@ -884,19 +891,40 @@ export async function startSimulatedDataFeed(
 
               if (currentDataSource === "live") {
                 const recentBars = state.bars5m.slice(-3);
-                const recentCandle = recentBars.length > 0 ? recentBars[recentBars.length - 1] : null;
+                let recentCandle = recentBars.length > 0 ? recentBars[recentBars.length - 1] : null;
+
+                if (recentCandle && state.price > 0) {
+                  const scaleMismatch = Math.abs(recentCandle.close - state.price) / state.price;
+                  if (scaleMismatch > 0.1) {
+                    log(`[${state.ticker}] BAR SCALE MISMATCH: barClose=$${recentCandle.close.toFixed(2)} vs livePrice=$${state.price.toFixed(2)} (${(scaleMismatch*100).toFixed(0)}% diff). Using synthetic candle.`, "scanner");
+                    recentCandle = null;
+                  }
+                }
+
+                const synthCandle = (breakAbove: boolean): Candle => ({
+                  open: state.price * (breakAbove ? 0.997 : 1.001),
+                  high: state.price * (breakAbove ? 1.003 : 1.002),
+                  low: state.price * 0.995,
+                  close: state.price,
+                  volume: state.volume || 50000,
+                  timestamp: Date.now(),
+                });
+
                 if (recentCandle && recentCandle.close > state.resistanceLevel) {
                   shouldBreakout = true;
                   boCandle = recentCandle;
                 } else if (recentCandle && recentCandle.high > state.resistanceLevel && state.price > state.resistanceLevel) {
                   shouldBreakout = true;
                   boCandle = recentCandle;
+                } else if (state.price > state.resistanceLevel) {
+                  shouldBreakout = true;
+                  boCandle = synthCandle(true);
                 } else {
-                  boCandle = candle;
+                  boCandle = recentCandle || synthCandle(false);
                 }
               } else {
-                const nearResistance = state.price >= state.resistanceLevel * 0.998;
-                shouldBreakout = nearResistance || (state.trendPhase === "rally" && Math.random() > 0.7);
+                const nearResistance = state.price >= state.resistanceLevel * 0.995;
+                shouldBreakout = nearResistance || (state.trendPhase === "rally" && Math.random() > 0.4);
                 boCandle = createBreakoutCandle(state, state.resistanceLevel);
               }
 
