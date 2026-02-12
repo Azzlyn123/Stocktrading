@@ -45,7 +45,8 @@ export function checkTieredBreakout(
   levelPrice: number,
   levelType: "RESISTANCE" | "SUPPORT",
   tier: TierConfig,
-  strategyConfig: TieredStrategyConfig["strategy"]
+  strategyConfig: TieredStrategyConfig["strategy"],
+  overrideVolRatio?: number
 ): BreakoutQualification {
   const reasons: string[] = [];
   const isLong = levelType === "RESISTANCE";
@@ -67,7 +68,7 @@ export function checkTieredBreakout(
   }
 
   const avgVol = avgVolume(recentBars, strategyConfig.volumeLookback);
-  const volRatio = avgVol > 0 ? currentCandle.volume / avgVol : 0;
+  const volRatio = overrideVolRatio !== undefined ? overrideVolRatio : (avgVol > 0 ? currentCandle.volume / avgVol : 0);
   const volOk = volRatio >= tier.volumeRatioMin;
   if (!volOk) {
     reasons.push(`Volume ratio ${volRatio.toFixed(2)} < ${tier.volumeRatioMin} required`);

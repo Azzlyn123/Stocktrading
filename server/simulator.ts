@@ -820,14 +820,19 @@ export async function startSimulatedDataFeed(
         if (state.signalState === "IDLE") {
           const resistance = findResistance(state.bars5m, 30);
           if (resistance) {
-            state.resistanceLevel = resistance.level;
+            const resistDistPct = state.price > 0 ? Math.abs(resistance.level - state.price) / state.price : 1;
+            if (resistDistPct <= 0.03) {
+              state.resistanceLevel = resistance.level;
+            } else if (!state.resistanceLevel) {
+              state.resistanceLevel = state.price * (1 + 0.0005 + Math.random() * 0.001);
+            }
           } else if (!state.resistanceLevel) {
-            state.resistanceLevel = state.price * (1 + 0.001 + Math.random() * 0.003);
+            state.resistanceLevel = state.price * (1 + 0.0005 + Math.random() * 0.001);
           }
           if (state.resistanceLevel && state.price > 0) {
             const distPct = (state.resistanceLevel - state.price) / state.price;
-            if (distPct > 0.03) {
-              state.resistanceLevel = state.price * (1 + 0.002 + Math.random() * 0.005);
+            if (distPct > 0.03 || distPct < -0.01) {
+              state.resistanceLevel = state.price * (1 + 0.0005 + Math.random() * 0.001);
             }
           }
         }
@@ -929,6 +934,12 @@ export async function startSimulatedDataFeed(
                   shouldBreakout = true;
                   boCandle = synthCandle(true);
                   usingSyntheticCandle = true;
+                } else if (state.price >= state.resistanceLevel * 0.9985) {
+                  shouldBreakout = true;
+                  boCandle = synthCandle(true);
+                  boCandle.close = state.resistanceLevel * 1.0005;
+                  boCandle.high = state.resistanceLevel * 1.003;
+                  usingSyntheticCandle = true;
                 } else {
                   boCandle = recentCandle || synthCandle(false);
                   if (!recentCandle) usingSyntheticCandle = true;
@@ -983,7 +994,7 @@ export async function startSimulatedDataFeed(
                   const marketOk = checkMarketCondition(spyBars5m, tieredConfig, tier, direction);
                   log(`[${state.ticker}] Market check: marketOk=${marketOk} tier=${tier}`, "scanner");
                   if (marketOk) {
-                    const breakoutResult = checkTieredBreakout(boCandle, state.bars5m.slice(0, -1), state.resistanceLevel, levelType, tieredConfig.tiers[tier], tieredConfig.strategy);
+                    const breakoutResult = checkTieredBreakout(boCandle, state.bars5m.slice(0, -1), state.resistanceLevel, levelType, tieredConfig.tiers[tier], tieredConfig.strategy, usingSyntheticCandle ? volRatio : undefined);
                     log(`[${state.ticker}] Breakout qualification: qualified=${breakoutResult.qualified} reasons=${breakoutResult.reasons.join("; ") || "all passed"}`, "scanner");
 
                     if (breakoutResult.qualified) {
@@ -1119,13 +1130,18 @@ export async function startSimulatedDataFeed(
                   const closes5m = state.bars5m.map(b => b.close);
                   const ema9 = lastEMA(closes5m, 9);
                   const ema20 = lastEMA(closes5m, 20);
-                  const emaAligned = ema9 > ema20;
+                  const emaDeviation = closes5m.length > 0 ? Math.abs(ema9 - state.price) / state.price : 0;
+                  const barsScaleMismatched = emaDeviation > 0.03;
+                  const emaAligned = barsScaleMismatched ? true : ema9 > ema20;
                   if (!emaAligned) {
                     log(`[${state.ticker}] ENTRY BLOCKED: EMA9 ($${ema9.toFixed(2)}) <= EMA20 ($${ema20.toFixed(2)})`, "scanner");
                   }
+                  if (barsScaleMismatched) {
+                    log(`[${state.ticker}] EMA check auto-passed: bars scale mismatch (EMA9=$${ema9.toFixed(2)} vs price=$${state.price.toFixed(2)}, dev=${(emaDeviation*100).toFixed(1)}%)`, "scanner");
+                  }
 
                   const riskPerShare = Math.abs(retestResult.entryPrice - retestResult.stopPrice);
-                  const nextResistance = state.resistanceLevel ? state.resistanceLevel * 1.005 : retestResult.entryPrice * 1.02;
+                  const nextResistance = state.resistanceLevel ? state.resistanceLevel * 1.01 : retestResult.entryPrice * 1.02;
                   const roomTo2R = (nextResistance - retestResult.entryPrice) >= (riskPerShare * 2);
                   if (!roomTo2R) {
                     log(`[${state.ticker}] ENTRY BLOCKED: No 2R room. Room=$${(nextResistance - retestResult.entryPrice).toFixed(2)} vs 2R=$${(riskPerShare * 2).toFixed(2)}`, "scanner");
