@@ -67,7 +67,7 @@ export interface IStorage {
   getRecentLessons(limit: number): Promise<TradeLesson[]>;
   createLesson(lesson: InsertTradeLesson): Promise<TradeLesson>;
 
-  getSimulationRuns(): Promise<SimulationRun[]>;
+  getSimulationRuns(userId: string): Promise<SimulationRun[]>;
   getSimulationRun(id: string): Promise<SimulationRun | undefined>;
   createSimulationRun(run: InsertSimulationRun): Promise<SimulationRun>;
   updateSimulationRun(id: string, updates: Partial<SimulationRun>): Promise<SimulationRun | undefined>;
@@ -257,8 +257,8 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async getSimulationRuns(): Promise<SimulationRun[]> {
-    return db.select().from(simulationRuns).orderBy(desc(simulationRuns.startedAt));
+  async getSimulationRuns(userId: string): Promise<SimulationRun[]> {
+    return db.select().from(simulationRuns).where(eq(simulationRuns.userId, userId)).orderBy(desc(simulationRuns.startedAt));
   }
 
   async getSimulationRun(id: string): Promise<SimulationRun | undefined> {

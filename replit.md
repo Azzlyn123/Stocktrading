@@ -26,6 +26,7 @@ client/src/
     trades.tsx         - Paper trades with score tier, entry mode, enhanced exit labels
     settings.tsx       - Full config: risk, universe, breakout quality, market regime, scoring
     learning.tsx       - Learning insights: loss/win patterns, tier/session stats, recommendations, recent lessons
+    backtester.tsx     - Historical simulation: date picker, run controls, progress tracking, results display
   components/
     app-sidebar.tsx    - Sidebar navigation
     theme-provider.tsx - Dark/light mode
@@ -42,6 +43,8 @@ server/
   db.ts                - Drizzle database connection
   simulator.ts         - Orchestrator: per-ticker state, 15m bars, SPY context, scoring, exit management
   seed.ts              - Demo data seeding with scoring fields
+  alpaca.ts            - Alpaca API: live bars, snapshots, WebSocket stream, market clock, historical date bars
+  historicalSimulator.ts - Historical simulation engine: replays past trading days through strategy pipeline
   strategy/
     index.ts           - Barrel export for all strategy modules
     config.ts          - DEFAULT_STRATEGY_CONFIG with all sub-configs

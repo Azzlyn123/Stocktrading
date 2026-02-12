@@ -20,6 +20,7 @@ import Signals from "@/pages/signals";
 import Trades from "@/pages/trades";
 import Settings from "@/pages/settings";
 import Learning from "@/pages/learning";
+import Backtester from "@/pages/backtester";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -32,6 +33,7 @@ function Router() {
       <Route path="/trades" component={Trades} />
       <Route path="/settings" component={Settings} />
       <Route path="/learning" component={Learning} />
+      <Route path="/backtester" component={Backtester} />
       <Route component={NotFound} />
     </Switch>
   );

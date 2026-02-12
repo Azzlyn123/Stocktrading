@@ -9,6 +9,7 @@ import type { User } from "@shared/schema";
 import { startSimulatedDataFeed, registerUser, unregisterUser, getScannerData, getDataSource, isLiveConnected, getSharedUserId } from "./simulator";
 import { seedDemoData } from "./seed";
 import { generateAdaptiveInsights } from "./strategy/learning";
+import { runHistoricalSimulation, getActiveSimulations, cancelSimulation } from "./historicalSimulator";
 
 declare global {
   namespace Express {
@@ -239,6 +240,68 @@ export async function registerRoutes(
       }))
     );
     res.json({ lessons, insights });
+  });
+
+  // Historical simulation routes
+  app.get("/api/simulations", requireAuth, async (req, res) => {
+    const userId = (req.user as User).id;
+    const runs = await storage.getSimulationRuns(userId);
+    res.json(runs);
+  });
+
+  app.get("/api/simulations/active/list", requireAuth, (_req, res) => {
+    res.json(getActiveSimulations());
+  });
+
+  app.get("/api/simulations/:id", requireAuth, async (req, res) => {
+    const run = await storage.getSimulationRun(req.params.id);
+    if (!run) return res.status(404).json({ error: "Simulation not found" });
+    res.json(run);
+  });
+
+  app.post("/api/simulations", requireAuth, async (req, res) => {
+    const userId = (req.user as User).id;
+    const { simulationDate, tickers } = req.body;
+
+    if (!simulationDate || typeof simulationDate !== "string") {
+      return res.status(400).json({ error: "simulationDate is required (YYYY-MM-DD)" });
+    }
+
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(simulationDate)) {
+      return res.status(400).json({ error: "Invalid date format. Use YYYY-MM-DD." });
+    }
+
+    const today = new Date();
+    const simDate = new Date(simulationDate + "T12:00:00Z");
+    if (simDate >= today) {
+      return res.status(400).json({ error: "Simulation date must be in the past." });
+    }
+
+    const run = await storage.createSimulationRun({
+      userId,
+      simulationDate,
+      status: "pending",
+      tickers: tickers ?? null,
+    });
+
+    runHistoricalSimulation(
+      run.id,
+      simulationDate,
+      userId,
+      storage,
+      tickers && tickers.length > 0 ? tickers : undefined
+    ).catch((err) => {
+      console.error("Historical simulation error:", err);
+    });
+
+    res.status(201).json(run);
+  });
+
+  app.post("/api/simulations/:id/cancel", requireAuth, async (req, res) => {
+    const cancelled = cancelSimulation(req.params.id);
+    if (!cancelled) return res.status(404).json({ error: "Simulation not found or already completed" });
+    res.json({ success: true });
   });
 
   // Data source status

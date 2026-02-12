@@ -10,6 +10,7 @@ import {
   Activity,
   ScanSearch,
   Brain,
+  History,
 } from "lucide-react";
 import { useLocation, Link } from "wouter";
 import {
@@ -37,6 +38,7 @@ const navItems = [
   { title: "Signals", url: "/signals", icon: Radio },
   { title: "Trade Plans", url: "/trades", icon: FileText },
   { title: "Learning", url: "/learning", icon: Brain },
+  { title: "Backtester", url: "/backtester", icon: History },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
 
