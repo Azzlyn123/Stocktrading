@@ -817,13 +817,22 @@ export async function startSimulatedDataFeed(
             const timeSinceLastBreakout = Date.now() - state.lastBreakoutTime;
             const cooldownMs = tieredConfig.risk.cooldownMinutes * 60 * 1000;
 
+            // Debug: log why signals aren't firing (every ~60s per ticker)
+            if (tickCount % 30 === 0 && state.signalState === "IDLE" && state.ticker === SIMULATED_TICKERS[2]?.ticker) {
+              log(`[DEBUG ${state.ticker}] session=${inSession} universe=${passesUniverse} locked=${tradingLocked} resistance=${state.resistanceLevel?.toFixed(2)} price=${state.price.toFixed(2)} bars5m=${state.bars5m.length} cooldown=${timeSinceLastBreakout > cooldownMs} src=${currentDataSource}`, "simulator");
+            }
+
             if (state.signalState === "IDLE" && state.resistanceLevel && timeSinceLastBreakout > cooldownMs && !hasOpenTrade && !tradingLocked && inSession && passesUniverse) {
               let shouldBreakout = false;
               let boCandle: Candle;
 
               if (currentDataSource === "live") {
-                const recentCandle = state.bars5m.length > 0 ? state.bars5m[state.bars5m.length - 1] : null;
+                const recentBars = state.bars5m.slice(-3);
+                const recentCandle = recentBars.length > 0 ? recentBars[recentBars.length - 1] : null;
                 if (recentCandle && recentCandle.close > state.resistanceLevel) {
+                  shouldBreakout = true;
+                  boCandle = recentCandle;
+                } else if (recentCandle && recentCandle.high > state.resistanceLevel && state.price > state.resistanceLevel) {
                   shouldBreakout = true;
                   boCandle = recentCandle;
                 } else {
