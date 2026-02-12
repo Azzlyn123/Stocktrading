@@ -65,14 +65,14 @@ export const DEFAULT_TIERED_CONFIG: TieredStrategyConfig = {
     hardExitRedCandles: 0,
   },
   daily: {
-    maxLosingTrades: 10,
-    maxDailyLossR: -20.0,
+    maxLosingTrades: 999999,
+    maxDailyLossR: -999999.0,
   },
   risk: {
     maxPositionPct: 10,
     timeStopMinutes: 45,
     timeStopR: 0.5,
-    cooldownMinutes: 3,
+    cooldownMinutes: 1,
   },
 };
 
@@ -125,9 +125,9 @@ export const DEFAULT_STRATEGY_CONFIG: StrategyConfig = {
   risk: {
     perTradeRiskPct: 1.0,
     maxPositionPct: 20,
-    maxDailyLossPct: 20,
-    maxLosingTrades: 10,
-    cooldownMinutes: 3,
+    maxDailyLossPct: 100,
+    maxLosingTrades: 999999,
+    cooldownMinutes: 1,
     timeStopMinutes: 45,
     timeStopR: 0.5,
   },
@@ -187,9 +187,9 @@ export function buildConfigFromUser(user: any): StrategyConfig {
     risk: {
       perTradeRiskPct: user.perTradeRiskPct ?? 1.0,
       maxPositionPct: user.maxPositionPct ?? 20,
-      maxDailyLossPct: user.maxDailyLossPct ?? 6,
-      maxLosingTrades: user.maxLosingTrades ?? 3,
-      cooldownMinutes: user.cooldownMinutes ?? 3,
+      maxDailyLossPct: 100,
+      maxLosingTrades: 999999,
+      cooldownMinutes: 1,
       timeStopMinutes: user.timeStopMinutes ?? 45,
       timeStopR: user.timeStopR ?? 0.5,
     },

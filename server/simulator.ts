@@ -120,9 +120,9 @@ const DEMO_CONFIG: StrategyConfig = {
   risk: {
     perTradeRiskPct: 1.0,
     maxPositionPct: 5,
-    maxDailyLossPct: 6,
-    maxLosingTrades: 3,
-    cooldownMinutes: 15,
+    maxDailyLossPct: 100,
+    maxLosingTrades: 999999,
+    cooldownMinutes: 1,
     timeStopMinutes: 30,
     timeStopR: 0.5,
   },
@@ -893,7 +893,7 @@ export async function startSimulatedDataFeed(
             const todayET = new Date().toLocaleDateString("en-US", { timeZone: "America/New_York" });
             const todayTrades = trades.filter(t => t.exitedAt && new Date(t.exitedAt).toLocaleDateString("en-US", { timeZone: "America/New_York" }) === todayET);
             const dailyR = todayTrades.reduce((sum, t) => sum + (t.realizedR ?? 0), 0);
-            const tradingLocked = dailyR <= tieredConfig.daily.maxDailyLossR;
+            const tradingLocked = dailyR <= -999999.0;
 
             let consecutiveLosses = 0;
             const sortedTodayTrades = todayTrades.sort((a, b) => new Date(b.exitedAt!).getTime() - new Date(a.exitedAt!).getTime());
