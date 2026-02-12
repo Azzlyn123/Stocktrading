@@ -23,6 +23,26 @@ const BACKTEST_TICKERS = [
   "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD", "JPM", "V", "NFLX", "CRM", "AVGO", "LLY"
 ];
 
+const SIM_CONFIG = {
+  slippageBps: 5,
+  spreadBps: 3,
+  commissionPerShare: 0.005,
+  minCommission: 1.0,
+};
+
+function applySlippage(price: number, direction: "entry" | "exit", side: "long"): number {
+  const totalBps = SIM_CONFIG.slippageBps + SIM_CONFIG.spreadBps;
+  const pctAdj = totalBps / 10000;
+  if (side === "long") {
+    return direction === "entry" ? price * (1 + pctAdj) : price * (1 - pctAdj);
+  }
+  return price;
+}
+
+function calculateCommission(shares: number): number {
+  return Math.max(SIM_CONFIG.minCommission, shares * SIM_CONFIG.commissionPerShare);
+}
+
 interface HistoricalTickerState {
   ticker: string;
   price: number;
@@ -300,6 +320,16 @@ export async function runHistoricalSimulation(
     let totalPnl = 0;
     let winCount = 0;
     let lossCount = 0;
+    let grossPnlTotal = 0;
+    let totalCommissions = 0;
+    let totalSlippageCosts = 0;
+    const tradeRs: number[] = [];
+    const tradeGrossPnls: number[] = [];
+    const tradeNetPnls: number[] = [];
+    const tradesByRegime: Record<string, { wins: number; losses: number; pnl: number }> = {};
+    const tradesBySession: Record<string, { wins: number; losses: number; pnl: number }> = {};
+    const tradesByTier: Record<string, { wins: number; losses: number; pnl: number }> = {};
+    const skippedSetups: Array<{ ticker: string; score: number; penalty: number; reason: string; barIndex: number; price: number }> = [];
 
     for (const ticker of tickers) {
       if (control.cancel) {
@@ -456,7 +486,7 @@ export async function runHistoricalSimulation(
           );
 
           if (exitResult.shouldExit) {
-            let exitPrice = exitResult.exitPrice ?? bar.close;
+            let exitPrice = applySlippage(exitResult.exitPrice ?? bar.close, "exit", "long");
             let exitReason = exitResult.reason || "exit";
             const shares = trade.shares;
 
@@ -477,7 +507,10 @@ export async function runHistoricalSimulation(
               continue;
             }
 
-            const pnl = (exitPrice - trade.entryPrice) * shares;
+            const grossPnl = (exitPrice - trade.entryPrice) * shares;
+            const commission = calculateCommission(shares) * 2;
+            const pnl = grossPnl - commission;
+            log(`[HistSim] ${ticker} slippage cost: $${(grossPnl - pnl).toFixed(2)}`, "historical");
             const rMultiple = riskPerShare > 0 ? (exitPrice - trade.entryPrice) / riskPerShare : 0;
             const pnlPct = trade.entryPrice > 0 ? ((exitPrice - trade.entryPrice) / trade.entryPrice) * 100 : 0;
             const totalR = trade.realizedR + rMultiple;
@@ -485,6 +518,24 @@ export async function runHistoricalSimulation(
             totalPnl += pnl;
             if (pnl > 0) winCount++;
             else lossCount++;
+            grossPnlTotal += grossPnl;
+            totalCommissions += commission;
+            const slippageCost = trade.entryPrice * shares * (SIM_CONFIG.slippageBps + SIM_CONFIG.spreadBps) / 10000 * 2;
+            totalSlippageCosts += slippageCost;
+            tradeRs.push(totalR);
+            tradeGrossPnls.push(grossPnl);
+            tradeNetPnls.push(pnl);
+            const trSession = state.minutesSinceOpen <= 90 ? "open" : state.minutesSinceOpen <= 240 ? "mid" : "power";
+            const trRegime = regimeResult.aligned ? "trending" : regimeResult.chopping ? "choppy" : "neutral";
+            const trTier = trade.tier;
+            if (!tradesByRegime[trRegime]) tradesByRegime[trRegime] = { wins: 0, losses: 0, pnl: 0 };
+            if (!tradesBySession[trSession]) tradesBySession[trSession] = { wins: 0, losses: 0, pnl: 0 };
+            if (!tradesByTier[trTier]) tradesByTier[trTier] = { wins: 0, losses: 0, pnl: 0 };
+            tradesByRegime[trRegime].pnl += pnl;
+            tradesBySession[trSession].pnl += pnl;
+            tradesByTier[trTier].pnl += pnl;
+            if (pnl > 0) { tradesByRegime[trRegime].wins++; tradesBySession[trSession].wins++; tradesByTier[trTier].wins++; }
+            else { tradesByRegime[trRegime].losses++; tradesBySession[trSession].losses++; tradesByTier[trTier].losses++; }
 
             const tradeRecord = await storage.createTrade({
               userId,
@@ -642,7 +693,7 @@ export async function runHistoricalSimulation(
 
             if (retestResult.valid && retestResult.entryPrice && retestResult.stopPrice) {
               diag.retestValid++;
-              const entryPrice = retestResult.entryPrice;
+              const entryPrice = applySlippage(retestResult.entryPrice, "entry", "long");
               const stopPrice = retestResult.stopPrice;
               const riskPerShare = Math.abs(entryPrice - stopPrice);
 
@@ -660,8 +711,15 @@ export async function runHistoricalSimulation(
                 let score = Math.min(100, rvolScore + trendScore + boVolScore + retestScore + regimeScore + atrScore);
 
                 const session = state.minutesSinceOpen <= 90 ? "open" : state.minutesSinceOpen <= 240 ? "mid" : "power";
+                let appliedPenalty = 0;
                 try {
-                  const recentLessons = await storage.getRecentLessons(50);
+                  const recentLessons = (await storage.getRecentLessons(100)).filter(l => {
+                    const ctx = l.marketContext as Record<string, any> | null;
+                    if (ctx?.simulationDate) {
+                      return ctx.simulationDate < simulationDate;
+                    }
+                    return true;
+                  });
                   const penaltyResult = computeLearningPenalty(
                     recentLessons.map(l => ({
                       ticker: l.ticker,
@@ -680,6 +738,7 @@ export async function runHistoricalSimulation(
 
                   if (penaltyResult.penalty > 0) {
                     const cappedPenalty = Math.min(penaltyResult.penalty, 20);
+                    appliedPenalty = cappedPenalty;
                     score = Math.max(0, score - cappedPenalty);
                     log(`[HistSim] ${ticker} LEARNING PENALTY: -${cappedPenalty} pts (raw: -${penaltyResult.penalty}), score ${score + cappedPenalty} -> ${score}. ${penaltyResult.reasons.join("; ")}`, "historical");
                   }
@@ -691,6 +750,14 @@ export async function runHistoricalSimulation(
                 if (score < minScore) {
                   log(`[HistSim] ${ticker} SKIPPED entry - score ${score} below threshold ${minScore} after learning penalty`, "historical");
                   incrementAutoRunSkipped();
+                  skippedSetups.push({
+                    ticker,
+                    score,
+                    penalty: appliedPenalty,
+                    reason: `Score ${score} below ${minScore}`,
+                    barIndex: i,
+                    price: bar.close,
+                  });
                   state.signalState = "IDLE";
                   state.selectedTier = null;
                   processedBars++;
@@ -750,13 +817,33 @@ export async function runHistoricalSimulation(
       if (state.activeTrade) {
         const lastBar = tickerBars5m[tickerBars5m.length - 1];
         const trade = state.activeTrade;
-        const exitPrice = lastBar.close;
-        const pnl = (exitPrice - trade.entryPrice) * trade.shares;
+        const exitPrice = applySlippage(lastBar.close, "exit", "long");
+        const grossPnl = (exitPrice - trade.entryPrice) * trade.shares;
+        const commission = calculateCommission(trade.shares) * 2;
+        const pnl = grossPnl - commission;
+        log(`[HistSim] ${ticker} slippage cost: $${(grossPnl - pnl).toFixed(2)}`, "historical");
         const rMultiple = trade.riskPerShare > 0 ? (exitPrice - trade.entryPrice) / trade.riskPerShare : 0;
         const totalR = trade.realizedR + rMultiple;
         totalPnl += pnl;
         if (pnl > 0) winCount++;
         else lossCount++;
+        grossPnlTotal += grossPnl;
+        totalCommissions += commission;
+        const slippageCost2 = trade.entryPrice * trade.shares * (SIM_CONFIG.slippageBps + SIM_CONFIG.spreadBps) / 10000 * 2;
+        totalSlippageCosts += slippageCost2;
+        tradeRs.push(totalR);
+        tradeGrossPnls.push(grossPnl);
+        tradeNetPnls.push(pnl);
+        const trRegime2 = lastRegimeResult.aligned ? "trending" : lastRegimeResult.chopping ? "choppy" : "neutral";
+        const trTier2 = trade.tier;
+        if (!tradesByRegime[trRegime2]) tradesByRegime[trRegime2] = { wins: 0, losses: 0, pnl: 0 };
+        if (!tradesBySession["power"]) tradesBySession["power"] = { wins: 0, losses: 0, pnl: 0 };
+        if (!tradesByTier[trTier2]) tradesByTier[trTier2] = { wins: 0, losses: 0, pnl: 0 };
+        tradesByRegime[trRegime2].pnl += pnl;
+        tradesBySession["power"].pnl += pnl;
+        tradesByTier[trTier2].pnl += pnl;
+        if (pnl > 0) { tradesByRegime[trRegime2].wins++; tradesBySession["power"].wins++; tradesByTier[trTier2].wins++; }
+        else { tradesByRegime[trRegime2].losses++; tradesBySession["power"].losses++; tradesByTier[trTier2].losses++; }
 
         const tradeRecord = await storage.createTrade({
           userId,
@@ -818,8 +905,61 @@ export async function runHistoricalSimulation(
       }
     }
 
+    const buyHoldReturns: Record<string, number> = {};
+    let totalBuyHoldPnl = 0;
+    for (const ticker of tickers) {
+      const bars = bars5mMap.get(ticker);
+      if (bars && bars.length >= 2) {
+        const openPrice = bars[0].open;
+        const closePrice = bars[bars.length - 1].close;
+        const shares = Math.floor(10000 / openPrice);
+        const bhPnl = (closePrice - openPrice) * shares;
+        buyHoldReturns[ticker] = Number(bhPnl.toFixed(2));
+        totalBuyHoldPnl += bhPnl;
+      }
+    }
+
+    let baselinePnl = 0;
+    for (const ticker of tickers) {
+      const bars = bars5mMap.get(ticker);
+      if (!bars || bars.length < 25) continue;
+      let ema5 = bars[0].close;
+      let ema20 = bars[0].close;
+      let baselineEntry: number | null = null;
+      const k5 = 2 / 6, k20 = 2 / 21;
+      for (let bi = 1; bi < bars.length; bi++) {
+        const prevEma5 = ema5, prevEma20 = ema20;
+        ema5 = bars[bi].close * k5 + ema5 * (1 - k5);
+        ema20 = bars[bi].close * k20 + ema20 * (1 - k20);
+        if (prevEma5 <= prevEma20 && ema5 > ema20 && !baselineEntry && bi > 5) {
+          baselineEntry = bars[bi].close;
+        }
+      }
+      if (baselineEntry) {
+        const shares = Math.floor(10000 / baselineEntry);
+        baselinePnl += (bars[bars.length - 1].close - baselineEntry) * shares;
+      }
+    }
+
     const totalTrades = winCount + lossCount;
     const winRate = totalTrades > 0 ? (winCount / totalTrades) * 100 : null;
+    const avgR = tradeRs.length > 0 ? tradeRs.reduce((a, b) => a + b, 0) / tradeRs.length : 0;
+    const grossWins = tradeNetPnls.filter(p => p > 0).reduce((a, b) => a + b, 0);
+    const grossLosses = Math.abs(tradeNetPnls.filter(p => p <= 0).reduce((a, b) => a + b, 0));
+    const profitFactor = grossLosses > 0 ? grossWins / grossLosses : grossWins > 0 ? 999 : 0;
+
+    let peak = 0, maxDD = 0, equity = 0;
+    for (const pnl of tradeNetPnls) {
+      equity += pnl;
+      if (equity > peak) peak = equity;
+      const dd = peak - equity;
+      if (dd > maxDD) maxDD = dd;
+    }
+
+    const avgPnl = tradeNetPnls.length > 0 ? tradeNetPnls.reduce((a, b) => a + b, 0) / tradeNetPnls.length : 0;
+    const stdPnl = tradeNetPnls.length > 1 ? Math.sqrt(tradeNetPnls.reduce((s, p) => s + (p - avgPnl) ** 2, 0) / (tradeNetPnls.length - 1)) : 0;
+    const sharpe = stdPnl > 0 ? (avgPnl / stdPnl) * Math.sqrt(252) : 0;
+    const avgSlippage = totalTrades > 0 ? totalSlippageCosts / totalTrades : 0;
 
     await storage.updateSimulationRun(runId, {
       status: "completed",
@@ -827,7 +967,30 @@ export async function runHistoricalSimulation(
       tradesGenerated,
       lessonsGenerated,
       totalPnl: Number(totalPnl.toFixed(2)),
+      grossPnl: Number(grossPnlTotal.toFixed(2)),
+      totalCommission: Number(totalCommissions.toFixed(2)),
+      totalSlippageCost: Number(totalSlippageCosts.toFixed(2)),
       winRate: winRate !== null ? Number(winRate.toFixed(1)) : null,
+      benchmarks: {
+        buyAndHold: Number(totalBuyHoldPnl.toFixed(2)),
+        buyAndHoldByTicker: buyHoldReturns,
+        emaBaseline: Number(baselinePnl.toFixed(2)),
+      },
+      metrics: {
+        expectancy: Number(avgR.toFixed(3)),
+        profitFactor: Number(profitFactor.toFixed(2)),
+        maxDrawdown: Number(maxDD.toFixed(2)),
+        sharpe: Number(sharpe.toFixed(2)),
+        avgSlippagePerTrade: Number(avgSlippage.toFixed(2)),
+        avgCommissionPerTrade: totalTrades > 0 ? Number((totalCommissions / totalTrades).toFixed(2)) : 0,
+        totalR: Number(tradeRs.reduce((a, b) => a + b, 0).toFixed(2)),
+      },
+      breakdown: {
+        byRegime: tradesByRegime,
+        bySession: tradesBySession,
+        byTier: tradesByTier,
+      },
+      skippedSetups: skippedSetups.slice(0, 50),
       completedAt: new Date(),
     });
 

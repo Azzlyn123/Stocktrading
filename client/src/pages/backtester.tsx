@@ -24,6 +24,11 @@ import {
   Square,
   ShieldCheck,
   Timer,
+  ChevronDown,
+  ChevronUp,
+  DollarSign,
+  Target,
+  Activity,
 } from "lucide-react";
 import type { SimulationRun } from "@shared/schema";
 
@@ -93,6 +98,28 @@ function ProgressBar({ processed, total }: { processed: number; total: number })
         className="h-full bg-primary transition-all duration-300 rounded-full"
         style={{ width: `${pct}%` }}
       />
+    </div>
+  );
+}
+
+function BreakdownTable({ title, data }: { title: string; data: Record<string, { wins: number; losses: number; pnl: number }> }) {
+  const entries = Object.entries(data);
+  if (entries.length === 0) return null;
+  return (
+    <div>
+      <p className="text-[10px] text-muted-foreground font-medium mb-1">{title}</p>
+      <div className="space-y-0.5">
+        {entries.map(([key, val]) => (
+          <div key={key} className="grid grid-cols-4 gap-2 text-[10px]">
+            <span className="text-muted-foreground capitalize">{key}</span>
+            <span className="text-emerald-500 text-center">{val.wins}W</span>
+            <span className="text-red-500 text-center">{val.losses}L</span>
+            <span className={`text-right font-medium ${val.pnl >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+              {val.pnl >= 0 ? "+" : ""}{formatCurrency(val.pnl)}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -214,6 +241,18 @@ function AutoRunPanel({ status, onCancel }: { status: AutoRunStatus | null; onCa
 
 function RunCard({ run, onCancel }: { run: SimulationRun; onCancel: (id: string) => void }) {
   const isRunning = run.status === "running";
+  const [expanded, setExpanded] = useState(false);
+
+  const benchmarks = run.benchmarks as any;
+  const metrics = run.metrics as any;
+  const breakdown = run.breakdown as any;
+  const skippedSetups = run.skippedSetups as any;
+
+  const hasBenchmarks = benchmarks && (benchmarks.buyAndHold != null || benchmarks.emaBaseline != null);
+  const hasMetrics = metrics && (metrics.expectancy != null || metrics.profitFactor != null);
+  const hasCosts = (run.grossPnl ?? 0) !== (run.totalPnl ?? 0);
+  const hasBreakdown = breakdown && (breakdown.byRegime || breakdown.bySession || breakdown.byTier);
+  const skippedCount = Array.isArray(skippedSetups) ? skippedSetups.length : 0;
 
   return (
     <Card data-testid={`card-simulation-${run.id}`}>
@@ -248,33 +287,155 @@ function RunCard({ run, onCancel }: { run: SimulationRun; onCancel: (id: string)
         )}
 
         {run.status === "completed" && (
-          <div className="grid grid-cols-4 gap-3 mt-3">
-            <div className="text-center" data-testid={`stat-trades-${run.id}`}>
-              <p className="text-xs text-muted-foreground">Trades</p>
-              <p className="text-sm font-semibold">{run.tradesGenerated ?? 0}</p>
+          <>
+            <div className="grid grid-cols-4 gap-3 mt-3">
+              <div className="text-center" data-testid={`stat-trades-${run.id}`}>
+                <p className="text-xs text-muted-foreground">Trades</p>
+                <p className="text-sm font-semibold">{run.tradesGenerated ?? 0}</p>
+              </div>
+              <div className="text-center" data-testid={`stat-lessons-${run.id}`}>
+                <p className="text-xs text-muted-foreground">Lessons</p>
+                <p className="text-sm font-semibold">{run.lessonsGenerated ?? 0}</p>
+              </div>
+              <div className="text-center" data-testid={`stat-pnl-${run.id}`}>
+                <p className="text-xs text-muted-foreground">P&L</p>
+                <p
+                  className={`text-sm font-semibold ${
+                    (run.totalPnl ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"
+                  }`}
+                >
+                  {(run.totalPnl ?? 0) >= 0 ? "+" : ""}
+                  {formatCurrency(run.totalPnl ?? 0)}
+                </p>
+              </div>
+              <div className="text-center" data-testid={`stat-winrate-${run.id}`}>
+                <p className="text-xs text-muted-foreground">Win Rate</p>
+                <p className="text-sm font-semibold">
+                  {run.winRate != null ? `${run.winRate.toFixed(0)}%` : "--"}
+                </p>
+              </div>
             </div>
-            <div className="text-center" data-testid={`stat-lessons-${run.id}`}>
-              <p className="text-xs text-muted-foreground">Lessons</p>
-              <p className="text-sm font-semibold">{run.lessonsGenerated ?? 0}</p>
-            </div>
-            <div className="text-center" data-testid={`stat-pnl-${run.id}`}>
-              <p className="text-xs text-muted-foreground">P&L</p>
-              <p
-                className={`text-sm font-semibold ${
-                  (run.totalPnl ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"
-                }`}
-              >
-                {(run.totalPnl ?? 0) >= 0 ? "+" : ""}
-                {formatCurrency(run.totalPnl ?? 0)}
-              </p>
-            </div>
-            <div className="text-center" data-testid={`stat-winrate-${run.id}`}>
-              <p className="text-xs text-muted-foreground">Win Rate</p>
-              <p className="text-sm font-semibold">
-                {run.winRate != null ? `${run.winRate.toFixed(0)}%` : "--"}
-              </p>
-            </div>
-          </div>
+
+            {hasBenchmarks && (
+              <div className="mt-3" data-testid={`benchmarks-${run.id}`}>
+                <div className="flex items-center gap-1 mb-1.5">
+                  <Target className="w-3 h-3 text-muted-foreground" />
+                  <p className="text-[10px] text-muted-foreground font-medium">vs. Benchmarks</p>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="text-center">
+                    <p className="text-[10px] text-muted-foreground">Bot P&L</p>
+                    <p className={`text-sm font-semibold ${(run.totalPnl ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                      {(run.totalPnl ?? 0) >= 0 ? "+" : ""}{formatCurrency(run.totalPnl ?? 0)}
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[10px] text-muted-foreground">Buy & Hold</p>
+                    <p className={`text-sm font-semibold ${(benchmarks?.buyAndHold ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                      {(benchmarks?.buyAndHold ?? 0) >= 0 ? "+" : ""}{formatCurrency(benchmarks?.buyAndHold ?? 0)}
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[10px] text-muted-foreground">EMA Baseline</p>
+                    <p className={`text-sm font-semibold ${(benchmarks?.emaBaseline ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                      {(benchmarks?.emaBaseline ?? 0) >= 0 ? "+" : ""}{formatCurrency(benchmarks?.emaBaseline ?? 0)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {hasMetrics && (
+              <div className="mt-3" data-testid={`metrics-${run.id}`}>
+                <div className="flex items-center gap-1 mb-1.5">
+                  <Activity className="w-3 h-3 text-muted-foreground" />
+                  <p className="text-[10px] text-muted-foreground font-medium">Advanced Metrics</p>
+                </div>
+                <div className="grid grid-cols-4 gap-3">
+                  <div className="text-center">
+                    <p className="text-[10px] text-muted-foreground">Expectancy</p>
+                    <p className="text-sm font-semibold">{(metrics?.expectancy ?? 0).toFixed(2)}R</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[10px] text-muted-foreground">Profit Factor</p>
+                    <p className="text-sm font-semibold">{(metrics?.profitFactor ?? 0).toFixed(2)}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[10px] text-muted-foreground">Max Drawdown</p>
+                    <p className="text-sm font-semibold text-red-500">{formatCurrency(metrics?.maxDrawdown ?? 0)}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[10px] text-muted-foreground">Sharpe</p>
+                    <p className="text-sm font-semibold">{(metrics?.sharpe ?? 0).toFixed(2)}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {hasCosts && (
+              <div className="mt-3" data-testid={`costs-${run.id}`}>
+                <div className="flex items-center gap-1 mb-1.5">
+                  <DollarSign className="w-3 h-3 text-muted-foreground" />
+                  <p className="text-[10px] text-muted-foreground font-medium">Cost Breakdown</p>
+                </div>
+                <div className="grid grid-cols-4 gap-3">
+                  <div className="text-center">
+                    <p className="text-[10px] text-muted-foreground">Gross P&L</p>
+                    <p className={`text-sm font-semibold ${(run.grossPnl ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                      {(run.grossPnl ?? 0) >= 0 ? "+" : ""}{formatCurrency(run.grossPnl ?? 0)}
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[10px] text-muted-foreground">Slippage</p>
+                    <p className="text-sm font-semibold text-red-500">-{formatCurrency(run.totalSlippageCost ?? 0)}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[10px] text-muted-foreground">Commission</p>
+                    <p className="text-sm font-semibold text-red-500">-{formatCurrency(run.totalCommission ?? 0)}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[10px] text-muted-foreground">Net P&L</p>
+                    <p className={`text-sm font-semibold ${(run.totalPnl ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                      {(run.totalPnl ?? 0) >= 0 ? "+" : ""}{formatCurrency(run.totalPnl ?? 0)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {hasBreakdown && (
+              <div className="mt-3" data-testid={`breakdown-${run.id}`}>
+                <button
+                  onClick={() => setExpanded(!expanded)}
+                  className="flex items-center gap-1 text-[10px] text-muted-foreground font-medium hover-elevate rounded-md px-1 py-0.5"
+                  data-testid={`button-toggle-breakdown-${run.id}`}
+                >
+                  {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                  Performance Breakdown
+                </button>
+                {expanded && (
+                  <div className="mt-2 space-y-3">
+                    {breakdown.byRegime && Object.keys(breakdown.byRegime).length > 0 && (
+                      <BreakdownTable title="By Regime" data={breakdown.byRegime} />
+                    )}
+                    {breakdown.bySession && Object.keys(breakdown.bySession).length > 0 && (
+                      <BreakdownTable title="By Session" data={breakdown.bySession} />
+                    )}
+                    {breakdown.byTier && Object.keys(breakdown.byTier).length > 0 && (
+                      <BreakdownTable title="By Tier" data={breakdown.byTier} />
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {skippedCount > 0 && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground bg-accent/50 rounded-md px-3 py-1.5 mt-3" data-testid={`skipped-${run.id}`}>
+                <ShieldCheck className="w-3.5 h-3.5 text-primary shrink-0" />
+                <span>AI skipped {skippedCount} setups</span>
+              </div>
+            )}
+          </>
         )}
 
         {run.status === "failed" && run.errorMessage && (
@@ -417,6 +578,19 @@ export default function Backtester() {
   const totalLessons = completedRuns.reduce((s, r) => s + (r.lessonsGenerated ?? 0), 0);
   const totalTrades = completedRuns.reduce((s, r) => s + (r.tradesGenerated ?? 0), 0);
   const totalPnl = completedRuns.reduce((s, r) => s + (r.totalPnl ?? 0), 0);
+  const totalCosts = completedRuns.reduce((s, r) => s + (r.totalCommission ?? 0) + (r.totalSlippageCost ?? 0), 0);
+  const aggBuyAndHold = completedRuns.reduce((s, r) => {
+    const b = r.benchmarks as any;
+    return s + (b?.buyAndHold ?? 0);
+  }, 0);
+  const aggEma = completedRuns.reduce((s, r) => {
+    const b = r.benchmarks as any;
+    return s + (b?.emaBaseline ?? 0);
+  }, 0);
+  const hasBenchmarkAgg = completedRuns.some((r) => {
+    const b = r.benchmarks as any;
+    return b && (b.buyAndHold != null || b.emaBaseline != null);
+  });
 
   return (
     <div
@@ -538,45 +712,75 @@ export default function Backtester() {
       </Card>
 
       {completedRuns.length > 0 && (
-        <div className="grid grid-cols-3 gap-3">
-          <Card data-testid="card-total-trades">
-            <CardContent className="p-4 flex items-center gap-3">
-              <BarChart3 className="w-5 h-5 text-muted-foreground shrink-0" />
-              <div>
-                <p className="text-xs text-muted-foreground">Sim Trades</p>
-                <p className="text-lg font-semibold">{totalTrades}</p>
-              </div>
-            </CardContent>
-          </Card>
-          <Card data-testid="card-total-lessons">
-            <CardContent className="p-4 flex items-center gap-3">
-              <Brain className="w-5 h-5 text-muted-foreground shrink-0" />
-              <div>
-                <p className="text-xs text-muted-foreground">Lessons Generated</p>
-                <p className="text-lg font-semibold">{totalLessons}</p>
-              </div>
-            </CardContent>
-          </Card>
-          <Card data-testid="card-total-pnl">
-            <CardContent className="p-4 flex items-center gap-3">
-              {totalPnl >= 0 ? (
-                <TrendingUp className="w-5 h-5 text-emerald-500 shrink-0" />
-              ) : (
-                <TrendingDown className="w-5 h-5 text-red-500 shrink-0" />
-              )}
-              <div>
-                <p className="text-xs text-muted-foreground">Total Sim P&L</p>
-                <p
-                  className={`text-lg font-semibold ${
-                    totalPnl >= 0 ? "text-emerald-500" : "text-red-500"
-                  }`}
-                >
-                  {totalPnl >= 0 ? "+" : ""}
-                  {formatCurrency(totalPnl)}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Card data-testid="card-total-trades">
+              <CardContent className="p-4 flex items-center gap-3">
+                <BarChart3 className="w-5 h-5 text-muted-foreground shrink-0" />
+                <div>
+                  <p className="text-xs text-muted-foreground">Sim Trades</p>
+                  <p className="text-lg font-semibold">{totalTrades}</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card data-testid="card-total-lessons">
+              <CardContent className="p-4 flex items-center gap-3">
+                <Brain className="w-5 h-5 text-muted-foreground shrink-0" />
+                <div>
+                  <p className="text-xs text-muted-foreground">Lessons Generated</p>
+                  <p className="text-lg font-semibold">{totalLessons}</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card data-testid="card-total-pnl">
+              <CardContent className="p-4 flex items-center gap-3">
+                {totalPnl >= 0 ? (
+                  <TrendingUp className="w-5 h-5 text-emerald-500 shrink-0" />
+                ) : (
+                  <TrendingDown className="w-5 h-5 text-red-500 shrink-0" />
+                )}
+                <div>
+                  <p className="text-xs text-muted-foreground">Total Sim P&L</p>
+                  <p
+                    className={`text-lg font-semibold ${
+                      totalPnl >= 0 ? "text-emerald-500" : "text-red-500"
+                    }`}
+                  >
+                    {totalPnl >= 0 ? "+" : ""}
+                    {formatCurrency(totalPnl)}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card data-testid="card-total-costs">
+              <CardContent className="p-4 flex items-center gap-3">
+                <DollarSign className="w-5 h-5 text-red-500 shrink-0" />
+                <div>
+                  <p className="text-xs text-muted-foreground">Total Costs</p>
+                  <p className="text-lg font-semibold text-red-500">
+                    -{formatCurrency(totalCosts)}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {hasBenchmarkAgg && (
+            <div className="flex items-center gap-4 text-xs text-muted-foreground bg-accent/50 rounded-md px-3 py-2 flex-wrap" data-testid="aggregate-benchmarks">
+              <Target className="w-3.5 h-3.5 shrink-0" />
+              <span className={`font-medium ${totalPnl >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                Bot: {totalPnl >= 0 ? "+" : ""}{formatCurrency(totalPnl)}
+              </span>
+              <span className="text-muted-foreground">|</span>
+              <span className={`font-medium ${aggBuyAndHold >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                Buy & Hold: {aggBuyAndHold >= 0 ? "+" : ""}{formatCurrency(aggBuyAndHold)}
+              </span>
+              <span className="text-muted-foreground">|</span>
+              <span className={`font-medium ${aggEma >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                EMA: {aggEma >= 0 ? "+" : ""}{formatCurrency(aggEma)}
+              </span>
+            </div>
+          )}
         </div>
       )}
 

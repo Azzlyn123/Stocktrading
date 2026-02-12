@@ -119,6 +119,21 @@ shared/
 - Storage has both per-user methods (getSignals, getTrades, etc.) and global methods (getAllSignals, getAllTrades, etc.) - routes use global methods
 
 ## Recent Changes (Feb 12, 2026)
+- **Honest Backtester**: Added realistic cost modeling to historical simulator
+  - Slippage model: 5 bps slippage + 3 bps spread = 8 bps adverse on all entry/exit fills
+  - Commission model: $0.005/share with $1 minimum, deducted from P&L (entry + exit)
+  - Walk-forward lesson isolation: learning penalty only uses lessons from dates BEFORE current simulation date (prevents training on test set)
+  - SIM_CONFIG constant in historicalSimulator.ts controls all cost parameters
+- **Benchmark Comparison**: Each simulation run calculates and stores:
+  - Buy & hold: $10k per ticker, open→close for the day
+  - EMA baseline: 5/20 EMA crossover strategy for comparison
+- **Advanced Metrics**: Stored per simulation run in JSONB:
+  - Expectancy (avg R-multiple), profit factor, max drawdown, Sharpe ratio (annualized)
+  - Avg slippage per trade, avg commission per trade, total R
+- **Performance Breakdown**: Win/loss/P&L tracked by regime (trending/choppy/neutral), session (open/mid/power), and tier (A/B/C)
+- **Skipped Setups**: Trades skipped by learning penalty stored with context (ticker, score, penalty, reason)
+- **Enhanced Backtester UI**: Shows benchmarks (bot vs buy&hold vs EMA), cost breakdown (gross→slippage→commission→net), advanced metrics, expandable regime/session/tier breakdown, skipped setup count
+- **Schema additions**: simulation_runs table has grossPnl, totalCommission, totalSlippageCost (real), benchmarks, metrics, breakdown, skippedSetups (JSONB)
 - **Fixed findResistance**: Excludes most recent 2 bars from resistance calculation, searches for consolidation levels with 2+ touches at same price zone instead of tracking highest high (which made breakouts impossible)
 - **Improved RVOL scoring**: 5-tier granular scoring (5/10/14/18/20 pts) instead of binary 5/10 to prevent artificially low scores
 - **Score partial credit**: Non-aligned trend gives 8pts (not 0), non-aligned regime gives 8pts (not 0), producing more realistic base scores
