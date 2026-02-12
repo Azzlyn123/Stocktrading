@@ -237,7 +237,7 @@ export const settingsUpdateSchema = z.object({
   accountSize: z.number().min(1000).optional(),
   paperMode: z.boolean().optional(),
   maxDailyLossPct: z.number().min(0.5).max(10).optional(),
-  maxLosingTrades: z.number().min(1).max(10).optional(),
+  maxLosingTrades: z.number().min(1).max(50).optional(),
   cooldownMinutes: z.number().min(1).max(60).optional(),
   perTradeRiskPct: z.number().min(0.1).max(2).optional(),
   maxPositionPct: z.number().min(5).max(50).optional(),

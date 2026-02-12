@@ -165,6 +165,7 @@ interface PriceState {
   selectedTier: TradeTier | null;
   retestBarsSinceBreakout: number;
   confirmationCandle: Candle | null;
+  scaleFactor: number;
 }
 
 const priceStates = new Map<string, PriceState>();
@@ -220,6 +221,7 @@ function initializePriceState(ticker: SimulatedTicker): PriceState {
     selectedTier: null,
     retestBarsSinceBreakout: 0,
     confirmationCandle: null,
+    scaleFactor: 1,
   };
 }
 
@@ -812,7 +814,23 @@ export async function startSimulatedDataFeed(
 
           candle = create5mCandle(state);
         } else {
-          candle = state.bars5m.length > 0 ? state.bars5m[state.bars5m.length - 1] : create5mCandle(state);
+          const lastBar = state.bars5m.length > 0 ? state.bars5m[state.bars5m.length - 1] : null;
+          if (lastBar && state.price > 0) {
+            const scaleMismatch = Math.abs(lastBar.close - state.price) / state.price;
+            if (scaleMismatch > 0.03) {
+              state.scaleFactor = state.price / lastBar.close;
+            } else {
+              state.scaleFactor = 1;
+            }
+          }
+          candle = {
+            open: state.price * 0.999,
+            high: state.price * 1.001,
+            low: state.price * 0.998,
+            close: state.price,
+            volume: state.volume || (lastBar?.volume ?? 50000),
+            timestamp: Date.now(),
+          };
         }
 
         if (tickerConfig.ticker === "SPY" || tickerConfig.ticker === "QQQ") continue;
@@ -974,7 +992,8 @@ export async function startSimulatedDataFeed(
                   volRatio = boCandle.volume / Math.max(avgVol, 1);
                 }
 
-                const atr = calculateATR(state.bars5m, tieredConfig.strategy.atrLen);
+                const rawAtr = calculateATR(state.bars5m, tieredConfig.strategy.atrLen);
+                const atr = rawAtr * (state.scaleFactor || 1);
                 const atrRatio = state.atr14 > 0 ? atr / state.atr14 : 1.0;
 
                 let tier = selectTier(volRatio, atrRatio, tieredConfig);
@@ -1019,7 +1038,7 @@ export async function startSimulatedDataFeed(
                         atrExpansion: atrRatio >= 1.1,
                         timeframe: "5m",
                         rvol: Number(state.rvol.toFixed(2)),
-                        atrValue: Number(state.atr14.toFixed(4)),
+                        atrValue: Number((state.atr14 * (state.scaleFactor || 1)).toFixed(4)),
                         rejectionCount: 2,
                         score: state.lastScore,
                         scoreTier: tier,
@@ -1065,7 +1084,7 @@ export async function startSimulatedDataFeed(
               } else {
                 let retCandle: Candle;
                 if (currentDataSource === "live") {
-                  retCandle = state.bars5m.length > 0 ? state.bars5m[state.bars5m.length - 1] : candle;
+                  retCandle = candle; // Always use live-price candle in live mode
                 } else {
                   retCandle = createRetestCandle(state, state.resistanceLevel);
                   state.bars5m.push(retCandle);
@@ -1127,17 +1146,15 @@ export async function startSimulatedDataFeed(
                 log(`[${state.ticker}] RETEST→ENTRY check: valid=${retestResult.valid} entry=$${retestResult.entryPrice?.toFixed(2) ?? "none"} stop=$${retestResult.stopPrice?.toFixed(2) ?? "none"} reasons=${retestResult.reasons.join("; ") || "all passed"} session=${inSession} locked=${tradingLocked}`, "scanner");
 
                 if (retestResult.valid && retestResult.entryPrice && retestResult.stopPrice && inSession && !tradingLocked) {
-                  const closes5m = state.bars5m.map(b => b.close);
-                  const ema9 = lastEMA(closes5m, 9);
-                  const ema20 = lastEMA(closes5m, 20);
-                  const emaDeviation = closes5m.length > 0 ? Math.abs(ema9 - state.price) / state.price : 0;
-                  const barsScaleMismatched = emaDeviation > 0.03;
-                  const emaAligned = barsScaleMismatched ? true : ema9 > ema20;
+                  const sf2 = state.scaleFactor;
+                  const normalizedCloses = sf2 !== 1 
+                    ? state.bars5m.map(b => b.close * sf2) 
+                    : state.bars5m.map(b => b.close);
+                  const ema9 = lastEMA(normalizedCloses, 9);
+                  const ema20 = lastEMA(normalizedCloses, 20);
+                  const emaAligned = ema9 > ema20;
                   if (!emaAligned) {
                     log(`[${state.ticker}] ENTRY BLOCKED: EMA9 ($${ema9.toFixed(2)}) <= EMA20 ($${ema20.toFixed(2)})`, "scanner");
-                  }
-                  if (barsScaleMismatched) {
-                    log(`[${state.ticker}] EMA check auto-passed: bars scale mismatch (EMA9=$${ema9.toFixed(2)} vs price=$${state.price.toFixed(2)}, dev=${(emaDeviation*100).toFixed(1)}%)`, "scanner");
                   }
 
                   const riskPerShare = Math.abs(retestResult.entryPrice - retestResult.stopPrice);
@@ -1211,10 +1228,20 @@ export async function startSimulatedDataFeed(
               const minutesSinceEntry = Math.floor((Date.now() - new Date(trade.enteredAt!).getTime()) / 60000);
               const riskPerShare = Math.abs(trade.entryPrice - trade.stopPrice);
 
+              const sf = state.scaleFactor;
+              const normalizedBars = sf !== 1 ? state.bars5m.map(b => ({
+                ...b,
+                open: b.open * sf,
+                high: b.high * sf,
+                low: b.low * sf,
+                close: b.close * sf,
+              })) : state.bars5m;
+              const normalizedATR = state.atr14 * sf;
+
               const exitDecision = checkTieredExitRules(
-                candle, state.bars5m, trade.entryPrice, trade.stopPrice, trade.shares,
+                candle, normalizedBars, trade.entryPrice, trade.stopPrice, trade.shares,
                 trade.isPartiallyExited ?? false, riskPerShare, minutesSinceEntry,
-                tieredConfig.exits, tieredConfig.risk, state.atr14
+                tieredConfig.exits, tieredConfig.risk, normalizedATR
               );
 
               if (exitDecision.shouldExit) {
@@ -1225,14 +1252,29 @@ export async function startSimulatedDataFeed(
                     runnerShares: trade.shares - exitDecision.partialShares!,
                   });
                 } else {
-                  const pnl = (exitDecision.exitPrice! - trade.entryPrice) * trade.shares;
-                  const realizedR = riskPerShare > 0 ? (exitDecision.exitPrice! - trade.entryPrice) / riskPerShare : 0;
-                  await storage.updateTrade(trade.id, {
-                    status: "closed", exitPrice: exitDecision.exitPrice!, exitedAt: new Date(),
-                    exitReason: exitDecision.exitType!, pnl, realizedR,
-                    pnlPercent: ((exitDecision.exitPrice! - trade.entryPrice) / trade.entryPrice) * 100,
-                  });
-                  await storage.upsertDailySummary(userId, pnl, pnl >= 0, (user.accountSize ?? 100000) + pnl);
+                  const exitPrice = exitDecision.exitPrice!;
+                  const priceDiff = Math.abs(exitPrice - trade.entryPrice) / trade.entryPrice;
+                  if (priceDiff > 0.20) {
+                    log(`[${state.ticker}] EXIT SANITY FAIL: exitPrice=$${exitPrice.toFixed(2)} vs entry=$${trade.entryPrice.toFixed(2)} (${(priceDiff*100).toFixed(1)}% diff). Using entry as exit.`, "scanner");
+                    const sanitizedExit = trade.entryPrice;
+                    const pnl = (sanitizedExit - trade.entryPrice) * trade.shares;
+                    const realizedR = riskPerShare > 0 ? (sanitizedExit - trade.entryPrice) / riskPerShare : 0;
+                    await storage.updateTrade(trade.id, {
+                      status: "closed", exitPrice: sanitizedExit, exitedAt: new Date(),
+                      exitReason: "sanity_check", pnl, realizedR,
+                      pnlPercent: 0,
+                    });
+                    await storage.upsertDailySummary(userId, 0, true, (user.accountSize ?? 100000));
+                  } else {
+                    const pnl = (exitPrice - trade.entryPrice) * trade.shares;
+                    const realizedR = riskPerShare > 0 ? (exitPrice - trade.entryPrice) / riskPerShare : 0;
+                    await storage.updateTrade(trade.id, {
+                      status: "closed", exitPrice, exitedAt: new Date(),
+                      exitReason: exitDecision.exitType!, pnl, realizedR,
+                      pnlPercent: ((exitPrice - trade.entryPrice) / trade.entryPrice) * 100,
+                    });
+                    await storage.upsertDailySummary(userId, pnl, pnl >= 0, (user.accountSize ?? 100000) + pnl);
+                  }
                 }
               } else if (exitDecision.newStopPrice) {
                 await storage.updateTrade(trade.id, { stopPrice: exitDecision.newStopPrice });
@@ -1250,9 +1292,6 @@ export async function startSimulatedDataFeed(
       isLunchChop: isLunchChop(),
       spyAligned: regimeResult.aligned,
       spyChopping: regimeResult.chopping,
-      tradingLocked: false,
-      dailyLossCount: 0,
-      dailyR: 0,
       currentSession: getCurrentSession(TIERED_CONFIG),
     });
   }, 2000);

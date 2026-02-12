@@ -188,7 +188,8 @@ export default function Dashboard() {
   const lossCount = todayClosedTrades.filter((t) => (t.pnl ?? 0) < 0).length;
   const winRate = todayTradeCount > 0 ? (winCount / todayTradeCount) * 100 : 0;
   const totalPnl = allClosedTrades.reduce((sum, t) => sum + (t.pnl ?? 0), 0);
-  const tradingLocked = lossCount >= (user?.maxLosingTrades ?? 3) || todayNetR <= -3;
+  const maxDailyLossR = -20;
+  const tradingLocked = lossCount >= (user?.maxLosingTrades ?? 10) || todayNetR <= maxDailyLossR;
   const recentAlerts = (alerts ?? []).slice(0, 6);
 
   const equityCurve: { date: string; balance: number }[] = [];
