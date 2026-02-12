@@ -892,9 +892,8 @@ export async function startSimulatedDataFeed(
             const trades = await storage.getAllTrades();
             const todayET = new Date().toLocaleDateString("en-US", { timeZone: "America/New_York" });
             const todayTrades = trades.filter(t => t.exitedAt && new Date(t.exitedAt).toLocaleDateString("en-US", { timeZone: "America/New_York" }) === todayET);
-            const lossCount = todayTrades.filter(t => (t.pnl ?? 0) < 0).length;
             const dailyR = todayTrades.reduce((sum, t) => sum + (t.realizedR ?? 0), 0);
-            const tradingLocked = lossCount >= tieredConfig.daily.maxLosingTrades || dailyR <= tieredConfig.daily.maxDailyLossR;
+            const tradingLocked = dailyR <= tieredConfig.daily.maxDailyLossR;
 
             let consecutiveLosses = 0;
             const sortedTodayTrades = todayTrades.sort((a, b) => new Date(b.exitedAt!).getTime() - new Date(a.exitedAt!).getTime());
