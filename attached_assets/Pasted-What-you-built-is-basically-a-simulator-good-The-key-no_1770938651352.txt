@@ -1,0 +1,76 @@
+What you built is basically a simulator — good.
+
+The key now is: is the simulator honest? Because a “too-perfect” simulator will create a bot that dominates backtests and dies live.
+
+The top 8 things that make bots fake-good
+	1.	Lookahead bias
+Using data your bot wouldn’t have at that moment (even accidentally). Example: using the full candle’s high/low before the candle closes.
+	2.	Survivorship bias
+Testing only on today’s winners (like current S&P list). Real testing needs the universe as it existed then.
+	3.	Bad fills / no slippage
+If you assume you always get mid-price fills, your results are fantasy. You need spread + slippage + partial fills.
+	4.	Ignoring latency
+If your entry triggers at 10:05:00 but you “fill” at that exact price, that’s not real. Even a small delay changes outcomes.
+	5.	Over-trading small edge
+A tiny “edge” disappears once you add costs. You need to model fees + slippage + spread.
+	6.	Training on the test set
+If it “learns” from days you later use to evaluate it, it’ll look like it’s improving—because it’s memorizing.
+	7.	Changing rules while measuring
+If you tweak while evaluating, you can’t tell if it’s skill or curve-fit.
+	8.	Not tracking “no trade” examples
+If it only learns from taken trades, it becomes biased and doesn’t learn what it should’ve skipped.
+
+If you want a bot that truly gets better, do this structure
+
+Think of it like this:
+
+Layer 1 (non-negotiable): Hard risk rules
+	•	max loss per day
+	•	fixed risk per trade (your tier system)
+	•	max position size
+	•	kill-switch
+
+Layer 2: Strategy generates candidates
+
+Your breakout + retest rules spit out possible trades.
+
+Layer 3: AI only ranks candidates
+
+The AI’s first job should be one of these:
+	•	“Probability of reaching +1R before stop”
+	•	“Expected R”
+	•	“Quality score A/B/C”
+
+Do NOT let AI control risk sizing or remove stops early on. That’s how accounts get nuked.
+
+The “world-class” part comes from evaluation discipline
+
+If you want elite-level progress, you need elite-level testing:
+
+Use walk-forward testing (this matters a lot)
+
+Example:
+	•	Train on Days 1–60
+	•	Test on Days 61–70 (no learning during this window)
+	•	Roll forward: Train 1–70, test 71–80
+This proves it can generalize.
+
+Track the right scoreboard
+
+Win rate is not enough. Track:
+	•	expectancy (avg R per trade)
+	•	profit factor
+	•	max drawdown
+	•	average slippage per trade
+	•	performance by regime (trending vs choppy days, high ATR vs low ATR)
+	•	time-of-day performance
+
+The honest truth about “best in the world”
+
+The best systems usually win because of:
+	•	insane execution quality (fills, routing, latency)
+	•	massive data + clean labeling
+	•	tight risk controls
+	•	constant monitoring for regime shifts
+
+You can build a very strong system, but your edge will come from being more honest in testing than everyone else, not from the fanciest AI.
