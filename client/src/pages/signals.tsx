@@ -7,17 +7,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   Radio,
-  TrendingUp,
-  Volume2,
   Activity,
   Target,
-  Shield,
   CheckCircle,
   Clock,
-  ArrowUpRight,
   Eye,
-  BarChart3,
   Zap,
+  Search,
+  AlertTriangle,
+  XCircle,
 } from "lucide-react";
 import type { Signal, Alert } from "@shared/schema";
 
@@ -54,21 +52,155 @@ function TierBadge({ tier, score }: { tier?: string | null; score?: number | nul
   );
 }
 
-function ScoreBreakdown({ breakdown }: { breakdown: any }) {
-  if (!breakdown) return null;
-  const items = [
-    { label: "Vol Ratio", value: breakdown.volRatio?.toFixed(1) ?? "—" },
-    { label: "ATR Ratio", value: breakdown.atrRatio?.toFixed(1) ?? "—" },
-    { label: "Tier", value: breakdown.tier ?? "—" },
-  ];
+interface ScannerItem {
+  ticker: string;
+  name: string;
+  sector: string;
+  price: number;
+  changePct: number;
+  volume: number;
+  avgDailyVolume: number;
+  dollarVolume: number;
+  rvol: number;
+  atr14: number;
+  signalState: string;
+  resistanceLevel: number | null;
+  passesFilters: boolean;
+  trend1H: boolean;
+  spreadPct: number;
+  dailyATRpct: number;
+  vwap: number;
+  score: number;
+  scoreTier: string;
+  tier: string | null;
+  volRatio: number;
+  atrRatio: number;
+  distanceToResistancePct: number | null;
+  selectedTier: string | null;
+  blockedReasons: string[];
+  relStrengthVsSpy: number;
+  spyAligned: boolean;
+  inSession: boolean;
+}
+
+function LiveScannerCard({ item }: { item: ScannerItem }) {
+  const isActive = item.signalState !== "IDLE";
+  const readyCount = item.blockedReasons.length;
+  const isPositive = item.changePct >= 0;
+
   return (
-    <div className="flex items-center gap-1 flex-wrap">
-      {items.map((item) => (
-        <span key={item.label} className="text-[8px] px-1 py-0.5 rounded bg-accent text-muted-foreground">
-          {item.label}: {item.value}
-        </span>
-      ))}
-    </div>
+    <Card data-testid={`scanner-card-${item.ticker}`} className={isActive ? "border-emerald-500/40" : ""}>
+      <CardContent className="p-3 space-y-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold">{item.ticker}</span>
+            <Badge
+              variant={isActive ? "default" : "secondary"}
+              className="text-[9px] px-1.5 min-h-5"
+            >
+              {isActive ? STATE_LABELS[item.signalState] ?? item.signalState : "Scanning"}
+            </Badge>
+            {item.tier && <TierBadge tier={item.tier} />}
+            {item.selectedTier && (
+              <Badge variant="default" className="text-[8px] px-1 min-h-4">
+                Active: Tier {item.selectedTier}
+              </Badge>
+            )}
+          </div>
+          <div className="text-right">
+            <p className="text-sm font-medium">${item.price.toFixed(2)}</p>
+            <p className={`text-[10px] font-medium ${isPositive ? "text-emerald-500" : "text-red-500"}`}>
+              {isPositive ? "+" : ""}{item.changePct.toFixed(2)}%
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-4 gap-1.5">
+          <div className="p-1.5 rounded-md bg-accent/50 text-center">
+            <p className="text-[8px] text-muted-foreground uppercase">RVOL</p>
+            <p className={`text-[11px] font-medium ${item.rvol >= 1.5 ? "text-emerald-500" : "text-muted-foreground"}`}>
+              {item.rvol.toFixed(1)}x
+            </p>
+          </div>
+          <div className="p-1.5 rounded-md bg-accent/50 text-center">
+            <p className="text-[8px] text-muted-foreground uppercase">Vol Ratio</p>
+            <p className={`text-[11px] font-medium ${item.volRatio >= 1.2 ? "text-emerald-500" : "text-muted-foreground"}`}>
+              {item.volRatio.toFixed(1)}x
+            </p>
+          </div>
+          <div className="p-1.5 rounded-md bg-accent/50 text-center">
+            <p className="text-[8px] text-muted-foreground uppercase">ATR Ratio</p>
+            <p className={`text-[11px] font-medium ${item.atrRatio >= 1.0 ? "text-emerald-500" : "text-muted-foreground"}`}>
+              {item.atrRatio.toFixed(1)}x
+            </p>
+          </div>
+          <div className="p-1.5 rounded-md bg-accent/50 text-center">
+            <p className="text-[8px] text-muted-foreground uppercase">Resistance</p>
+            <p className="text-[11px] font-medium">
+              {item.resistanceLevel ? `$${item.resistanceLevel.toFixed(2)}` : "—"}
+            </p>
+          </div>
+        </div>
+
+        {item.resistanceLevel && item.distanceToResistancePct != null && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex-1 h-1.5 bg-accent rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  item.distanceToResistancePct <= 0 ? "bg-emerald-500" :
+                  item.distanceToResistancePct <= 0.5 ? "bg-amber-500" :
+                  "bg-muted-foreground/30"
+                }`}
+                style={{ width: `${Math.max(5, Math.min(100, 100 - item.distanceToResistancePct * 20))}%` }}
+              />
+            </div>
+            <span className={`text-[9px] font-medium ${
+              item.distanceToResistancePct <= 0 ? "text-emerald-500" :
+              item.distanceToResistancePct <= 0.5 ? "text-amber-500" :
+              "text-muted-foreground"
+            }`}>
+              {item.distanceToResistancePct <= 0
+                ? "Above resistance"
+                : `${item.distanceToResistancePct.toFixed(2)}% below`
+              }
+            </span>
+          </div>
+        )}
+
+        <div className="flex items-center gap-1 flex-wrap">
+          {[
+            { label: "15m Bias", met: item.trend1H },
+            { label: "SPY", met: item.spyAligned },
+            { label: "Session", met: item.inSession },
+            { label: "Universe", met: item.passesFilters },
+            { label: `RS ${item.relStrengthVsSpy > 0 ? "+" : ""}${(item.relStrengthVsSpy * 100).toFixed(1)}%`, met: item.relStrengthVsSpy > 0 },
+          ].map((c) => (
+            <div
+              key={c.label}
+              className={`flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded-full ${
+                c.met
+                  ? "bg-emerald-500/10 text-emerald-500"
+                  : "bg-accent text-muted-foreground"
+              }`}
+            >
+              {c.met ? <CheckCircle className="w-2.5 h-2.5" /> : <XCircle className="w-2.5 h-2.5" />}
+              {c.label}
+            </div>
+          ))}
+        </div>
+
+        {readyCount > 0 && (
+          <div className="space-y-0.5">
+            {item.blockedReasons.map((reason, i) => (
+              <p key={i} className="text-[9px] text-muted-foreground/70 flex items-center gap-1">
+                <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
+                {reason}
+              </p>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -136,11 +268,6 @@ function SignalCard({ signal }: { signal: Signal }) {
                 {signal.entryMode} entry
               </span>
             )}
-            {signal.stopBasis && (
-              <span className="text-[9px] px-1.5 py-0.5 rounded bg-accent text-muted-foreground">
-                stop: {signal.stopBasis}
-              </span>
-            )}
           </div>
         )}
 
@@ -150,9 +277,6 @@ function SignalCard({ signal }: { signal: Signal }) {
             <p className="text-xs font-medium mt-0.5">
               ${signal.resistanceLevel?.toFixed(2) ?? "—"}
             </p>
-            {signal.rejectionCount && (
-              <p className="text-[8px] text-muted-foreground">{signal.rejectionCount} rej</p>
-            )}
           </div>
           <div className="p-2 rounded-md bg-accent/50 text-center">
             <p className="text-[9px] text-muted-foreground uppercase">Entry</p>
@@ -164,21 +288,6 @@ function SignalCard({ signal }: { signal: Signal }) {
             <p className="text-[9px] text-muted-foreground uppercase">Stop</p>
             <p className="text-xs font-medium mt-0.5 text-red-500">
               ${signal.stopPrice?.toFixed(2) ?? "—"}
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2">
-          <div className="p-2 rounded-md bg-accent/50 text-center">
-            <p className="text-[9px] text-muted-foreground uppercase">T1 (+1R partial 50%)</p>
-            <p className="text-xs font-medium mt-0.5 text-emerald-500">
-              ${signal.target1?.toFixed(2) ?? "—"}
-            </p>
-          </div>
-          <div className="p-2 rounded-md bg-accent/50 text-center">
-            <p className="text-[9px] text-muted-foreground uppercase">T2 (2.5R trail)</p>
-            <p className="text-xs font-medium mt-0.5 text-emerald-500">
-              ${signal.target2?.toFixed(2) ?? "—"}
             </p>
           </div>
         </div>
@@ -203,26 +312,6 @@ function SignalCard({ signal }: { signal: Signal }) {
           ))}
         </div>
 
-        <ScoreBreakdown breakdown={signal.scoreBreakdown} />
-
-        {signal.positionSize && (
-          <div className="flex items-center justify-between text-xs text-muted-foreground pt-1 border-t border-border flex-wrap gap-1">
-            <span>
-              Size: {signal.positionSize} shares (${((signal.positionSize ?? 0) * (signal.entryPrice ?? 0)).toFixed(0)})
-            </span>
-            {signal.dollarRisk && (
-              <span>Risk: ${signal.dollarRisk.toFixed(0)}</span>
-            )}
-            <span>R:R {riskReward.toFixed(1)}</span>
-          </div>
-        )}
-
-        {signal.candlePattern && (
-          <p className="text-[10px] text-muted-foreground">
-            Pattern: {signal.candlePattern}
-          </p>
-        )}
-
         {signal.notes && (
           <p className="text-[10px] text-muted-foreground/70 italic">
             {signal.notes}
@@ -234,9 +323,14 @@ function SignalCard({ signal }: { signal: Signal }) {
 }
 
 export default function Signals() {
-  const { data: signals, isLoading } = useQuery<Signal[]>({
+  const { data: signals, isLoading: signalsLoading } = useQuery<Signal[]>({
     queryKey: ["/api/signals"],
-    refetchInterval: 3000,
+    refetchInterval: 5000,
+  });
+
+  const { data: scannerData, isLoading: scannerLoading } = useQuery<ScannerItem[]>({
+    queryKey: ["/api/scanner"],
+    refetchInterval: 5000,
   });
 
   const { data: alerts } = useQuery<Alert[]>({
@@ -257,6 +351,9 @@ export default function Signals() {
   const closedSignals = signals?.filter((s) => s.state === "CLOSED") ?? [];
   const unreadAlerts = alerts?.filter((a) => !a.isRead) ?? [];
 
+  const scannerItems = scannerData ?? [];
+  const nearBreakout = scannerItems.filter(s => s.distanceToResistancePct != null && s.distanceToResistancePct <= 1.0 && s.distanceToResistancePct > 0);
+
   return (
     <div className="p-4 md:p-6 space-y-6 max-w-5xl mx-auto overflow-y-auto h-full">
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -265,7 +362,7 @@ export default function Signals() {
             Signal Feed
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Momentum breakout + retest signals with scoring
+            Live scanning with tier-based breakout + retest strategy
           </p>
         </div>
         {unreadAlerts.length > 0 && (
@@ -281,24 +378,69 @@ export default function Signals() {
         )}
       </div>
 
-      <Tabs defaultValue="active">
+      <Tabs defaultValue="scanning">
         <TabsList>
-          <TabsTrigger value="active" className="gap-1" data-testid="tab-active-signals">
-            <Radio className="w-3.5 h-3.5" />
-            Active ({activeSignals.length})
+          <TabsTrigger value="scanning" className="gap-1" data-testid="tab-live-scanner">
+            <Search className="w-3.5 h-3.5" />
+            Live Scanner ({scannerItems.length})
           </TabsTrigger>
-          <TabsTrigger value="closed" className="gap-1" data-testid="tab-closed-signals">
+          <TabsTrigger value="triggered" className="gap-1" data-testid="tab-triggered-signals">
+            <Zap className="w-3.5 h-3.5" />
+            Triggered ({activeSignals.length})
+          </TabsTrigger>
+          <TabsTrigger value="history" className="gap-1" data-testid="tab-signal-history">
             <CheckCircle className="w-3.5 h-3.5" />
-            Closed ({closedSignals.length})
+            History ({closedSignals.length})
           </TabsTrigger>
           <TabsTrigger value="alerts" className="gap-1" data-testid="tab-alerts">
             <Activity className="w-3.5 h-3.5" />
-            Alert Log
+            Alerts
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="active" className="mt-4">
-          {isLoading ? (
+        <TabsContent value="scanning" className="mt-4 space-y-4">
+          {nearBreakout.length > 0 && (
+            <Card className="border-amber-500/30">
+              <CardHeader className="flex flex-row items-center gap-2 space-y-0 pb-1 p-3">
+                <AlertTriangle className="w-4 h-4 text-amber-500" />
+                <p className="text-xs font-medium text-amber-500">
+                  {nearBreakout.length} stock{nearBreakout.length !== 1 ? "s" : ""} approaching resistance
+                </p>
+              </CardHeader>
+            </Card>
+          )}
+
+          {scannerLoading ? (
+            <div className="grid md:grid-cols-2 gap-3">
+              {[1, 2, 3, 4].map((i) => (
+                <Card key={i}>
+                  <CardContent className="p-4">
+                    <Skeleton className="h-32 w-full" />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : scannerItems.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+                <Search className="w-10 h-10 text-muted-foreground/20 mb-3" />
+                <p className="text-sm text-muted-foreground font-medium">Scanner initializing...</p>
+                <p className="text-xs text-muted-foreground/60 mt-1">
+                  Loading market data and calculating levels
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid md:grid-cols-2 gap-3">
+              {scannerItems.map((item) => (
+                <LiveScannerCard key={item.ticker} item={item} />
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="triggered" className="mt-4">
+          {signalsLoading ? (
             <div className="grid md:grid-cols-2 gap-3">
               {[1, 2, 3].map((i) => (
                 <Card key={i}>
@@ -312,11 +454,10 @@ export default function Signals() {
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-16 text-center">
                 <Radio className="w-10 h-10 text-muted-foreground/20 mb-3" />
-                <p className="text-sm text-muted-foreground font-medium">No active signals</p>
+                <p className="text-sm text-muted-foreground font-medium">No triggered signals</p>
                 <p className="text-xs text-muted-foreground/60 mt-1 max-w-sm">
-                  The scanner is monitoring for momentum breakout + retest setups.
-                  Signals appear during US market hours (9:30 AM - 4:00 PM ET).
-                  No new setups during lunch chop (11:30 AM - 1:30 PM ET).
+                  When a stock breaks above resistance with qualifying volume, it will appear here
+                  as a BREAKOUT or RETEST signal before potentially triggering a trade.
                 </p>
               </CardContent>
             </Card>
@@ -329,12 +470,12 @@ export default function Signals() {
           )}
         </TabsContent>
 
-        <TabsContent value="closed" className="mt-4">
+        <TabsContent value="history" className="mt-4">
           {closedSignals.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-16 text-center">
                 <Target className="w-10 h-10 text-muted-foreground/20 mb-3" />
-                <p className="text-sm text-muted-foreground font-medium">No closed signals yet</p>
+                <p className="text-sm text-muted-foreground font-medium">No signal history yet</p>
                 <p className="text-xs text-muted-foreground/60 mt-1">
                   Completed signals will show here with P&L data
                 </p>

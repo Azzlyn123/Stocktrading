@@ -387,6 +387,12 @@ export interface ScannerItem {
   tier: TradeTier | null;
   volRatio: number;
   atrRatio: number;
+  distanceToResistancePct: number | null;
+  selectedTier: TradeTier | null;
+  blockedReasons: string[];
+  relStrengthVsSpy: number;
+  spyAligned: boolean;
+  inSession: boolean;
 }
 
 export function getScannerData(filters: {
@@ -396,9 +402,15 @@ export function getScannerData(filters: {
 }): ScannerItem[] {
   const items: ScannerItem[] = [];
 
+  const spyState = priceStates.get("SPY");
+  const spyBars5m = spyState?.bars5m ?? [];
+  const regimeResult = checkMarketRegime(spyBars5m, DEFAULT_STRATEGY_CONFIG.marketRegime);
+  const inSession = isInTradingSession(TIERED_CONFIG);
+
   for (const tickerConfig of SIMULATED_TICKERS) {
     const state = priceStates.get(tickerConfig.ticker);
     if (!state) continue;
+    if (tickerConfig.ticker === "SPY" || tickerConfig.ticker === "QQQ") continue;
 
     const dollarVolume = state.price * tickerConfig.avgDailyVolume;
     const dailyATRpct = state.price > 0 ? (state.atr14 / state.price) * 100 : 0;
@@ -420,6 +432,23 @@ export function getScannerData(filters: {
     const volRatio = state.dayVolume / Math.max(avgVol, 1);
     const atrRatio = state.atr14 > 0 ? calculateATR(state.bars5m, 14) / state.atr14 : 1;
     const qualifyingTier = selectTier(volRatio, atrRatio, TIERED_CONFIG);
+
+    const distanceToResistancePct = state.resistanceLevel && state.price > 0
+      ? ((state.resistanceLevel - state.price) / state.price) * 100
+      : null;
+
+    const blockedReasons: string[] = [];
+    if (!passesFilters) blockedReasons.push("Fails universe filters");
+    if (!inSession) blockedReasons.push("Outside session window");
+    if (!state.resistanceLevel) blockedReasons.push("No resistance level found");
+    if (state.resistanceLevel && state.price < state.resistanceLevel) {
+      blockedReasons.push(`Below resistance ($${state.resistanceLevel.toFixed(2)})`);
+    }
+    if (!biasResult.aligned) blockedReasons.push("15m bias not aligned");
+    if (!regimeResult.aligned) blockedReasons.push("SPY not aligned");
+    if (!qualifyingTier) blockedReasons.push("No tier qualified (vol/ATR too low)");
+    if (state.relStrengthVsSpy <= 0) blockedReasons.push("Weak vs SPY");
+    if (state.signalState !== "IDLE") blockedReasons.push(`In state: ${state.signalState}`);
 
     items.push({
       ticker: state.ticker,
@@ -444,10 +473,23 @@ export function getScannerData(filters: {
       tier: qualifyingTier,
       volRatio: Number(volRatio.toFixed(2)),
       atrRatio: Number(atrRatio.toFixed(2)),
+      distanceToResistancePct: distanceToResistancePct != null ? Number(distanceToResistancePct.toFixed(2)) : null,
+      selectedTier: state.selectedTier,
+      blockedReasons,
+      relStrengthVsSpy: Number((state.relStrengthVsSpy ?? 0).toFixed(4)),
+      spyAligned: regimeResult.aligned,
+      inSession,
     });
   }
 
-  return items.sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct));
+  return items.sort((a, b) => {
+    if (a.signalState !== "IDLE" && b.signalState === "IDLE") return -1;
+    if (a.signalState === "IDLE" && b.signalState !== "IDLE") return 1;
+    const aReady = a.blockedReasons.length;
+    const bReady = b.blockedReasons.length;
+    if (aReady !== bReady) return aReady - bReady;
+    return Math.abs(b.changePct) - Math.abs(a.changePct);
+  });
 }
 
 async function initializeLiveData(): Promise<boolean> {
