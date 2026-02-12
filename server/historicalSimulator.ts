@@ -98,7 +98,7 @@ export async function runHistoricalSimulation(
   tickerList?: string[]
 ): Promise<void> {
   const tickers = tickerList ?? BACKTEST_TICKERS;
-  const allSymbols = [...new Set([...tickers, "SPY"])];
+  const allSymbols = Array.from(new Set([...tickers, "SPY"]));
 
   const control = { cancel: false };
   activeSimulations.set(runId, control);
@@ -354,7 +354,7 @@ export async function runHistoricalSimulation(
 
             tradesGenerated++;
 
-            const signal = trade.signalId ? await storage.getSignalById(trade.signalId) : null;
+            const signal = trade.signalId ? (await storage.getSignalById(trade.signalId)) ?? null : null;
             const lessonResult = analyzeClosedTrade({
               trade: {
                 ...tradeRecord,

@@ -254,7 +254,7 @@ export async function registerRoutes(
   });
 
   app.get("/api/simulations/:id", requireAuth, async (req, res) => {
-    const run = await storage.getSimulationRun(req.params.id);
+    const run = await storage.getSimulationRun(req.params.id as string);
     if (!run) return res.status(404).json({ error: "Simulation not found" });
     res.json(run);
   });
@@ -299,7 +299,7 @@ export async function registerRoutes(
   });
 
   app.post("/api/simulations/:id/cancel", requireAuth, async (req, res) => {
-    const cancelled = cancelSimulation(req.params.id);
+    const cancelled = cancelSimulation(req.params.id as string);
     if (!cancelled) return res.status(404).json({ error: "Simulation not found or already completed" });
     res.json({ success: true });
   });
