@@ -5,6 +5,7 @@ import {
   buildTieredConfigFromUser,
   calculateATR,
   calculateVWAP,
+  lastEMA,
   findResistance,
   detectCandlePattern,
   checkUniverseFilter,
@@ -118,8 +119,8 @@ const DEMO_CONFIG: StrategyConfig = {
   risk: {
     perTradeRiskPct: 1.0,
     maxPositionPct: 5,
-    maxDailyLossPct: 999,
-    maxLosingTrades: 999,
+    maxDailyLossPct: 6,
+    maxLosingTrades: 3,
     cooldownMinutes: 15,
     timeStopMinutes: 30,
     timeStopR: 0.5,
@@ -871,6 +872,13 @@ export async function startSimulatedDataFeed(
             const dailyR = todayTrades.reduce((sum, t) => sum + (t.realizedR ?? 0), 0);
             const tradingLocked = lossCount >= tieredConfig.daily.maxLosingTrades || dailyR <= tieredConfig.daily.maxDailyLossR;
 
+            let consecutiveLosses = 0;
+            const sortedTodayTrades = todayTrades.sort((a, b) => new Date(b.exitedAt!).getTime() - new Date(a.exitedAt!).getTime());
+            for (const t of sortedTodayTrades) {
+              if ((t.pnl ?? 0) < 0) consecutiveLosses++;
+              else break;
+            }
+
             const passesUniverse = state.price >= tieredConfig.filters.minPrice &&
               dollarVolume >= tieredConfig.filters.minDollarVolume &&
               state.spreadPct <= tieredConfig.filters.maxSpreadPct &&
@@ -950,8 +958,18 @@ export async function startSimulatedDataFeed(
                 const atr = calculateATR(state.bars5m, tieredConfig.strategy.atrLen);
                 const atrRatio = state.atr14 > 0 ? atr / state.atr14 : 1.0;
 
-                const tier = selectTier(volRatio, atrRatio, tieredConfig);
-                log(`[${state.ticker}] Tier selection: volRatio=${volRatio.toFixed(2)} atrRatio=${atrRatio.toFixed(2)} tier=${tier ?? "NONE"}`, "scanner");
+                let tier = selectTier(volRatio, atrRatio, tieredConfig);
+                if (tier && consecutiveLosses >= 2) {
+                  const demoted = tier === "A" ? "B" : tier === "B" ? "C" : null;
+                  if (demoted) {
+                    log(`[${state.ticker}] Tier demoted ${tier}→${demoted} after ${consecutiveLosses} consecutive losses`, "scanner");
+                    tier = demoted;
+                  } else {
+                    log(`[${state.ticker}] Tier C skipped after ${consecutiveLosses} consecutive losses`, "scanner");
+                    tier = null;
+                  }
+                }
+                log(`[${state.ticker}] Tier selection: volRatio=${volRatio.toFixed(2)} atrRatio=${atrRatio.toFixed(2)} tier=${tier ?? "NONE"} consLosses=${consecutiveLosses}`, "scanner");
 
                 if (tier) {
                   const marketOk = checkMarketCondition(spyBars5m, tieredConfig, tier, direction);
@@ -1090,7 +1108,26 @@ export async function startSimulatedDataFeed(
                 log(`[${state.ticker}] RETEST→ENTRY check: valid=${retestResult.valid} entry=$${retestResult.entryPrice?.toFixed(2) ?? "none"} stop=$${retestResult.stopPrice?.toFixed(2) ?? "none"} reasons=${retestResult.reasons.join("; ") || "all passed"} session=${inSession} locked=${tradingLocked}`, "scanner");
 
                 if (retestResult.valid && retestResult.entryPrice && retestResult.stopPrice && inSession && !tradingLocked) {
+                  const closes5m = state.bars5m.map(b => b.close);
+                  const ema9 = lastEMA(closes5m, 9);
+                  const ema20 = lastEMA(closes5m, 20);
+                  const emaAligned = ema9 > ema20;
+                  if (!emaAligned) {
+                    log(`[${state.ticker}] ENTRY BLOCKED: EMA9 ($${ema9.toFixed(2)}) <= EMA20 ($${ema20.toFixed(2)})`, "scanner");
+                  }
+
                   const riskPerShare = Math.abs(retestResult.entryPrice - retestResult.stopPrice);
+                  const nextResistance = state.resistanceLevel ? state.resistanceLevel * 1.005 : retestResult.entryPrice * 1.02;
+                  const roomTo2R = (nextResistance - retestResult.entryPrice) >= (riskPerShare * 2);
+                  if (!roomTo2R) {
+                    log(`[${state.ticker}] ENTRY BLOCKED: No 2R room. Room=$${(nextResistance - retestResult.entryPrice).toFixed(2)} vs 2R=$${(riskPerShare * 2).toFixed(2)}`, "scanner");
+                  }
+
+                  if (!emaAligned || !roomTo2R) {
+                    log(`[${state.ticker}] Entry gates failed. EMA=${emaAligned} Room2R=${roomTo2R}. Skipping entry.`, "scanner");
+                  }
+
+                  if (emaAligned && roomTo2R) {
                   const minRisk = retestResult.entryPrice * 0.003;
                   const effectiveRisk = Math.max(riskPerShare, minRisk);
                   const equity = user.accountSize ?? 100000;
@@ -1139,6 +1176,7 @@ export async function startSimulatedDataFeed(
                       message: `${state.ticker} entered at $${retestResult.entryPrice.toFixed(2)}. Risk $${riskDollars.toFixed(0)}.`,
                       priority: "high", isRead: false,
                     });
+                  }
                   }
                 }
               }

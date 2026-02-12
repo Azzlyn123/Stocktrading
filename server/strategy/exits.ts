@@ -215,6 +215,32 @@ export function checkTieredExitRules(
     };
   }
 
+  if (recentBars5m.length >= 5) {
+    const lookback = recentBars5m.slice(-10);
+    const swingLows: number[] = [];
+    for (let i = 1; i < lookback.length - 1; i++) {
+      if (lookback[i].low < lookback[i - 1].low && lookback[i].low < lookback[i + 1].low) {
+        swingLows.push(lookback[i].low);
+      }
+    }
+    if (swingLows.length > 0) {
+      const recentSwingLow = swingLows[swingLows.length - 1];
+      if (currentPrice < recentSwingLow) {
+        const ema9 = lastEMA(recentBars5m.map(c => c.close), 9);
+        if (currentPrice < ema9) {
+          return {
+            shouldExit: true,
+            exitType: "hard_exit",
+            exitPrice: currentPrice,
+            reason: `Structure break: price $${currentPrice.toFixed(2)} below swing low $${recentSwingLow.toFixed(2)} and EMA9`,
+            partialShares: null,
+            newStopPrice: null,
+          };
+        }
+      }
+    }
+  }
+
   if (exitsConfig.hardExitRedCandles > 0 && recentBars5m.length >= exitsConfig.hardExitRedCandles) {
     const lastN = recentBars5m.slice(-exitsConfig.hardExitRedCandles);
     const allRed = lastN.every(isRedCandle);
