@@ -20,8 +20,26 @@ import {
   Brain,
   Loader2,
   Calendar,
+  Zap,
+  Square,
+  ShieldCheck,
+  Timer,
 } from "lucide-react";
 import type { SimulationRun } from "@shared/schema";
+
+interface AutoRunStatus {
+  active: boolean;
+  elapsedSeconds: number;
+  remainingSeconds: number;
+  durationMinutes: number;
+  datesCompleted: string[];
+  datesRemaining: string[];
+  currentDate: string | null;
+  totalTrades: number;
+  totalLessons: number;
+  totalPnl: number;
+  skippedByLearning: number;
+}
 
 function formatDate(dateStr: string): string {
   const d = new Date(dateStr + "T12:00:00Z");
@@ -40,6 +58,12 @@ function formatCurrency(val: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(val);
+}
+
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -70,6 +94,121 @@ function ProgressBar({ processed, total }: { processed: number; total: number })
         style={{ width: `${pct}%` }}
       />
     </div>
+  );
+}
+
+function AutoRunPanel({ status, onCancel }: { status: AutoRunStatus | null; onCancel: () => void }) {
+  if (!status) return null;
+
+  const progressPct = status.durationMinutes > 0
+    ? Math.min((status.elapsedSeconds / (status.durationMinutes * 60)) * 100, 100)
+    : 0;
+
+  return (
+    <Card className="border-primary/30" data-testid="card-auto-run">
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Zap className="w-4 h-4 text-primary" />
+            <span className="text-sm font-medium">Auto-Run Training</span>
+            {status.active ? (
+              <Badge variant="secondary" className="text-[10px] px-1.5 min-h-5">
+                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                Active
+              </Badge>
+            ) : (
+              <Badge variant="default" className="text-[10px] px-1.5 min-h-5">
+                <CheckCircle2 className="w-3 h-3 mr-1" />
+                Finished
+              </Badge>
+            )}
+          </div>
+          {status.active && (
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={onCancel}
+              data-testid="button-cancel-auto-run"
+            >
+              <Square className="w-4 h-4" />
+            </Button>
+          )}
+        </div>
+
+        <div className="w-full h-2 bg-accent rounded-full overflow-hidden">
+          <div
+            className="h-full bg-primary transition-all duration-500 rounded-full"
+            style={{ width: `${progressPct}%` }}
+          />
+        </div>
+
+        <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
+          <span className="flex items-center gap-1">
+            <Timer className="w-3 h-3" />
+            {status.active
+              ? `${formatTime(status.remainingSeconds)} remaining`
+              : `Ran for ${formatTime(status.elapsedSeconds)}`}
+          </span>
+          {status.currentDate && (
+            <span className="flex items-center gap-1">
+              <Calendar className="w-3 h-3" />
+              Simulating {formatDate(status.currentDate)}
+            </span>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2">
+          <div className="text-center" data-testid="autorun-dates-done">
+            <p className="text-[10px] text-muted-foreground">Days Simulated</p>
+            <p className="text-sm font-semibold">
+              {status.datesCompleted.length}
+              <span className="text-muted-foreground font-normal">
+                /{status.datesCompleted.length + status.datesRemaining.length}
+              </span>
+            </p>
+          </div>
+          <div className="text-center" data-testid="autorun-trades">
+            <p className="text-[10px] text-muted-foreground">Trades</p>
+            <p className="text-sm font-semibold">{status.totalTrades}</p>
+          </div>
+          <div className="text-center" data-testid="autorun-lessons">
+            <p className="text-[10px] text-muted-foreground">Lessons</p>
+            <p className="text-sm font-semibold flex items-center justify-center gap-1">
+              <Brain className="w-3 h-3" />
+              {status.totalLessons}
+            </p>
+          </div>
+          <div className="text-center" data-testid="autorun-pnl">
+            <p className="text-[10px] text-muted-foreground">P&L</p>
+            <p className={`text-sm font-semibold ${status.totalPnl >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+              {status.totalPnl >= 0 ? "+" : ""}{formatCurrency(status.totalPnl)}
+            </p>
+          </div>
+        </div>
+
+        {status.skippedByLearning > 0 && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground bg-accent/50 rounded-md px-3 py-1.5">
+            <ShieldCheck className="w-3.5 h-3.5 text-primary shrink-0" />
+            <span>AI skipped {status.skippedByLearning} setups based on past lessons</span>
+          </div>
+        )}
+
+        {!status.active && status.datesCompleted.length > 0 && (
+          <div className="flex items-center gap-1 flex-wrap mt-1">
+            {status.datesCompleted.slice(-6).map((d) => (
+              <Badge key={d} variant="outline" className="text-[9px] px-1 min-h-4">
+                {new Date(d + "T12:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              </Badge>
+            ))}
+            {status.datesCompleted.length > 6 && (
+              <span className="text-[10px] text-muted-foreground">
+                +{status.datesCompleted.length - 6} more
+              </span>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -198,11 +337,18 @@ export default function Backtester() {
     return d.toISOString().split("T")[0];
   });
 
+  const [autoRunMinutes, setAutoRunMinutes] = useState(5);
+
   const { toast } = useToast();
 
   const { data: runs, isLoading } = useQuery<SimulationRun[]>({
     queryKey: ["/api/simulations"],
     refetchInterval: 3000,
+  });
+
+  const { data: autoRunStatus } = useQuery<AutoRunStatus | null>({
+    queryKey: ["/api/simulations/auto-run/status"],
+    refetchInterval: 2000,
   });
 
   const startSimulation = useMutation({
@@ -231,6 +377,34 @@ export default function Backtester() {
     },
   });
 
+  const startAutoRun = useMutation({
+    mutationFn: async (minutes: number) => {
+      const res = await apiRequest("POST", "/api/simulations/auto-run", {
+        durationMinutes: minutes,
+      });
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/simulations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/simulations/auto-run/status"] });
+      toast({ title: "Auto-run started", description: data.message });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Failed to start auto-run", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const cancelAutoRunMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("POST", "/api/simulations/auto-run/cancel");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/simulations/auto-run/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/simulations"] });
+      toast({ title: "Auto-run cancelled" });
+    },
+  });
+
   if (isLoading) return <LoadingSkeleton />;
 
   const sortedRuns = [...(runs ?? [])].sort(
@@ -238,6 +412,7 @@ export default function Backtester() {
   );
 
   const hasRunning = sortedRuns.some((r) => r.status === "running");
+  const isAutoRunActive = autoRunStatus?.active ?? false;
   const completedRuns = sortedRuns.filter((r) => r.status === "completed");
   const totalLessons = completedRuns.reduce((s, r) => s + (r.lessonsGenerated ?? 0), 0);
   const totalTrades = completedRuns.reduce((s, r) => s + (r.tradesGenerated ?? 0), 0);
@@ -257,11 +432,78 @@ export default function Backtester() {
         </p>
       </div>
 
+      <Card data-testid="card-auto-run-controls" className="border-primary/20">
+        <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2 p-4">
+          <div className="flex items-center gap-2">
+            <Zap className="w-4 h-4 text-primary" />
+            <h3 className="text-sm font-medium">Auto-Run Training</h3>
+          </div>
+          <div className="flex items-center gap-1">
+            <ShieldCheck className="w-3.5 h-3.5 text-muted-foreground" />
+            <span className="text-[10px] text-muted-foreground">AI adapts from lessons</span>
+          </div>
+        </CardHeader>
+        <CardContent className="p-4 pt-0">
+          <p className="text-[10px] text-muted-foreground mb-3">
+            Automatically simulates multiple past trading days. The AI learns from each day and adjusts entry decisions for the next, skipping setups that match past failure patterns.
+          </p>
+          <div className="flex items-end gap-3 flex-wrap">
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground" htmlFor="auto-run-duration">
+                Duration (minutes)
+              </label>
+              <Input
+                id="auto-run-duration"
+                type="number"
+                min={1}
+                max={15}
+                value={autoRunMinutes}
+                onChange={(e) => setAutoRunMinutes(Math.min(15, Math.max(1, Number(e.target.value) || 5)))}
+                className="w-24"
+                disabled={isAutoRunActive}
+                data-testid="input-auto-run-duration"
+              />
+            </div>
+            {isAutoRunActive ? (
+              <Button
+                variant="destructive"
+                onClick={() => cancelAutoRunMutation.mutate()}
+                disabled={cancelAutoRunMutation.isPending}
+                data-testid="button-stop-auto-run"
+              >
+                <Square className="w-4 h-4 mr-2" />
+                Stop Training
+              </Button>
+            ) : (
+              <Button
+                onClick={() => startAutoRun.mutate(autoRunMinutes)}
+                disabled={startAutoRun.isPending || hasRunning}
+                data-testid="button-start-auto-run"
+              >
+                {startAutoRun.isPending ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Zap className="w-4 h-4 mr-2" />
+                )}
+                Start {autoRunMinutes}-min Training
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {autoRunStatus && (
+        <AutoRunPanel
+          status={autoRunStatus}
+          onCancel={() => cancelAutoRunMutation.mutate()}
+        />
+      )}
+
       <Card data-testid="card-new-simulation">
         <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2 p-4">
           <div className="flex items-center gap-2">
             <History className="w-4 h-4 text-muted-foreground" />
-            <h3 className="text-sm font-medium">Run Simulation</h3>
+            <h3 className="text-sm font-medium">Single Day Simulation</h3>
           </div>
         </CardHeader>
         <CardContent className="p-4 pt-0">
@@ -281,7 +523,7 @@ export default function Backtester() {
             </div>
             <Button
               onClick={() => startSimulation.mutate(selectedDate)}
-              disabled={startSimulation.isPending || hasRunning}
+              disabled={startSimulation.isPending || hasRunning || isAutoRunActive}
               data-testid="button-start-simulation"
             >
               {startSimulation.isPending ? (
@@ -289,12 +531,9 @@ export default function Backtester() {
               ) : (
                 <Play className="w-4 h-4 mr-2" />
               )}
-              {hasRunning ? "Simulation Running..." : "Start Simulation"}
+              {hasRunning ? "Simulation Running..." : "Run Single Day"}
             </Button>
           </div>
-          <p className="text-[10px] text-muted-foreground mt-2">
-            Fetches real market data from Alpaca and replays it through your strategy engine, generating trades and lessons.
-          </p>
         </CardContent>
       </Card>
 

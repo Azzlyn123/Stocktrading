@@ -9,7 +9,7 @@ import type { User } from "@shared/schema";
 import { startSimulatedDataFeed, registerUser, unregisterUser, getScannerData, getDataSource, isLiveConnected, getSharedUserId } from "./simulator";
 import { seedDemoData } from "./seed";
 import { generateAdaptiveInsights } from "./strategy/learning";
-import { runHistoricalSimulation, getActiveSimulations, cancelSimulation } from "./historicalSimulator";
+import { runHistoricalSimulation, getActiveSimulations, cancelSimulation, startAutoRun, getAutoRunStatus, cancelAutoRun } from "./historicalSimulator";
 
 declare global {
   namespace Express {
@@ -253,6 +253,11 @@ export async function registerRoutes(
     res.json(getActiveSimulations());
   });
 
+  app.get("/api/simulations/auto-run/status", requireAuth, (_req, res) => {
+    const status = getAutoRunStatus();
+    res.json(status);
+  });
+
   app.get("/api/simulations/:id", requireAuth, async (req, res) => {
     const run = await storage.getSimulationRun(req.params.id as string);
     if (!run) return res.status(404).json({ error: "Simulation not found" });
@@ -301,6 +306,23 @@ export async function registerRoutes(
   app.post("/api/simulations/:id/cancel", requireAuth, async (req, res) => {
     const cancelled = cancelSimulation(req.params.id as string);
     if (!cancelled) return res.status(404).json({ error: "Simulation not found or already completed" });
+    res.json({ success: true });
+  });
+
+  app.post("/api/simulations/auto-run", requireAuth, async (req, res) => {
+    const userId = (req.user as User).id;
+    const { durationMinutes } = req.body;
+    const duration = Math.min(Math.max(Number(durationMinutes) || 5, 1), 15);
+    const result = await startAutoRun(userId, duration, storage);
+    if (!result.started) {
+      return res.status(409).json({ error: result.message });
+    }
+    res.json(result);
+  });
+
+  app.post("/api/simulations/auto-run/cancel", requireAuth, (_req, res) => {
+    const cancelled = cancelAutoRun();
+    if (!cancelled) return res.status(404).json({ error: "No active auto-run to cancel" });
     res.json({ success: true });
   });
 

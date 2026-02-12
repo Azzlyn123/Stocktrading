@@ -16,7 +16,7 @@ import {
   type TradeTier,
 } from "./strategy";
 import { DEFAULT_STRATEGY_CONFIG } from "./strategy/config";
-import { analyzeClosedTrade } from "./strategy/learning";
+import { analyzeClosedTrade, computeLearningPenalty } from "./strategy/learning";
 import { isAlpacaConfigured, fetchBarsForDate, fetchDailyBarsForDate } from "./alpaca";
 
 const BACKTEST_TICKERS = [
@@ -76,9 +76,148 @@ interface HistoricalTickerState {
 }
 
 const activeSimulations = new Map<string, { cancel: boolean }>();
+let autoRunState: {
+  active: boolean;
+  cancel: boolean;
+  userId: string;
+  startedAt: number;
+  durationMinutes: number;
+  datesCompleted: string[];
+  datesRemaining: string[];
+  currentDate: string | null;
+  totalTrades: number;
+  totalLessons: number;
+  totalPnl: number;
+  skippedByLearning: number;
+} | null = null;
 
 export function getActiveSimulations(): string[] {
   return Array.from(activeSimulations.keys());
+}
+
+export function getAutoRunStatus() {
+  if (!autoRunState) return null;
+  const elapsed = (Date.now() - autoRunState.startedAt) / 1000;
+  const remaining = Math.max(0, autoRunState.durationMinutes * 60 - elapsed);
+  return {
+    active: autoRunState.active,
+    elapsedSeconds: Math.round(elapsed),
+    remainingSeconds: Math.round(remaining),
+    durationMinutes: autoRunState.durationMinutes,
+    datesCompleted: autoRunState.datesCompleted,
+    datesRemaining: autoRunState.datesRemaining,
+    currentDate: autoRunState.currentDate,
+    totalTrades: autoRunState.totalTrades,
+    totalLessons: autoRunState.totalLessons,
+    totalPnl: Number(autoRunState.totalPnl.toFixed(2)),
+    skippedByLearning: autoRunState.skippedByLearning,
+  };
+}
+
+export function cancelAutoRun(): boolean {
+  if (autoRunState && autoRunState.active) {
+    autoRunState.cancel = true;
+    activeSimulations.forEach((sim) => {
+      sim.cancel = true;
+    });
+    return true;
+  }
+  return false;
+}
+
+function getWeekdaysGoingBack(fromDate: Date, count: number): string[] {
+  const dates: string[] = [];
+  const d = new Date(fromDate);
+  d.setDate(d.getDate() - 1);
+  while (dates.length < count) {
+    if (d.getDay() !== 0 && d.getDay() !== 6) {
+      dates.push(d.toISOString().split("T")[0]);
+    }
+    d.setDate(d.getDate() - 1);
+  }
+  return dates;
+}
+
+export async function startAutoRun(
+  userId: string,
+  durationMinutes: number,
+  storage: IStorage
+): Promise<{ started: boolean; message: string }> {
+  if (autoRunState?.active) {
+    return { started: false, message: "Auto-run is already active." };
+  }
+
+  const maxDates = Math.max(3, Math.ceil(durationMinutes * 2));
+  const dates = getWeekdaysGoingBack(new Date(), maxDates);
+
+  autoRunState = {
+    active: true,
+    cancel: false,
+    userId,
+    startedAt: Date.now(),
+    durationMinutes,
+    datesCompleted: [],
+    datesRemaining: [...dates],
+    currentDate: null,
+    totalTrades: 0,
+    totalLessons: 0,
+    totalPnl: 0,
+    skippedByLearning: 0,
+  };
+
+  log(`[AutoRun] Starting ${durationMinutes}-minute auto-run across ${dates.length} dates`, "historical");
+
+  runAutoRunLoop(userId, storage).catch((err) => {
+    log(`[AutoRun] Error: ${err.message}`, "historical");
+  });
+
+  return { started: true, message: `Auto-run started for ${durationMinutes} minutes across ${dates.length} trading days.` };
+}
+
+async function runAutoRunLoop(userId: string, storage: IStorage) {
+  if (!autoRunState) return;
+
+  const deadline = autoRunState.startedAt + autoRunState.durationMinutes * 60 * 1000;
+
+  while (autoRunState.datesRemaining.length > 0 && Date.now() < deadline && !autoRunState.cancel) {
+    const date = autoRunState.datesRemaining.shift()!;
+    autoRunState.currentDate = date;
+
+    log(`[AutoRun] Simulating ${date} (${autoRunState.datesCompleted.length + 1}/${autoRunState.datesCompleted.length + autoRunState.datesRemaining.length + 1})`, "historical");
+
+    const run = await storage.createSimulationRun({
+      userId,
+      simulationDate: date,
+      status: "pending",
+      tickers: null,
+    });
+
+    await runHistoricalSimulation(run.id, date, userId, storage);
+
+    const completedRun = await storage.getSimulationRun(run.id);
+    if (completedRun) {
+      autoRunState.totalTrades += completedRun.tradesGenerated ?? 0;
+      autoRunState.totalLessons += completedRun.lessonsGenerated ?? 0;
+      autoRunState.totalPnl += completedRun.totalPnl ?? 0;
+    }
+
+    autoRunState.datesCompleted.push(date);
+
+    if (Date.now() >= deadline) {
+      log(`[AutoRun] Time limit reached after ${autoRunState.datesCompleted.length} dates`, "historical");
+      break;
+    }
+  }
+
+  autoRunState.active = false;
+  autoRunState.currentDate = null;
+  log(`[AutoRun] Finished: ${autoRunState.datesCompleted.length} dates, ${autoRunState.totalTrades} trades, ${autoRunState.totalLessons} lessons, P&L: $${autoRunState.totalPnl.toFixed(2)}`, "historical");
+}
+
+export function incrementAutoRunSkipped() {
+  if (autoRunState) {
+    autoRunState.skippedByLearning++;
+  }
 }
 
 export function cancelSimulation(runId: string): boolean {
@@ -479,7 +618,44 @@ export async function runHistoricalSimulation(
                 const shares = Math.max(1, Math.floor(dollarRisk / riskPerShare));
                 const target1 = entryPrice + riskPerShare * (tieredConfig.exits.partialAtR ?? 1.5);
                 const target2 = entryPrice + riskPerShare * (tieredConfig.exits.finalTargetR ?? 2.5);
-                const score = Math.round((state.rvol > 1.5 ? 20 : 10) + (biasResult.aligned ? 15 : 0) + 20 + 15);
+                let score = Math.round((state.rvol > 1.5 ? 20 : 10) + (biasResult.aligned ? 15 : 0) + 20 + 15);
+
+                const session = state.minutesSinceOpen <= 90 ? "open" : state.minutesSinceOpen <= 240 ? "mid" : "power";
+                try {
+                  const recentLessons = await storage.getRecentLessons(50);
+                  const penaltyResult = computeLearningPenalty(
+                    recentLessons.map(l => ({
+                      ticker: l.ticker,
+                      tier: l.tier,
+                      outcomeCategory: l.outcomeCategory,
+                      lessonTags: l.lessonTags,
+                      marketContext: l.marketContext,
+                      pnl: l.pnl,
+                      scoreAtEntry: l.scoreAtEntry,
+                    })),
+                    ticker,
+                    state.selectedTier ?? "C",
+                    regimeResult.aligned,
+                    session
+                  );
+
+                  if (penaltyResult.penalty > 0) {
+                    score = Math.max(0, score - penaltyResult.penalty);
+                    log(`[HistSim] ${ticker} LEARNING PENALTY: -${penaltyResult.penalty} pts (score ${score + penaltyResult.penalty} -> ${score}). ${penaltyResult.reasons.join("; ")}`, "historical");
+                  }
+                } catch (lpErr) {
+                  log(`[HistSim] Learning penalty error: ${lpErr}`, "historical");
+                }
+
+                const minScore = DEFAULT_STRATEGY_CONFIG.scoring.halfSizeMin;
+                if (score < minScore) {
+                  log(`[HistSim] ${ticker} SKIPPED entry - score ${score} below threshold ${minScore} after learning penalty`, "historical");
+                  incrementAutoRunSkipped();
+                  state.signalState = "IDLE";
+                  state.selectedTier = null;
+                  processedBars++;
+                  continue;
+                }
 
                 state.signalState = "TRIGGERED";
                 state.activeTrade = {
