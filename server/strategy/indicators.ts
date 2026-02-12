@@ -82,18 +82,41 @@ export function findResistance(
 ): { level: number; rejections: number } | null {
   if (candles.length < lookback) return null;
   const recent = candles.slice(-lookback);
-  let highestHigh = 0;
-  let rejectionCount = 0;
+  const excludeRecent = 2;
+  if (recent.length <= excludeRecent) return null;
 
-  for (const c of recent) {
-    if (c.high > highestHigh) highestHigh = c.high;
+  const priorBars = recent.slice(0, -excludeRecent);
+
+  const highs = priorBars.map(c => c.high).sort((a, b) => b - a);
+  const tolerance = 0.004;
+  let bestLevel = 0;
+  let bestCount = 0;
+
+  for (let i = 0; i < Math.min(highs.length, 10); i++) {
+    const candidate = highs[i];
+    let touches = 0;
+    for (const c of priorBars) {
+      if (Math.abs(c.high - candidate) / candidate < tolerance && c.close < candidate) {
+        touches++;
+      }
+    }
+    if (touches > bestCount) {
+      bestCount = touches;
+      bestLevel = candidate;
+    }
   }
 
-  for (const c of recent) {
-    if (
-      Math.abs(c.high - highestHigh) / highestHigh < 0.003 &&
-      c.close < highestHigh
-    ) {
+  if (bestCount >= 2) {
+    return { level: bestLevel, rejections: bestCount };
+  }
+
+  let highestHigh = 0;
+  for (const c of priorBars) {
+    if (c.high > highestHigh) highestHigh = c.high;
+  }
+  let rejectionCount = 0;
+  for (const c of priorBars) {
+    if (Math.abs(c.high - highestHigh) / highestHigh < tolerance && c.close < highestHigh) {
       rejectionCount++;
     }
   }

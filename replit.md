@@ -118,6 +118,14 @@ shared/
 - buildConfigFromUser in strategy/index.ts maps user settings to StrategyConfig
 - Storage has both per-user methods (getSignals, getTrades, etc.) and global methods (getAllSignals, getAllTrades, etc.) - routes use global methods
 
+## Recent Changes (Feb 12, 2026)
+- **Fixed findResistance**: Excludes most recent 2 bars from resistance calculation, searches for consolidation levels with 2+ touches at same price zone instead of tracking highest high (which made breakouts impossible)
+- **Improved RVOL scoring**: 5-tier granular scoring (5/10/14/18/20 pts) instead of binary 5/10 to prevent artificially low scores
+- **Score partial credit**: Non-aligned trend gives 8pts (not 0), non-aligned regime gives 8pts (not 0), producing more realistic base scores
+- **Learning penalty cap**: Capped at 20pts in historical simulator to prevent runaway filtering of all trade setups
+- **SIP data feed**: Switched from IEX to SIP feed for 35x more volume data accuracy
+- **Multi-day RVOL baseline**: fetchMultiDayDailyBars fetches 20-day daily bars for accurate RVOL/ATR calculations
+
 ## User Preferences
 - Default dark mode
 - Inter font family

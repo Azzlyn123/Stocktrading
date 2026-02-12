@@ -130,7 +130,7 @@ export async function fetchBarsForDate(
   const end = `${date}T16:00:00-05:00`;
 
   const symbolStr = symbols.join(",");
-  const url = `${DATA_BASE_URL}/stocks/bars?symbols=${symbolStr}&timeframe=${timeframe}&start=${start}&end=${end}&limit=10000&feed=iex&adjustment=split`;
+  const url = `${DATA_BASE_URL}/stocks/bars?symbols=${symbolStr}&timeframe=${timeframe}&start=${start}&end=${end}&limit=10000&feed=sip&adjustment=split`;
 
   try {
     const res = await fetch(url, { headers });
@@ -151,6 +151,35 @@ export async function fetchBarsForDate(
   return result;
 }
 
+export async function fetchMultiDayDailyBars(
+  symbols: string[],
+  date: string,
+  lookbackDays: number = 20
+): Promise<Map<string, Candle[]>> {
+  const result = new Map<string, Candle[]>();
+  const endDate = new Date(date + "T12:00:00Z");
+  const startDate = new Date(endDate);
+  startDate.setDate(startDate.getDate() - lookbackDays - 5);
+  const start = startDate.toISOString().split("T")[0];
+
+  const symbolStr = symbols.join(",");
+  const url = `${DATA_BASE_URL}/stocks/bars?symbols=${symbolStr}&timeframe=1Day&start=${start}T00:00:00Z&end=${date}T00:00:00Z&limit=1000&feed=sip&adjustment=split`;
+
+  try {
+    const res = await fetch(url, { headers });
+    if (!res.ok) return result;
+    const data = await res.json();
+    const barsMap: Record<string, AlpacaBar[]> = data.bars || {};
+    for (const [sym, bars] of Object.entries(barsMap)) {
+      result.set(sym, (bars as AlpacaBar[]).map(alpacaBarToCandle));
+    }
+  } catch (e: any) {
+    log(`Alpaca multi-day bars fetch failed: ${e.message}`, "alpaca");
+  }
+
+  return result;
+}
+
 export async function fetchDailyBarsForDate(
   symbols: string[],
   date: string
@@ -161,7 +190,7 @@ export async function fetchDailyBarsForDate(
   const start = prevDate.toISOString().split("T")[0];
 
   const symbolStr = symbols.join(",");
-  const url = `${DATA_BASE_URL}/stocks/bars?symbols=${symbolStr}&timeframe=1Day&start=${start}T00:00:00Z&end=${date}T00:00:00Z&limit=10&feed=iex&adjustment=split`;
+  const url = `${DATA_BASE_URL}/stocks/bars?symbols=${symbolStr}&timeframe=1Day&start=${start}T00:00:00Z&end=${date}T00:00:00Z&limit=10&feed=sip&adjustment=split`;
 
   try {
     const res = await fetch(url, { headers });

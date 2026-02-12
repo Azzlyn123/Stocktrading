@@ -17,7 +17,7 @@ import {
 } from "./strategy";
 import { DEFAULT_STRATEGY_CONFIG } from "./strategy/config";
 import { analyzeClosedTrade, computeLearningPenalty } from "./strategy/learning";
-import { isAlpacaConfigured, fetchBarsForDate, fetchDailyBarsForDate } from "./alpaca";
+import { isAlpacaConfigured, fetchBarsForDate, fetchDailyBarsForDate, fetchMultiDayDailyBars } from "./alpaca";
 
 const BACKTEST_TICKERS = [
   "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD", "JPM", "V", "NFLX", "CRM", "AVGO", "LLY"
@@ -263,6 +263,9 @@ export async function runHistoricalSimulation(
     log(`[HistSim] Fetching previous day bars...`, "historical");
     const prevDayBars = await fetchDailyBarsForDate(allSymbols, simulationDate);
 
+    log(`[HistSim] Fetching 20-day daily bars for RVOL/ATR baseline...`, "historical");
+    const multiDayBars = await fetchMultiDayDailyBars(allSymbols, simulationDate, 20);
+
     const spyBars5m = bars5mMap.get("SPY") ?? [];
     if (spyBars5m.length === 0) {
       await storage.updateSimulationRun(runId, {
@@ -313,10 +316,27 @@ export async function runHistoricalSimulation(
 
       const tickerBars5m = bars5mMap.get(ticker) ?? [];
       const prevDay = prevDayBars.get(ticker);
+      const dailyHistory = multiDayBars.get(ticker) ?? [];
 
       if (tickerBars5m.length < 10) {
         processedBars += tickerBars5m.length;
+        log(`[HistSim] ${ticker} skipped - only ${tickerBars5m.length} bars (need 10+)`, "historical");
         continue;
+      }
+
+      const avgDailyVolume = dailyHistory.length > 1
+        ? dailyHistory.slice(0, -1).reduce((s, b) => s + b.volume, 0) / (dailyHistory.length - 1)
+        : 0;
+
+      let dailyATRbaseline = 0;
+      if (dailyHistory.length >= 5) {
+        const ranges = dailyHistory.slice(-5).map(b => b.high - b.low);
+        dailyATRbaseline = ranges.reduce((s, r) => s + r, 0) / ranges.length;
+        dailyATRbaseline = dailyATRbaseline / 78 * 1.2;
+      } else if (prevDay) {
+        dailyATRbaseline = (prevDay.high - prevDay.low) / 78 * 1.2;
+      } else {
+        dailyATRbaseline = tickerBars5m[0].open * 0.002;
       }
 
       const state: HistoricalTickerState = {
@@ -334,13 +354,13 @@ export async function runHistoricalSimulation(
         retestBars: [],
         barCount: 0,
         dayVolume: 0,
-        rvol: 1.5,
+        rvol: 1.0,
         atr14: 0,
         vwap: 0,
         prevDayHigh: prevDay ? prevDay.high : tickerBars5m[0].open * 1.01,
         prevDayLow: prevDay ? prevDay.low : tickerBars5m[0].open * 0.99,
         yesterdayRange: prevDay ? (prevDay.high - prevDay.low) : tickerBars5m[0].open * 0.02,
-        dailyATRbaseline: prevDay ? ((prevDay.high - prevDay.low) * 0.15) : tickerBars5m[0].open * 0.003,
+        dailyATRbaseline,
         spreadPct: 0.02,
         minutesSinceOpen: 0,
         selectedTier: null,
@@ -350,6 +370,8 @@ export async function runHistoricalSimulation(
       };
 
       let lastRegimeResult = checkMarketRegime([], DEFAULT_STRATEGY_CONFIG.marketRegime);
+
+      let diag = { resistFound: 0, breakoutsAboveResist: 0, tierSelected: 0, boQualified: 0, retestValid: 0, entryAttempted: 0 };
 
       for (let i = 0; i < tickerBars5m.length; i++) {
         if (control.cancel) break;
@@ -364,6 +386,12 @@ export async function runHistoricalSimulation(
         state.low = Math.min(state.low, bar.low);
         state.dayVolume += bar.volume;
         state.volume = bar.volume;
+
+        if (avgDailyVolume > 0 && state.barCount > 0) {
+          const fractionOfDay = state.barCount / 78;
+          const expectedVolume = avgDailyVolume * fractionOfDay;
+          state.rvol = expectedVolume > 0 ? state.dayVolume / expectedVolume : 1.0;
+        }
 
         if (state.barCount % 3 === 0 && state.bars5m.length >= 3) {
           const last3 = state.bars5m.slice(-3);
@@ -529,6 +557,7 @@ export async function runHistoricalSimulation(
         if (state.signalState === "IDLE" && (i - state.lastBreakoutBarIndex) > 10) {
           const resistance = findResistance(state.bars5m, 30);
           if (resistance) {
+            diag.resistFound++;
             const resistDistPct = state.price > 0 ? Math.abs(resistance.level - state.price) / state.price : 1;
             if (resistDistPct <= 0.03) {
               state.resistanceLevel = resistance.level;
@@ -536,6 +565,7 @@ export async function runHistoricalSimulation(
           }
 
           if (state.resistanceLevel && bar.close > state.resistanceLevel) {
+            diag.breakoutsAboveResist++;
             const avgVol = state.bars5m.length > 20
               ? state.bars5m.slice(-21, -1).reduce((s, b) => s + b.volume, 0) / 20
               : state.bars5m.slice(0, -1).reduce((s, b) => s + b.volume, 0) / Math.max(state.bars5m.length - 1, 1);
@@ -547,12 +577,14 @@ export async function runHistoricalSimulation(
             const tier = selectTier(volRatio, atrRatio, tieredConfig);
 
             if (tier) {
+              diag.tierSelected++;
               const breakoutResult = checkTieredBreakout(
                 bar, state.bars5m.slice(0, -1), state.resistanceLevel,
                 "RESISTANCE", tieredConfig.tiers[tier], tieredConfig.strategy
               );
 
               if (breakoutResult.qualified) {
+                diag.boQualified++;
                 state.signalState = "BREAKOUT";
                 state.breakoutCandle = bar;
                 state.selectedTier = tier;
@@ -609,6 +641,7 @@ export async function runHistoricalSimulation(
             );
 
             if (retestResult.valid && retestResult.entryPrice && retestResult.stopPrice) {
+              diag.retestValid++;
               const entryPrice = retestResult.entryPrice;
               const stopPrice = retestResult.stopPrice;
               const riskPerShare = Math.abs(entryPrice - stopPrice);
@@ -618,7 +651,13 @@ export async function runHistoricalSimulation(
                 const shares = Math.max(1, Math.floor(dollarRisk / riskPerShare));
                 const target1 = entryPrice + riskPerShare * (tieredConfig.exits.partialAtR ?? 1.5);
                 const target2 = entryPrice + riskPerShare * (tieredConfig.exits.finalTargetR ?? 2.5);
-                let score = Math.round((state.rvol > 1.5 ? 20 : 10) + (biasResult.aligned ? 15 : 0) + 20 + 15);
+                const rvolScore = state.rvol >= 2.0 ? 20 : state.rvol >= 1.5 ? 18 : state.rvol >= 1.0 ? 14 : state.rvol >= 0.7 ? 10 : 5;
+                const trendScore = biasResult.aligned ? 15 : 8;
+                const boVolScore = 20;
+                const retestScore = 15;
+                const regimeScore = regimeResult.aligned ? 15 : regimeResult.chopping ? 0 : 8;
+                const atrScore = state.atr14 > state.dailyATRbaseline * 1.3 ? 10 : 5;
+                let score = Math.min(100, rvolScore + trendScore + boVolScore + retestScore + regimeScore + atrScore);
 
                 const session = state.minutesSinceOpen <= 90 ? "open" : state.minutesSinceOpen <= 240 ? "mid" : "power";
                 try {
@@ -640,8 +679,9 @@ export async function runHistoricalSimulation(
                   );
 
                   if (penaltyResult.penalty > 0) {
-                    score = Math.max(0, score - penaltyResult.penalty);
-                    log(`[HistSim] ${ticker} LEARNING PENALTY: -${penaltyResult.penalty} pts (score ${score + penaltyResult.penalty} -> ${score}). ${penaltyResult.reasons.join("; ")}`, "historical");
+                    const cappedPenalty = Math.min(penaltyResult.penalty, 20);
+                    score = Math.max(0, score - cappedPenalty);
+                    log(`[HistSim] ${ticker} LEARNING PENALTY: -${cappedPenalty} pts (raw: -${penaltyResult.penalty}), score ${score + cappedPenalty} -> ${score}. ${penaltyResult.reasons.join("; ")}`, "historical");
                   }
                 } catch (lpErr) {
                   log(`[HistSim] Learning penalty error: ${lpErr}`, "historical");
@@ -704,6 +744,8 @@ export async function runHistoricalSimulation(
           });
         }
       }
+
+      log(`[HistSim] ${ticker} pipeline: bars=${tickerBars5m.length}, resistFound=${diag.resistFound}, closedAbove=${diag.breakoutsAboveResist}, tierOk=${diag.tierSelected}, boQualified=${diag.boQualified}, retestValid=${diag.retestValid}, rvol=${state.rvol.toFixed(2)}, atrBase=${state.dailyATRbaseline.toFixed(4)}`, "historical");
 
       if (state.activeTrade) {
         const lastBar = tickerBars5m[tickerBars5m.length - 1];
