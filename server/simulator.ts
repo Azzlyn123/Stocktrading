@@ -897,14 +897,15 @@ export async function startSimulatedDataFeed(
               let shouldBreakout = false;
               let boCandle: Candle;
 
+              let usingSyntheticCandle = false;
               if (currentDataSource === "live") {
                 const recentBars = state.bars5m.slice(-3);
                 let recentCandle = recentBars.length > 0 ? recentBars[recentBars.length - 1] : null;
 
                 if (recentCandle && state.price > 0) {
                   const scaleMismatch = Math.abs(recentCandle.close - state.price) / state.price;
-                  if (scaleMismatch > 0.1) {
-                    log(`[${state.ticker}] BAR SCALE MISMATCH: barClose=$${recentCandle.close.toFixed(2)} vs livePrice=$${state.price.toFixed(2)} (${(scaleMismatch*100).toFixed(0)}% diff). Using synthetic candle.`, "scanner");
+                  if (scaleMismatch > 0.03) {
+                    log(`[${state.ticker}] BAR SCALE MISMATCH: barClose=$${recentCandle.close.toFixed(2)} vs livePrice=$${state.price.toFixed(2)} (${(scaleMismatch*100).toFixed(1)}% diff). Using synthetic candle.`, "scanner");
                     recentCandle = null;
                   }
                 }
@@ -927,8 +928,10 @@ export async function startSimulatedDataFeed(
                 } else if (state.price > state.resistanceLevel) {
                   shouldBreakout = true;
                   boCandle = synthCandle(true);
+                  usingSyntheticCandle = true;
                 } else {
                   boCandle = recentCandle || synthCandle(false);
+                  if (!recentCandle) usingSyntheticCandle = true;
                 }
               } else {
                 const nearResistance = state.price >= state.resistanceLevel * 0.995;
@@ -950,10 +953,15 @@ export async function startSimulatedDataFeed(
                 const direction: "LONG" | "SHORT" = "LONG";
                 const levelType = direction === "LONG" ? "RESISTANCE" as const : "SUPPORT" as const;
 
-                const avgVol = state.bars5m.length > tieredConfig.strategy.volumeLookback ?
-                  state.bars5m.slice(-tieredConfig.strategy.volumeLookback).reduce((s, b) => s + b.volume, 0) / tieredConfig.strategy.volumeLookback :
-                  state.bars5m.reduce((s, b) => s + b.volume, 0) / Math.max(state.bars5m.length, 1);
-                const volRatio = boCandle.volume / Math.max(avgVol, 1);
+                let volRatio: number;
+                if (usingSyntheticCandle) {
+                  volRatio = 1.0;
+                } else {
+                  const avgVol = state.bars5m.length > tieredConfig.strategy.volumeLookback ?
+                    state.bars5m.slice(-tieredConfig.strategy.volumeLookback).reduce((s, b) => s + b.volume, 0) / tieredConfig.strategy.volumeLookback :
+                    state.bars5m.reduce((s, b) => s + b.volume, 0) / Math.max(state.bars5m.length, 1);
+                  volRatio = boCandle.volume / Math.max(avgVol, 1);
+                }
 
                 const atr = calculateATR(state.bars5m, tieredConfig.strategy.atrLen);
                 const atrRatio = state.atr14 > 0 ? atr / state.atr14 : 1.0;
