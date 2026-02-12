@@ -724,6 +724,18 @@ export async function startSimulatedDataFeed(
     log("Running with SIMULATED market data", "simulator");
   }
 
+  try {
+    const staleSignals = await storage.getAllSignals();
+    for (const sig of staleSignals) {
+      if (sig.state && sig.state !== "CLOSED" && sig.state !== "IDLE") {
+        await storage.updateSignal(sig.id, { state: "CLOSED", notes: (sig.notes ?? "") + " [Auto-closed on restart]", closedAt: new Date() });
+        log(`Cleaned up stale signal ${sig.ticker} (was ${sig.state})`, "simulator");
+      }
+    }
+  } catch (e) {
+    log(`Error cleaning stale signals: ${e}`, "simulator");
+  }
+
   setInterval(async () => {
     const clock = await checkMarketClock().catch(() => ({ isOpen: false, nextOpen: null, nextClose: null }));
     const wasOpen = marketIsOpen;
@@ -803,11 +815,13 @@ export async function startSimulatedDataFeed(
 
         if (tickerConfig.ticker === "SPY" || tickerConfig.ticker === "QQQ") continue;
 
-        const resistance = findResistance(state.bars5m, 30);
-        if (resistance) {
-          state.resistanceLevel = resistance.level;
-        } else if (!state.resistanceLevel) {
-          state.resistanceLevel = state.price * (1 + 0.003 + Math.random() * 0.005);
+        if (state.signalState === "IDLE") {
+          const resistance = findResistance(state.bars5m, 30);
+          if (resistance) {
+            state.resistanceLevel = resistance.level;
+          } else if (!state.resistanceLevel) {
+            state.resistanceLevel = state.price * (1 + 0.003 + Math.random() * 0.005);
+          }
         }
 
         const biasResult = checkHigherTimeframeBias(
@@ -859,9 +873,9 @@ export async function startSimulatedDataFeed(
             const timeSinceLastBreakout = Date.now() - state.lastBreakoutTime;
             const cooldownMs = tieredConfig.risk.cooldownMinutes * 60 * 1000;
 
-            // Debug: log why signals aren't firing (every ~60s per ticker)
-            if (tickCount % 30 === 0 && state.signalState === "IDLE" && state.ticker === SIMULATED_TICKERS[2]?.ticker) {
-              log(`[DEBUG ${state.ticker}] session=${inSession} universe=${passesUniverse} locked=${tradingLocked} resistance=${state.resistanceLevel?.toFixed(2)} price=${state.price.toFixed(2)} bars5m=${state.bars5m.length} cooldown=${timeSinceLastBreakout > cooldownMs} src=${currentDataSource}`, "simulator");
+            if (tickCount % 15 === 0) {
+              const distPct = state.resistanceLevel ? ((state.resistanceLevel - state.price) / state.price * 100).toFixed(2) : "N/A";
+              log(`[${state.ticker}] state=${state.signalState} price=$${state.price.toFixed(2)} resist=$${state.resistanceLevel?.toFixed(2) ?? "none"} dist=${distPct}% session=${inSession} univ=${passesUniverse} locked=${tradingLocked} cooldown=${timeSinceLastBreakout > cooldownMs ? "clear" : "active"} src=${currentDataSource}`, "scanner");
             }
 
             if (state.signalState === "IDLE" && state.resistanceLevel && timeSinceLastBreakout > cooldownMs && !hasOpenTrade && !tradingLocked && inSession && passesUniverse) {
@@ -887,6 +901,8 @@ export async function startSimulatedDataFeed(
               }
 
               if (shouldBreakout) {
+                log(`[${state.ticker}] BREAKOUT CANDIDATE: price=$${state.price.toFixed(2)} resist=$${state.resistanceLevel.toFixed(2)} candleClose=$${boCandle.close.toFixed(2)} candleHigh=$${boCandle.high.toFixed(2)}`, "scanner");
+
                 if (currentDataSource === "simulated") {
                   state.bars5m.push(boCandle);
                   if (state.bars5m.length > 200) state.bars5m.shift();
@@ -907,11 +923,14 @@ export async function startSimulatedDataFeed(
                 const atrRatio = state.atr14 > 0 ? atr / state.atr14 : 1.0;
 
                 const tier = selectTier(volRatio, atrRatio, tieredConfig);
+                log(`[${state.ticker}] Tier selection: volRatio=${volRatio.toFixed(2)} atrRatio=${atrRatio.toFixed(2)} tier=${tier ?? "NONE"}`, "scanner");
 
                 if (tier) {
                   const marketOk = checkMarketCondition(spyBars5m, tieredConfig, tier, direction);
+                  log(`[${state.ticker}] Market check: marketOk=${marketOk} tier=${tier}`, "scanner");
                   if (marketOk) {
                     const breakoutResult = checkTieredBreakout(boCandle, state.bars5m.slice(0, -1), state.resistanceLevel, levelType, tieredConfig.tiers[tier], tieredConfig.strategy);
+                    log(`[${state.ticker}] Breakout qualification: qualified=${breakoutResult.qualified} reasons=${breakoutResult.reasons.join("; ") || "all passed"}`, "scanner");
 
                     if (breakoutResult.qualified) {
                       state.signalState = "BREAKOUT";
@@ -936,7 +955,7 @@ export async function startSimulatedDataFeed(
                         timeframe: "5m",
                         rvol: Number(state.rvol.toFixed(2)),
                         atrValue: Number(state.atr14.toFixed(4)),
-                        rejectionCount: resistance?.rejections ?? 2,
+                        rejectionCount: 2,
                         score: state.lastScore,
                         scoreTier: tier,
                         marketRegime: regimeResult.chopping ? "choppy" : regimeResult.aligned ? "aligned" : "misaligned",
@@ -968,6 +987,12 @@ export async function startSimulatedDataFeed(
               const tierConfig = tieredConfig.tiers[state.selectedTier];
 
               if (state.retestBarsSinceBreakout > tierConfig.retestTimeoutCandles) {
+                log(`[${state.ticker}] BREAKOUT timed out after ${state.retestBarsSinceBreakout} candles (max ${tierConfig.retestTimeoutCandles}). Resetting to IDLE.`, "scanner");
+                const staleBreakoutSignals = await storage.getAllSignals();
+                const stale = staleBreakoutSignals.find(s => s.ticker === state.ticker && s.state === "BREAKOUT");
+                if (stale) {
+                  await storage.updateSignal(stale.id, { state: "CLOSED", notes: (stale.notes ?? "") + " [Retest timeout]", closedAt: new Date() });
+                }
                 state.signalState = "IDLE";
                 state.selectedTier = null;
                 state.breakoutCandle = null;
@@ -987,12 +1012,20 @@ export async function startSimulatedDataFeed(
 
                 const direction = "LONG" as const;
                 const retestResult = checkTieredRetest(retCandle, state.breakoutCandle, state.retestBars, state.resistanceLevel, "RESISTANCE", state.bars5m, tierConfig, direction);
+                log(`[${state.ticker}] BREAKOUT→RETEST check (bar ${state.retestBarsSinceBreakout}/${tierConfig.retestTimeoutCandles}): valid=${retestResult.valid} reasons=${retestResult.reasons.join("; ") || "all passed"} candleClose=$${retCandle.close.toFixed(2)} level=$${state.resistanceLevel.toFixed(2)}`, "scanner");
 
                 if (retestResult.valid) {
                   state.signalState = "RETEST";
                   state.retestSwingLow = retCandle.low;
                   state.retestBars.push(retCandle);
                   state.confirmationCandle = retCandle;
+                  log(`[${state.ticker}] >> RETEST CONFIRMED. Tier ${state.selectedTier}. Waiting for entry.`, "scanner");
+
+                  const existingSignals = await storage.getAllSignals();
+                  const activeSignal = existingSignals.find(s => s.ticker === state.ticker && s.state === "BREAKOUT");
+                  if (activeSignal) {
+                    await storage.updateSignal(activeSignal.id, { state: "RETEST", currentPrice: Number(state.price.toFixed(2)) });
+                  }
 
                   broadcast("signal_update", { ticker: state.ticker, state: "RETEST", resistanceLevel: state.resistanceLevel, price: state.price, tier: state.selectedTier });
                   await storage.createAlert({
@@ -1013,6 +1046,12 @@ export async function startSimulatedDataFeed(
               const tierConfig = tieredConfig.tiers[state.selectedTier];
 
               if (state.retestBarsSinceBreakout > tierConfig.retestTimeoutCandles) {
+                log(`[${state.ticker}] RETEST timed out after ${state.retestBarsSinceBreakout} candles. Resetting to IDLE.`, "scanner");
+                const staleRetestSignals = await storage.getAllSignals();
+                const staleRetest = staleRetestSignals.find(s => s.ticker === state.ticker && (s.state === "RETEST" || s.state === "BREAKOUT"));
+                if (staleRetest) {
+                  await storage.updateSignal(staleRetest.id, { state: "CLOSED", notes: (staleRetest.notes ?? "") + " [Retest timeout]", closedAt: new Date() });
+                }
                 state.signalState = "IDLE";
                 state.selectedTier = null;
                 state.breakoutCandle = null;
@@ -1020,6 +1059,7 @@ export async function startSimulatedDataFeed(
               } else {
                 const direction = "LONG" as const;
                 const retestResult = checkTieredRetest(candle, state.breakoutCandle, state.retestBars, state.resistanceLevel, "RESISTANCE", state.bars5m, tierConfig, direction);
+                log(`[${state.ticker}] RETEST→ENTRY check: valid=${retestResult.valid} entry=$${retestResult.entryPrice?.toFixed(2) ?? "none"} stop=$${retestResult.stopPrice?.toFixed(2) ?? "none"} reasons=${retestResult.reasons.join("; ") || "all passed"} session=${inSession} locked=${tradingLocked}`, "scanner");
 
                 if (retestResult.valid && retestResult.entryPrice && retestResult.stopPrice && inSession && !tradingLocked) {
                   const riskPerShare = Math.abs(retestResult.entryPrice - retestResult.stopPrice);
@@ -1036,6 +1076,24 @@ export async function startSimulatedDataFeed(
                     state.signalState = "TRIGGERED";
                     const target1 = retestResult.entryPrice + (riskPerShare * tieredConfig.exits.partialAtR);
                     const target2 = retestResult.entryPrice + (riskPerShare * tieredConfig.exits.finalTargetR);
+                    log(`[${state.ticker}] >> TRADE TRIGGERED! Tier ${state.selectedTier} entry=$${retestResult.entryPrice.toFixed(2)} stop=$${retestResult.stopPrice.toFixed(2)} shares=${shares} risk=$${riskDollars.toFixed(0)} T1=$${target1.toFixed(2)} T2=$${target2.toFixed(2)}`, "scanner");
+
+                    const existingSignals2 = await storage.getAllSignals();
+                    const activeSignal2 = existingSignals2.find(s => s.ticker === state.ticker && (s.state === "RETEST" || s.state === "BREAKOUT"));
+                    if (activeSignal2) {
+                      await storage.updateSignal(activeSignal2.id, {
+                        state: "TRIGGERED",
+                        currentPrice: Number(state.price.toFixed(2)),
+                        entryPrice: retestResult.entryPrice,
+                        stopPrice: retestResult.stopPrice,
+                        target1,
+                        target2,
+                        positionSize: shares,
+                        dollarRisk: riskDollars,
+                        riskReward: riskPerShare > 0 ? (target2 - retestResult.entryPrice) / riskPerShare : 0,
+                        entryMode: "conservative",
+                      });
+                    }
 
                     const trade = await storage.createTrade({
                       userId, ticker: state.ticker, side: "long",

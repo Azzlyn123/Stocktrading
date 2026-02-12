@@ -88,30 +88,32 @@ export function checkTieredRetest(
   const withinTolerance = (price: number): boolean =>
     Math.abs(price - levelPrice) / levelPrice <= tier.tolerancePct;
 
-  const currentWithinTolerance = withinTolerance(currentCandle.close);
-  let retestTouched = currentWithinTolerance;
-  if (!retestTouched) {
-    for (const bar of retestBars) {
-      if (withinTolerance(bar.close) || withinTolerance(bar.low) || withinTolerance(bar.high)) {
-        retestTouched = true;
-        break;
-      }
+  const allBars = [...retestBars, currentCandle];
+  let retestTouched = false;
+  for (const bar of allBars) {
+    if (withinTolerance(bar.close) || withinTolerance(bar.low) || withinTolerance(bar.high)) {
+      retestTouched = true;
+      break;
     }
   }
+
+  if (!retestTouched) {
+    const pullbackPct = isLong
+      ? (breakoutCandle.high - currentCandle.low) / breakoutCandle.high
+      : (currentCandle.high - breakoutCandle.low) / breakoutCandle.low;
+    if (pullbackPct >= 0.003) {
+      retestTouched = true;
+    }
+  }
+
   if (!retestTouched) {
     reasons.push("Price never returned to within tolerance of level");
   }
 
   let closesAgainst = 0;
-  for (const bar of retestBars) {
-    if (withinTolerance(bar.close)) {
-      if (isLong && bar.close < levelPrice) closesAgainst++;
-      if (!isLong && bar.close > levelPrice) closesAgainst++;
-    }
-  }
-  if (withinTolerance(currentCandle.close)) {
-    if (isLong && currentCandle.close < levelPrice) closesAgainst++;
-    if (!isLong && currentCandle.close > levelPrice) closesAgainst++;
+  for (const bar of allBars) {
+    if (isLong && bar.close < levelPrice * (1 - tier.tolerancePct * 0.5)) closesAgainst++;
+    if (!isLong && bar.close > levelPrice * (1 + tier.tolerancePct * 0.5)) closesAgainst++;
   }
   const closesAgainstOk = closesAgainst <= tier.maxClosesAgainstLevel;
   if (!closesAgainstOk) {
@@ -119,23 +121,16 @@ export function checkTieredRetest(
   }
 
   let invalidated = false;
-  if (isLong && currentCandle.close < levelPrice * (1 - tier.tolerancePct)) {
-    invalidated = true;
-    reasons.push(`LONG invalidated: close ${currentCandle.close.toFixed(2)} < level ${levelPrice.toFixed(2)} beyond tolerance`);
-  }
-  if (!isLong && currentCandle.close > levelPrice * (1 + tier.tolerancePct)) {
-    invalidated = true;
-    reasons.push(`SHORT invalidated: close ${currentCandle.close.toFixed(2)} > level ${levelPrice.toFixed(2)} beyond tolerance`);
-  }
-  for (const bar of retestBars) {
-    if (isLong && bar.close < levelPrice * (1 - tier.tolerancePct)) {
+  const invalidationBuffer = tier.tolerancePct * 2;
+  for (const bar of allBars) {
+    if (isLong && bar.close < levelPrice * (1 - invalidationBuffer)) {
       invalidated = true;
-      reasons.push(`LONG invalidated during retest: bar close ${bar.close.toFixed(2)} broke below tolerance`);
+      reasons.push(`LONG invalidated: close ${bar.close.toFixed(2)} broke too far below level ${levelPrice.toFixed(2)}`);
       break;
     }
-    if (!isLong && bar.close > levelPrice * (1 + tier.tolerancePct)) {
+    if (!isLong && bar.close > levelPrice * (1 + invalidationBuffer)) {
       invalidated = true;
-      reasons.push(`SHORT invalidated during retest: bar close ${bar.close.toFixed(2)} broke above tolerance`);
+      reasons.push(`SHORT invalidated: close ${bar.close.toFixed(2)} broke too far above level ${levelPrice.toFixed(2)}`);
       break;
     }
   }
@@ -146,17 +141,26 @@ export function checkTieredRetest(
   let stopPrice: number | null = null;
 
   if (valid) {
-    const isConfirmation = isLong
-      ? currentCandle.close > levelPrice && withinTolerance(currentCandle.low)
-      : currentCandle.close < levelPrice && withinTolerance(currentCandle.high);
-
-    if (isConfirmation || isGreenCandle(currentCandle) === isLong) {
-      entryPrice = isLong ? currentCandle.high : currentCandle.low;
+    if (isLong) {
+      if (currentCandle.close >= levelPrice) {
+        entryPrice = currentCandle.close;
+      } else if (isGreenCandle(currentCandle)) {
+        entryPrice = currentCandle.high;
+      } else if (currentCandle.close >= levelPrice * (1 - tier.tolerancePct)) {
+        entryPrice = levelPrice;
+      }
+    } else {
+      if (currentCandle.close <= levelPrice) {
+        entryPrice = currentCandle.close;
+      } else if (!isGreenCandle(currentCandle)) {
+        entryPrice = currentCandle.low;
+      } else if (currentCandle.close <= levelPrice * (1 + tier.tolerancePct)) {
+        entryPrice = levelPrice;
+      }
     }
 
-    const allRetestBars = [...retestBars, currentCandle];
-    const swingLow = Math.min(...allRetestBars.map((c) => c.low));
-    const swingHigh = Math.max(...allRetestBars.map((c) => c.high));
+    const swingLow = Math.min(...allBars.map((c) => c.low));
+    const swingHigh = Math.max(...allBars.map((c) => c.high));
 
     if (isLong) {
       const levelStop = levelPrice * (1 - tier.stopBufferPct);
