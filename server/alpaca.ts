@@ -119,6 +119,68 @@ export async function fetchMultipleHistoricalBars(
   return result;
 }
 
+export async function fetchBarsForDate(
+  symbols: string[],
+  date: string,
+  timeframe: string = "5Min"
+): Promise<Map<string, Candle[]>> {
+  const result = new Map<string, Candle[]>();
+
+  const start = `${date}T09:30:00-05:00`;
+  const end = `${date}T16:00:00-05:00`;
+
+  const symbolStr = symbols.join(",");
+  const url = `${DATA_BASE_URL}/stocks/bars?symbols=${symbolStr}&timeframe=${timeframe}&start=${start}&end=${end}&limit=10000&feed=iex&adjustment=split`;
+
+  try {
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      const text = await res.text();
+      log(`Alpaca date-bars error: ${res.status} ${text}`, "alpaca");
+      return result;
+    }
+    const data = await res.json();
+    const barsMap: Record<string, AlpacaBar[]> = data.bars || {};
+    for (const [sym, bars] of Object.entries(barsMap)) {
+      result.set(sym, (bars as AlpacaBar[]).map(alpacaBarToCandle));
+    }
+  } catch (e: any) {
+    log(`Alpaca date-bars fetch failed: ${e.message}`, "alpaca");
+  }
+
+  return result;
+}
+
+export async function fetchDailyBarsForDate(
+  symbols: string[],
+  date: string
+): Promise<Map<string, Candle>> {
+  const result = new Map<string, Candle>();
+  const prevDate = new Date(date + "T12:00:00Z");
+  prevDate.setDate(prevDate.getDate() - 3);
+  const start = prevDate.toISOString().split("T")[0];
+
+  const symbolStr = symbols.join(",");
+  const url = `${DATA_BASE_URL}/stocks/bars?symbols=${symbolStr}&timeframe=1Day&start=${start}T00:00:00Z&end=${date}T00:00:00Z&limit=10&feed=iex&adjustment=split`;
+
+  try {
+    const res = await fetch(url, { headers });
+    if (!res.ok) return result;
+    const data = await res.json();
+    const barsMap: Record<string, AlpacaBar[]> = data.bars || {};
+    for (const [sym, bars] of Object.entries(barsMap)) {
+      const dailyBars = (bars as AlpacaBar[]).map(alpacaBarToCandle);
+      if (dailyBars.length > 0) {
+        result.set(sym, dailyBars[dailyBars.length - 1]);
+      }
+    }
+  } catch (e: any) {
+    log(`Alpaca daily-bars fetch failed: ${e.message}`, "alpaca");
+  }
+
+  return result;
+}
+
 export async function fetchSnapshots(
   symbols: string[]
 ): Promise<Map<string, AlpacaSnapshot>> {

@@ -225,6 +225,32 @@ export const tradeLessons = pgTable("trade_lessons", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const simulationRuns = pgTable("simulation_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  simulationDate: text("simulation_date").notNull(),
+  status: text("status").default("pending"),
+  tickers: text("tickers").array(),
+  totalBars: integer("total_bars").default(0),
+  processedBars: integer("processed_bars").default(0),
+  tradesGenerated: integer("trades_generated").default(0),
+  lessonsGenerated: integer("lessons_generated").default(0),
+  totalPnl: real("total_pnl").default(0),
+  winRate: real("win_rate"),
+  errorMessage: text("error_message"),
+  startedAt: timestamp("started_at").defaultNow(),
+  completedAt: timestamp("completed_at"),
+});
+
+export const insertSimulationRunSchema = createInsertSchema(simulationRuns).omit({
+  id: true,
+  startedAt: true,
+  completedAt: true,
+});
+
+export type SimulationRun = typeof simulationRuns.$inferSelect;
+export type InsertSimulationRun = z.infer<typeof insertSimulationRunSchema>;
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,

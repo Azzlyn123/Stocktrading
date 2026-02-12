@@ -8,6 +8,7 @@ import {
   paperTrades,
   dailySummaries,
   tradeLessons,
+  simulationRuns,
   type User,
   type InsertUser,
   type WatchlistItem,
@@ -23,6 +24,8 @@ import {
   type TradeLesson,
   type InsertTradeLesson,
   type SettingsUpdate,
+  type SimulationRun,
+  type InsertSimulationRun,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -63,6 +66,11 @@ export interface IStorage {
   getLessons(): Promise<TradeLesson[]>;
   getRecentLessons(limit: number): Promise<TradeLesson[]>;
   createLesson(lesson: InsertTradeLesson): Promise<TradeLesson>;
+
+  getSimulationRuns(): Promise<SimulationRun[]>;
+  getSimulationRun(id: string): Promise<SimulationRun | undefined>;
+  createSimulationRun(run: InsertSimulationRun): Promise<SimulationRun>;
+  updateSimulationRun(id: string, updates: Partial<SimulationRun>): Promise<SimulationRun | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -246,6 +254,25 @@ export class DatabaseStorage implements IStorage {
 
   async createLesson(lesson: InsertTradeLesson): Promise<TradeLesson> {
     const [result] = await db.insert(tradeLessons).values(lesson).returning();
+    return result;
+  }
+
+  async getSimulationRuns(): Promise<SimulationRun[]> {
+    return db.select().from(simulationRuns).orderBy(desc(simulationRuns.startedAt));
+  }
+
+  async getSimulationRun(id: string): Promise<SimulationRun | undefined> {
+    const [run] = await db.select().from(simulationRuns).where(eq(simulationRuns.id, id));
+    return run;
+  }
+
+  async createSimulationRun(run: InsertSimulationRun): Promise<SimulationRun> {
+    const [result] = await db.insert(simulationRuns).values(run).returning();
+    return result;
+  }
+
+  async updateSimulationRun(id: string, updates: Partial<SimulationRun>): Promise<SimulationRun | undefined> {
+    const [result] = await db.update(simulationRuns).set(updates).where(eq(simulationRuns.id, id)).returning();
     return result;
   }
 }
