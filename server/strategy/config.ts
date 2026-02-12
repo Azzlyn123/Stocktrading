@@ -37,7 +37,7 @@ export const DEFAULT_TIERED_CONFIG: TieredStrategyConfig = {
       stopBufferPct: 0.002,
     },
     B: {
-      volumeRatioMin: 1.5,
+      volumeRatioMin: 1.0,
       atrRatioMin: 0.5,
       tolerancePct: 0.002,
       maxClosesAgainstLevel: 3,
@@ -46,7 +46,7 @@ export const DEFAULT_TIERED_CONFIG: TieredStrategyConfig = {
       stopBufferPct: 0.003,
     },
     C: {
-      volumeRatioMin: 1.5,
+      volumeRatioMin: 0.7,
       atrRatioMin: 0.0,
       tolerancePct: 0.002,
       maxClosesAgainstLevel: 4,
