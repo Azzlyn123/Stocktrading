@@ -7,6 +7,7 @@ import {
   alerts,
   paperTrades,
   dailySummaries,
+  tradeLessons,
   type User,
   type InsertUser,
   type WatchlistItem,
@@ -19,6 +20,8 @@ import {
   type InsertPaperTrade,
   type DailySummary,
   type InsertDailySummary,
+  type TradeLesson,
+  type InsertTradeLesson,
   type SettingsUpdate,
 } from "@shared/schema";
 
@@ -56,6 +59,10 @@ export interface IStorage {
   getAllSummaries(): Promise<DailySummary[]>;
   createSummary(summary: InsertDailySummary): Promise<DailySummary>;
   upsertDailySummary(userId: string, pnl: number, isWin: boolean, accountBalance: number): Promise<DailySummary>;
+
+  getLessons(): Promise<TradeLesson[]>;
+  getRecentLessons(limit: number): Promise<TradeLesson[]>;
+  createLesson(lesson: InsertTradeLesson): Promise<TradeLesson>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -227,6 +234,19 @@ export class DatabaseStorage implements IStorage {
         accountBalance: Number(accountBalance.toFixed(2)),
       });
     }
+  }
+
+  async getLessons(): Promise<TradeLesson[]> {
+    return db.select().from(tradeLessons).orderBy(desc(tradeLessons.createdAt));
+  }
+
+  async getRecentLessons(limit: number): Promise<TradeLesson[]> {
+    return db.select().from(tradeLessons).orderBy(desc(tradeLessons.createdAt)).limit(limit);
+  }
+
+  async createLesson(lesson: InsertTradeLesson): Promise<TradeLesson> {
+    const [result] = await db.insert(tradeLessons).values(lesson).returning();
+    return result;
   }
 }
 

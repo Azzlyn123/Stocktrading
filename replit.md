@@ -25,6 +25,7 @@ client/src/
     signals.tsx        - Signal feed with scoring, market regime, entry mode, score breakdown
     trades.tsx         - Paper trades with score tier, entry mode, enhanced exit labels
     settings.tsx       - Full config: risk, universe, breakout quality, market regime, scoring
+    learning.tsx       - Learning insights: loss/win patterns, tier/session stats, recommendations, recent lessons
   components/
     app-sidebar.tsx    - Sidebar navigation
     theme-provider.tsx - Dark/light mode
@@ -54,6 +55,7 @@ server/
     volatilityGate.ts  - First 30m range ≥70% prev day, 5m ATR ≥1.3x baseline
     scoring.ts         - 0-100 composite: RVOL(20) + trend(15) + BO vol(20) + retest vol(15) + SPY(15) + ATR(10) + catalyst(5)
     exits.ts           - Partial +1R, trailing (EMA9/prior low), 2 red candles, time stop, stop loss, target
+    learning.ts        - Post-trade analysis engine: classifies wins/losses, tags patterns, computes learning penalties, generates adaptive insights
 
 shared/
   schema.ts            - Drizzle schema + Zod validation + settingsUpdateSchema
@@ -74,6 +76,9 @@ shared/
 - **Time Stop**: Exit if not +0.5R within 30 minutes
 - **Risk Management**: Daily -2% max loss, 3 losing trades stop, 15-min cooldown
 - **Lunch Chop Filter**: 11:30-13:30 ET
+- **Learning System**: Post-trade analysis classifies wins/losses, tags 18 pattern types, computes adaptive score penalties
+- **Learning Penalties**: Pre-entry score deduction based on ticker loss rate, tier performance, recurring patterns, loss streaks (capped -40pts)
+- **Adaptive Insights**: Tier/session win rates, top loss/win patterns with suggestions, actionable recommendations
 - **Paper Trading**: Simulated $100k account with P&L tracking
 - **Real-time Data**: WebSocket streaming simulated price updates
 - **Dark Mode**: Default dark theme with toggle
@@ -85,6 +90,7 @@ shared/
 - alerts
 - paper_trades (+ score, scoreTier, entryMode, enhanced exit reasons)
 - daily_summaries (ruleViolations, ruleViolationDetails, accountBalance)
+- trade_lessons (tradeId, ticker, tier, outcomeCategory, exitReason, lessonTags[], lessonDetail, entryConditions JSONB, marketContext JSONB, scoreAtEntry, patternHash, durationMinutes)
 
 ## API Endpoints
 - POST /api/register, /api/login, /api/logout
@@ -96,6 +102,8 @@ shared/
 - GET/POST /api/alerts, POST /api/alerts/mark-read
 - GET /api/trades
 - GET /api/summaries
+- GET /api/lessons (raw lesson records)
+- GET /api/lessons/insights (lessons + computed insights: topLossPatterns, topWinPatterns, tierStats, sessionStats, recommendations)
 - WS /ws - Real-time price updates + market_status (isOpen, isLunchChop, spyAligned, spyChopping)
 
 ## Important Notes

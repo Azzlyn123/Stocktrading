@@ -27,6 +27,7 @@ import {
   type TradeTier,
 } from "./strategy";
 import { DEFAULT_STRATEGY_CONFIG } from "./strategy/config";
+import { analyzeClosedTrade, computeLearningPenalty } from "./strategy/learning";
 import {
   isAlpacaConfigured,
   fetchHistoricalBars,
@@ -1168,7 +1169,42 @@ export async function startSimulatedDataFeed(
                     log(`[${state.ticker}] Entry gates failed. EMA=${emaAligned} Room2R=${roomTo2R}. Skipping entry.`, "scanner");
                   }
 
-                  if (emaAligned && roomTo2R) {
+                  let learningPenalty = 0;
+                  let learningReasons: string[] = [];
+                  try {
+                    const recentLessons = await storage.getRecentLessons(50);
+                    const session = getCurrentSession(TIERED_CONFIG);
+                    const penaltyResult = computeLearningPenalty(
+                      recentLessons.map(l => ({
+                        ticker: l.ticker,
+                        tier: l.tier,
+                        outcomeCategory: l.outcomeCategory,
+                        lessonTags: l.lessonTags,
+                        marketContext: l.marketContext,
+                        pnl: l.pnl,
+                        scoreAtEntry: l.scoreAtEntry,
+                      })),
+                      state.ticker,
+                      state.selectedTier ?? "C",
+                      regimeResult.aligned,
+                      session
+                    );
+                    learningPenalty = penaltyResult.penalty;
+                    learningReasons = penaltyResult.reasons;
+                    if (learningPenalty > 0) {
+                      log(`[${state.ticker}] LEARNING PENALTY: -${learningPenalty} points. ${learningReasons.join("; ")}`, "scanner");
+                    }
+                  } catch (lpErr) {
+                    log(`[${state.ticker}] Learning penalty error: ${lpErr}`, "scanner");
+                  }
+
+                  const adjustedScore = (state.lastScore ?? 0) - learningPenalty;
+                  const scorePassesAfterPenalty = adjustedScore >= (tieredConfig.daily.maxDailyLossR !== undefined ? 30 : 30);
+                  if (!scorePassesAfterPenalty && learningPenalty > 0) {
+                    log(`[${state.ticker}] ENTRY BLOCKED by learning: score ${state.lastScore} - ${learningPenalty} penalty = ${adjustedScore} (below 30 min)`, "scanner");
+                  }
+
+                  if (emaAligned && roomTo2R && (scorePassesAfterPenalty || learningPenalty === 0)) {
                   const minRisk = retestResult.entryPrice * 0.003;
                   const effectiveRisk = Math.max(riskPerShare, minRisk);
                   const equity = user.accountSize ?? 100000;
@@ -1275,6 +1311,23 @@ export async function startSimulatedDataFeed(
                     });
                     await storage.upsertDailySummary(userId, pnl, pnl >= 0, (user.accountSize ?? 100000) + pnl);
                   }
+                    try {
+                      const updatedTrade = (await storage.getAllTrades()).find(t => t.id === trade.id);
+                      if (updatedTrade) {
+                        const matchingSignal = trade.signalId ? await storage.getSignalById(trade.signalId) : null;
+                        const lesson = analyzeClosedTrade({
+                          trade: updatedTrade,
+                          signal: matchingSignal ?? null,
+                          spyAligned: regimeResult.aligned,
+                          isLunchChop: isLunchChop(),
+                          session: getCurrentSession(TIERED_CONFIG),
+                        });
+                        await storage.createLesson(lesson);
+                        log(`[${state.ticker}] LESSON: ${lesson.outcomeCategory} | tags=${(lesson.lessonTags ?? []).join(",")} | ${lesson.lessonDetail?.substring(0, 80)}`, "scanner");
+                      }
+                    } catch (lessonErr) {
+                      log(`[${state.ticker}] Lesson error: ${lessonErr}`, "scanner");
+                    }
                 }
               } else if (exitDecision.newStopPrice) {
                 await storage.updateTrade(trade.id, { stopPrice: exitDecision.newStopPrice });

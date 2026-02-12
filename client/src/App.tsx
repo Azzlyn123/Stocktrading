@@ -19,6 +19,7 @@ import Watchlist from "@/pages/watchlist";
 import Signals from "@/pages/signals";
 import Trades from "@/pages/trades";
 import Settings from "@/pages/settings";
+import Learning from "@/pages/learning";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -30,6 +31,7 @@ function Router() {
       <Route path="/signals" component={Signals} />
       <Route path="/trades" component={Trades} />
       <Route path="/settings" component={Settings} />
+      <Route path="/learning" component={Learning} />
       <Route component={NotFound} />
     </Switch>
   );

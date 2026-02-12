@@ -201,6 +201,30 @@ export const dailySummaries = pgTable("daily_summaries", {
   isLockedOut: boolean("is_locked_out").default(false),
 });
 
+export const tradeLessons = pgTable("trade_lessons", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tradeId: varchar("trade_id"),
+  signalId: varchar("signal_id"),
+  ticker: text("ticker").notNull(),
+  tier: text("tier"),
+  direction: text("direction").default("LONG"),
+  entryPrice: real("entry_price"),
+  exitPrice: real("exit_price"),
+  pnl: real("pnl"),
+  rMultiple: real("r_multiple"),
+  outcomeCategory: text("outcome_category").notNull(),
+  exitReason: text("exit_reason"),
+  lessonTags: text("lesson_tags").array(),
+  lessonDetail: text("lesson_detail"),
+  entryConditions: jsonb("entry_conditions"),
+  marketContext: jsonb("market_context"),
+  scoreAtEntry: integer("score_at_entry"),
+  scoreBreakdown: jsonb("score_breakdown_at_entry"),
+  durationMinutes: integer("duration_minutes"),
+  patternHash: text("pattern_hash"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
@@ -231,6 +255,11 @@ export const insertPaperTradeSchema = createInsertSchema(paperTrades).omit({
 
 export const insertDailySummarySchema = createInsertSchema(dailySummaries).omit({
   id: true,
+});
+
+export const insertTradeLessonSchema = createInsertSchema(tradeLessons).omit({
+  id: true,
+  createdAt: true,
 });
 
 export const settingsUpdateSchema = z.object({
@@ -294,4 +323,6 @@ export type PaperTrade = typeof paperTrades.$inferSelect;
 export type InsertPaperTrade = z.infer<typeof insertPaperTradeSchema>;
 export type DailySummary = typeof dailySummaries.$inferSelect;
 export type InsertDailySummary = z.infer<typeof insertDailySummarySchema>;
+export type TradeLesson = typeof tradeLessons.$inferSelect;
+export type InsertTradeLesson = z.infer<typeof insertTradeLessonSchema>;
 export type SettingsUpdate = z.infer<typeof settingsUpdateSchema>;

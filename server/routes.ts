@@ -8,6 +8,7 @@ import { insertUserSchema, settingsUpdateSchema } from "@shared/schema";
 import type { User } from "@shared/schema";
 import { startSimulatedDataFeed, registerUser, unregisterUser, getScannerData, getDataSource, isLiveConnected, getSharedUserId } from "./simulator";
 import { seedDemoData } from "./seed";
+import { generateAdaptiveInsights } from "./strategy/learning";
 
 declare global {
   namespace Express {
@@ -213,6 +214,31 @@ export async function registerRoutes(
       minDollarVolume: su.minDollarVolume ?? 50000000,
     });
     res.json(data);
+  });
+
+  // Learning Insights (shared across all users)
+  app.get("/api/lessons", requireAuth, async (req, res) => {
+    const lessons = await storage.getLessons();
+    res.json(lessons);
+  });
+
+  app.get("/api/lessons/insights", requireAuth, async (req, res) => {
+    const lessons = await storage.getLessons();
+    const insights = generateAdaptiveInsights(
+      lessons.map(l => ({
+        ticker: l.ticker,
+        tier: l.tier,
+        outcomeCategory: l.outcomeCategory,
+        lessonTags: l.lessonTags,
+        marketContext: l.marketContext,
+        pnl: l.pnl,
+        scoreAtEntry: l.scoreAtEntry,
+        exitReason: l.exitReason,
+        durationMinutes: l.durationMinutes,
+        rMultiple: l.rMultiple,
+      }))
+    );
+    res.json({ lessons, insights });
   });
 
   // Data source status
