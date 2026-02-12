@@ -118,8 +118,8 @@ const DEMO_CONFIG: StrategyConfig = {
   risk: {
     perTradeRiskPct: 1.0,
     maxPositionPct: 5,
-    maxDailyLossPct: 2,
-    maxLosingTrades: 3,
+    maxDailyLossPct: 999,
+    maxLosingTrades: 999,
     cooldownMinutes: 15,
     timeStopMinutes: 30,
     timeStopR: 0.5,

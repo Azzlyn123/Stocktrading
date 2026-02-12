@@ -65,8 +65,8 @@ export const DEFAULT_TIERED_CONFIG: TieredStrategyConfig = {
     hardExitRedCandles: 2,
   },
   daily: {
-    maxLosingTrades: 3,
-    maxDailyLossR: -3.0,
+    maxLosingTrades: 999,
+    maxDailyLossR: -999,
   },
   risk: {
     maxPositionPct: 10,
