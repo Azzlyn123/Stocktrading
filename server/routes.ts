@@ -446,6 +446,14 @@ export async function registerRoutes(
     });
   }
 
+  app.get("/api/analytics/daily-report", requireAuth, (_req, res) => {
+    const { getTodayTrades } = require("./analytics/tradeStore");
+    const { buildDailySummary, formatDailySummary } = require("./analytics/tradeAnalytics");
+    const trades = getTodayTrades();
+    const summary = buildDailySummary(trades);
+    res.json({ summary, formatted: formatDailySummary(summary) });
+  });
+
   // Start simulated market data feed
   startSimulatedDataFeed(broadcast, storage);
 

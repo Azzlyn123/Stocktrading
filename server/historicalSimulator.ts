@@ -41,7 +41,14 @@ function classifyExitReason(reason: string): ExitReasonType {
 }
 
 function buildAnalyticsRecord(
-  trade: NonNullable<TickerState["activeTrade"]>,
+  trade: {
+    entryPrice: number;
+    stopPrice: number;
+    shares: number;
+    tier: string;
+    direction: string;
+    entryBarIndex: number;
+  },
   ticker: string,
   exitPrice: number,
   exitReason: string,
@@ -2179,6 +2186,16 @@ export async function runHistoricalSimulation(
       `[HistSim] Completed simulation for ${simulationDate}: ${tradesGenerated} trades, ${lessonsGenerated} lessons, P&L: $${totalPnl.toFixed(2)}`,
       "historical",
     );
+
+    if (tradesGenerated > 0) {
+      const { getTodayTrades } = await import("./analytics/tradeStore");
+      const { buildDailySummary, formatDailySummary } = await import("./analytics/tradeAnalytics");
+      const todayTrades = getTodayTrades();
+      if (todayTrades.length > 0) {
+        const summary = buildDailySummary(todayTrades);
+        log(`\n${formatDailySummary(summary)}`, "historical");
+      }
+    }
   } catch (error: any) {
     log(`[HistSim] Error: ${error.message}`, "historical");
     if (!isDryRun) {
