@@ -83,7 +83,7 @@ function simAssert(
 }
 
 const SIM_CONFIG = {
-  baseSlippageBps: 5,
+  baseSlippageBps: 2.5,
   halfSpreadBps: 3,
   slippageK: 0.25,
   commissionPerShare: 0.005,

@@ -71,6 +71,7 @@ export interface IStorage {
   getSimulationRun(id: string): Promise<SimulationRun | undefined>;
   createSimulationRun(run: InsertSimulationRun): Promise<SimulationRun>;
   updateSimulationRun(id: string, updates: Partial<SimulationRun>): Promise<SimulationRun | undefined>;
+  resetAllSimulationData(): Promise<{ simulationRuns: number; trades: number; lessons: number; signals: number; alerts: number; summaries: number }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -274,6 +275,23 @@ export class DatabaseStorage implements IStorage {
   async updateSimulationRun(id: string, updates: Partial<SimulationRun>): Promise<SimulationRun | undefined> {
     const [result] = await db.update(simulationRuns).set(updates).where(eq(simulationRuns.id, id)).returning();
     return result;
+  }
+
+  async resetAllSimulationData(): Promise<{ simulationRuns: number; trades: number; lessons: number; signals: number; alerts: number; summaries: number }> {
+    const simRows = await db.delete(simulationRuns).returning();
+    const tradeRows = await db.delete(paperTrades).returning();
+    const lessonRows = await db.delete(tradeLessons).returning();
+    const signalRows = await db.delete(signals).returning();
+    const alertRows = await db.delete(alerts).returning();
+    const summaryRows = await db.delete(dailySummaries).returning();
+    return {
+      simulationRuns: simRows.length,
+      trades: tradeRows.length,
+      lessons: lessonRows.length,
+      signals: signalRows.length,
+      alerts: alertRows.length,
+      summaries: summaryRows.length,
+    };
   }
 }
 

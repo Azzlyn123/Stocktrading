@@ -387,6 +387,15 @@ export async function registerRoutes(
     res.json({ cancelled });
   });
 
+  app.post("/api/simulations/reset", requireAuth, async (_req, res) => {
+    try {
+      const result = await storage.resetAllSimulationData();
+      res.json({ success: true, deleted: result });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to reset simulation data" });
+    }
+  });
+
   // Data source status
   app.get("/api/data-source", requireAuth, (_req, res) => {
     res.json({

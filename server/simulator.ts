@@ -1198,13 +1198,13 @@ export async function startSimulatedDataFeed(
                   }
 
                   const adjustedScore = (state.lastScore ?? 0) - learningPenalty;
-                  const scorePassesAfterPenalty = adjustedScore >= (tieredConfig.daily.maxDailyLossR !== undefined ? 30 : 30);
+                  const scorePassesAfterPenalty = adjustedScore >= (tieredConfig.daily.maxDailyLossR !== undefined ? 35 : 35);
                   if (!scorePassesAfterPenalty && learningPenalty > 0) {
                     log(`[${state.ticker}] ENTRY BLOCKED by learning: score ${state.lastScore} - ${learningPenalty} penalty = ${adjustedScore} (below 30 min)`, "scanner");
                   }
 
-                  if (emaAligned && roomTo2R && (scorePassesAfterPenalty || learningPenalty === 0)) {
-                  const minRisk = retestResult.entryPrice * 0.003;
+                  if (emaAligned && roomTo2R && scorePassesAfterPenalty) {
+                  const minRisk = retestResult.entryPrice * 0.005;
                   const effectiveRisk = Math.max(riskPerShare, minRisk);
                   const equity = user.accountSize ?? 100000;
                   const riskDollars = equity * tierConfig.riskPct;

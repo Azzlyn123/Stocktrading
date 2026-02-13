@@ -30,7 +30,19 @@ import {
   Target,
   Activity,
   Layers,
+  Trash2,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import type { SimulationRun } from "@shared/schema";
 
 interface AutoRunStatus {
@@ -1093,6 +1105,69 @@ function LoadingSkeleton() {
   );
 }
 
+function ResetSimulationButton() {
+  const { toast } = useToast();
+  const resetMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/simulations/reset");
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/simulations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trades"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/signals"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/alerts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/summaries"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/lessons"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/lessons/insights"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/walk-forward/results"] });
+      const d = data.deleted;
+      toast({
+        title: "Simulation Data Reset",
+        description: `Cleared ${d.simulationRuns} runs, ${d.trades} trades, ${d.lessons} lessons, ${d.signals} signals, ${d.alerts} alerts, ${d.summaries} summaries.`,
+      });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Reset failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button variant="outline" size="sm" data-testid="button-reset-simulation">
+          <Trash2 className="w-4 h-4 mr-2" />
+          Reset All Data
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Reset all simulation data?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This will permanently delete all simulation runs, paper trades, trade lessons, signals, alerts, and daily summaries. Your account settings and watchlist will be preserved. This action cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel data-testid="button-cancel-reset">Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => resetMutation.mutate()}
+            className="bg-destructive text-destructive-foreground"
+            disabled={resetMutation.isPending}
+            data-testid="button-confirm-reset"
+          >
+            {resetMutation.isPending ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Trash2 className="w-4 h-4 mr-2" />
+            )}
+            Reset Everything
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 export default function Backtester() {
   const [selectedDate, setSelectedDate] = useState(() => {
     const d = new Date();
@@ -1202,13 +1277,16 @@ export default function Backtester() {
       className="p-4 md:p-6 space-y-6 max-w-5xl mx-auto overflow-y-auto h-full"
       data-testid="page-backtester"
     >
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight" data-testid="text-backtester-title">
-          Historical Backtester
-        </h1>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Replay past trading days to train the AI learning system
-        </p>
+      <div className="flex items-start justify-between gap-2 flex-wrap">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight" data-testid="text-backtester-title">
+            Historical Backtester
+          </h1>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Replay past trading days to train the AI learning system
+          </p>
+        </div>
+        <ResetSimulationButton />
       </div>
 
       <Card data-testid="card-auto-run-controls" className="border-primary/20">
