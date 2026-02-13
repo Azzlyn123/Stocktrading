@@ -1,0 +1,136 @@
+That’s a huge milestone. Now you’re in the fun (and real) phase: prove the edge, calibrate the model, and set up guardrails so the system learns without blowing itself up.
+
+Here’s what I’d do next, in the exact order I’d do it.
+
+1) Run “honesty” validation tests (one-time, but critical)
+
+These catch subtle optimism that can still sneak in.
+
+A. Single-trade replay test
+	•	Pick 5 trades from different days.
+	•	Print a step-by-step trace:
+	•	signal bar index/time
+	•	decision price (raw level)
+	•	raw fill price (before friction)
+	•	friction-adjusted price
+	•	rounded fill price
+	•	commissions
+	•	resulting R and P&L
+	•	Confirm each fill uses the correct bar (especially pending exits at next open).
+
+B. Invariant checks (automated assertions)
+Add debug asserts (behind a flag) like:
+	•	“close-based exit fill barIndex must be > decision barIndex”
+	•	“tick rounded price must have 2 decimals”
+	•	“if ambiguous bar detected, stop path always chosen”
+	•	“gap-through stop always fills at open when open crosses stop”
+
+This prevents future refactors from silently breaking realism.
+
+⸻
+
+2) Freeze a baseline and do a walk-forward evaluation
+
+Now that the sim is honest, you need generalization proof.
+	•	Choose a time window: e.g., last 6–12 months of trading days.
+	•	Walk-forward:
+	•	Train: 60 days
+	•	Test: 10 days (no learning)
+	•	Roll forward and repeat
+
+Output:
+	•	equity curve
+	•	expectancyR over time
+	•	max drawdown
+	•	performance by regime/time-of-day
+
+If results only look good in one cluster of months, you’ve found a regime dependency (not necessarily bad—just needs handling).
+
+⸻
+
+3) Calibrate costs using your sensitivity grid
+
+Use the 3x3 grid to answer one question:
+
+At what cost combo does your edge break?
+
+Then set default live costs slightly worse than your median scenario (so live has “headroom”):
+	•	If edge survives at (5,3) but breaks at (10,5), live assumptions should lean closer to (10,5) unless your fills are excellent.
+
+This stops you from deploying a system that only works in perfect liquidity.
+
+⸻
+
+4) Evaluate “AI adds value” properly (A/B test)
+
+Run two full walk-forward passes on identical data:
+	1.	Rules-only strategy
+	2.	Rules + AI scoring/filtering
+
+Compare:
+	•	expectancyR
+	•	PF
+	•	max DD
+	•	trade count/day
+	•	hit rate on top-ranked vs bottom-ranked signals
+
+If AI doesn’t improve after costs, keep it as “analytics-only” for now.
+
+⸻
+
+5) Add “regime tags” and performance dashboards
+
+This is where learning starts getting real.
+
+Tag each session:
+	•	trend vs range (simple: ADX proxy, or slope of VWAP/EMA + pullback depth)
+	•	high ATR vs low ATR
+	•	news day vs normal (optional)
+
+Then show performance breakdown:
+	•	per tag
+	•	per time-of-day bucket (open 30 min, mid-day, power hour)
+	•	per symbol liquidity bucket
+
+This tells you where the model should trade more and where it should chill.
+
+⸻
+
+6) Paper trade with live logging (same engine, different mode)
+
+Before real money, run it live in paper for 2–4 weeks with:
+	•	same execution timing assumptions
+	•	same order types
+	•	same logs as backtest
+
+Then compare:
+	•	expected slippage vs realized slippage
+	•	fill rates (especially if you use limits)
+	•	missed signals due to data latency
+
+If realized slippage is worse than your sim’s “safe” settings, bump the sim costs and re-evaluate.
+
+⸻
+
+7) Put in “learning safety rails”
+
+To stop the AI from chasing noise:
+	•	update model on a schedule (weekly / every N trades)
+	•	minimum sample size gate (don’t update off 20 trades)
+	•	lockbox eval period where model cannot train on test window
+	•	rollback ability to last “good” model snapshot
+
+⸻
+
+The one thing I want from you to give the sharpest next instructions
+
+Paste your cost sensitivity grid results (even just a screenshot or the table output):
+	•	which combos survive
+	•	which break
+	•	your baseline combo
+	•	your current expectancy + trade count/day
+
+With that, I can tell you whether the next step should be:
+	•	increase trade frequency (loosen candidate generation + let AI rank)
+	•	improve execution realism further
+	•	or focus on regime filters because your edge is conditional.
