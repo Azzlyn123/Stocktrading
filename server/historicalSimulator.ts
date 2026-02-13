@@ -355,13 +355,14 @@ export function getWeekdaysGoingBack(fromDate: Date, count: number): string[] {
 export async function startAutoRun(
   userId: string,
   durationMinutes: number,
-  storage: IStorage
+  storage: IStorage,
+  exactDays?: number
 ): Promise<{ started: boolean; message: string }> {
   if (autoRunState?.active) {
     return { started: false, message: "Auto-run is already active." };
   }
 
-  const maxDates = Math.max(3, Math.ceil(durationMinutes * 2));
+  const maxDates = exactDays ?? Math.max(3, Math.ceil(durationMinutes * 2));
   const dates = getWeekdaysGoingBack(new Date(), maxDates);
 
   autoRunState = {
@@ -1210,6 +1211,7 @@ export async function runHistoricalSimulation(
                   processedBars++;
                   continue;
                 }
+                log(`[ENTRY GATE] ${ticker} score=${score} tier=${state.selectedTier} penalty=${appliedPenalty} regime=${regimeResult.aligned ? "trending" : "neutral"}`, "scanner");
 
                 state.signalState = "TRIGGERED";
                 state.activeTrade = {

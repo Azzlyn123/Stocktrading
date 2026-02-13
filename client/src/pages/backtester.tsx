@@ -1219,9 +1219,10 @@ export default function Backtester() {
   });
 
   const startAutoRun = useMutation({
-    mutationFn: async (minutes: number) => {
+    mutationFn: async (opts: { minutes: number; exactDays?: number }) => {
       const res = await apiRequest("POST", "/api/simulations/auto-run", {
-        durationMinutes: minutes,
+        durationMinutes: opts.minutes,
+        exactDays: opts.exactDays,
       });
       return res.json();
     },
@@ -1332,18 +1333,33 @@ export default function Backtester() {
                 Stop Training
               </Button>
             ) : (
-              <Button
-                onClick={() => startAutoRun.mutate(autoRunMinutes)}
-                disabled={startAutoRun.isPending || hasRunning}
-                data-testid="button-start-auto-run"
-              >
-                {startAutoRun.isPending ? (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                ) : (
-                  <Zap className="w-4 h-4 mr-2" />
-                )}
-                Start {autoRunMinutes}-min Training
-              </Button>
+              <>
+                <Button
+                  onClick={() => startAutoRun.mutate({ minutes: autoRunMinutes })}
+                  disabled={startAutoRun.isPending || hasRunning}
+                  data-testid="button-start-auto-run"
+                >
+                  {startAutoRun.isPending ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Zap className="w-4 h-4 mr-2" />
+                  )}
+                  Start {autoRunMinutes}-min Training
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => startAutoRun.mutate({ minutes: 15, exactDays: 5 })}
+                  disabled={startAutoRun.isPending || hasRunning}
+                  data-testid="button-run-last-5-days"
+                >
+                  {startAutoRun.isPending ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Play className="w-4 h-4 mr-2" />
+                  )}
+                  Run Last 5 Days
+                </Button>
+              </>
             )}
           </div>
         </CardContent>

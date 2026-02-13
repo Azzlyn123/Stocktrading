@@ -313,9 +313,10 @@ export async function registerRoutes(
 
   app.post("/api/simulations/auto-run", requireAuth, async (req, res) => {
     const userId = (req.user as User).id;
-    const { durationMinutes } = req.body;
+    const { durationMinutes, exactDays } = req.body;
     const duration = Math.min(Math.max(Number(durationMinutes) || 5, 1), 15);
-    const result = await startAutoRun(userId, duration, storage);
+    const days = exactDays ? Math.min(Math.max(Number(exactDays), 1), 30) : undefined;
+    const result = await startAutoRun(userId, duration, storage, days);
     if (!result.started) {
       return res.status(409).json({ error: result.message });
     }
