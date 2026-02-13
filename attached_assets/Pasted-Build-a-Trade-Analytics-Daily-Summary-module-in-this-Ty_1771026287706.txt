@@ -1,0 +1,102 @@
+Build a “Trade Analytics + Daily Summary” module in this TypeScript trading app.
+
+GOAL
+When each trade fully closes, log a complete TradeRecord.
+At any time (and at end of day), print a DailySummary from all trades taken today.
+
+REQUIREMENTS
+1) Create a TypeScript type/interface TradeRecord with:
+- id: string
+- symbol: string
+- tier: "A" | "B" | "C"
+- direction: "LONG" | "SHORT"
+- entryTime: string (ISO)
+- exitTime: string (ISO)
+- entryPrice: number
+- stopPrice: number
+- exitPrice: number
+- qty: number
+- riskDollars: number
+- rMultiple: number
+- pnlDollars: number
+- durationMinutes: number
+- exitReason:
+  "STOP_LOSS" | "TIME_STOP" | "HARD_EXIT" | "TARGET_2" | "MANUAL" | "UNKNOWN"
+- notes?: string
+
+2) Create a new file: src/analytics/tradeAnalytics.ts
+Export functions:
+- computeRMultiple(direction, entryPrice, stopPrice, exitPrice): number
+- computePnLDollars(direction, entryPrice, exitPrice, qty): number
+- computeDurationMinutes(entryTimeISO, exitTimeISO): number
+- buildDailySummary(trades: TradeRecord[]): DailySummary
+- formatDailySummary(summary: DailySummary): string
+
+Define DailySummary with:
+- dateISO: string
+- trades: number
+- wins: number
+- losses: number
+- winRate: number
+- avgR: number
+- totalR: number
+- avgWinR: number
+- avgLossR: number
+- bestR: number
+- worstR: number
+- totalPnL: number
+- avgDurationMin: number
+- maxDrawdownR: number
+- exitReasonCounts: Record<string, number>
+
+3) Add a simple storage for today’s trades:
+- new file: src/analytics/tradeStore.ts
+Exports:
+- addTrade(trade: TradeRecord): void
+- getTodayTrades(): TradeRecord[]
+- resetTodayTrades(): void
+Implementation can be in-memory array (OK for now).
+“Today” is based on local date of entryTime.
+
+4) INTEGRATION POINT (MOST IMPORTANT)
+Find the part of the code where a trade reaches FINAL CLOSED state (full exit).
+Right there:
+- Create a TradeRecord using the actual trade fields from your system
+- Compute:
+   riskDollars = abs(entryPrice - stopPrice) * qty
+   rMultiple = (exitPrice - entryPrice) / (entryPrice - stopPrice) for LONG
+              (entryPrice - exitPrice) / (stopPrice - entryPrice) for SHORT
+   pnlDollars = (exitPrice - entryPrice) * qty for LONG
+                (entryPrice - exitPrice) * qty for SHORT
+   durationMinutes from entryTime/exitTime
+- Determine exitReason based on whichever exit triggered in your logic
+- Call addTrade(tradeRecord)
+
+5) DAILY REPORT OUTPUT
+Add a command or function (wherever you print logs) called printDailyReport():
+- const trades = getTodayTrades()
+- const summary = buildDailySummary(trades)
+- console.log(formatDailySummary(summary))
+
+Format example:
+DAILY SUMMARY (YYYY-MM-DD)
+Trades: 6 | Wins: 3 | Losses: 3 | WinRate: 50.0%
+Total R: +1.20 | Avg R: +0.20 | Total PnL: $123.45
+Best R: +2.00 | Worst R: -1.00 | Avg Win R: +0.85 | Avg Loss R: -0.45
+Avg Duration: 18.3 min | Max Drawdown: -1.40R
+Exit Reasons: STOP_LOSS=2, TIME_STOP=2, HARD_EXIT=1, TARGET_2=1
+
+6) EDGE CASES / SAFETY
+- Round prices to 2 decimals where relevant (but keep rMultiple and PnL full precision internally).
+- If stopPrice == entryPrice (invalid), set rMultiple=0 and flag notes="invalid risk distance".
+- If no trades, daily report should print “No trades yet today.”
+
+7) DO NOT CHANGE STRATEGY
+This is logging + reporting only.
+No change to entry/exit rules, position sizing, or order routing.
+
+DELIVERABLES
+- src/analytics/tradeAnalytics.ts
+- src/analytics/tradeStore.ts
+- Minimal code changes where trade closes to addTrade()
+- A callable printDailyReport() that prints exactly like the format above

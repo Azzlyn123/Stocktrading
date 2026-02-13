@@ -16,11 +16,36 @@ import {
   type TradeTier,
 } from "./strategy";
 import { DEFAULT_STRATEGY_CONFIG } from "./strategy/config";
-import { analyzeClosedTrade, computeLearningPenalty } from "./strategy/learning";
-import { isAlpacaConfigured, fetchBarsForDate, fetchDailyBarsForDate, fetchMultiDayDailyBars } from "./alpaca";
+import {
+  analyzeClosedTrade,
+  computeLearningPenalty,
+} from "./strategy/learning";
+import {
+  isAlpacaConfigured,
+  fetchBarsForDate,
+  fetchDailyBarsForDate,
+  fetchMultiDayDailyBars,
+} from "./alpaca";
 
+function isTickAligned(price: number, tick = 0.01, eps = 1e-6){
+  const q = price / tick;
+  return Math.abs(q - Math.round(q)) < eps;
+}
 const BACKTEST_TICKERS = [
-  "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD", "JPM", "V", "NFLX", "CRM", "AVGO", "LLY"
+  "AAPL",
+  "MSFT",
+  "NVDA",
+  "AMZN",
+  "GOOGL",
+  "META",
+  "TSLA",
+  "AMD",
+  "JPM",
+  "V",
+  "NFLX",
+  "CRM",
+  "AVGO",
+  "LLY",
 ];
 
 type Side = "long" | "short";
@@ -68,14 +93,20 @@ function simAssert(
   rule: string,
   barIndex: number,
   ticker: string,
-  context?: Record<string, any>
+  context?: Record<string, any>,
 ): void {
   if (!SIM_DEBUG) return;
   if (!condition) {
-    const ctxStr = context ? ` | Context: ${JSON.stringify(context)}` : '';
+    const ctxStr = context ? ` | Context: ${JSON.stringify(context)}` : "";
     const err = `[SIM ASSERT FAILED] ${message}${ctxStr}`;
     log(err, "historical");
-    violations.push({ rule, message, barIndex, ticker, context: context ?? {} });
+    violations.push({
+      rule,
+      message,
+      barIndex,
+      ticker,
+      context: context ?? {},
+    });
     if (SIM_ASSERT_THROW) {
       throw new Error(err);
     }
@@ -147,7 +178,11 @@ function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
 }
 
-function dynamicSlippageBps(price: number, atr14: number, overrides?: CostOverrides): number {
+function dynamicSlippageBps(
+  price: number,
+  atr14: number,
+  overrides?: CostOverrides,
+): number {
   const cfg = effectiveConfig(overrides);
   const ratioBps = price > 0 ? (atr14 / price) * 10000 : 0;
   const unclamped = cfg.baseSlippageBps + cfg.slippageK * ratioBps;
@@ -177,9 +212,14 @@ function applyFrictionAndRound(params: {
   const slipBps = dynamicSlippageBps(rawPrice, atr14, costOverrides);
   const totalBps = slipBps + cfg.halfSpreadBps;
   const pct = totalBps / 10000;
-  const sign = (side === "long")
-    ? (direction === "entry" ? +1 : -1)
-    : (direction === "entry" ? -1 : +1);
+  const sign =
+    side === "long"
+      ? direction === "entry"
+        ? +1
+        : -1
+      : direction === "entry"
+        ? -1
+        : +1;
   const withFriction = rawPrice * (1 + sign * pct);
   const mode = roundingMode(side, direction);
   return roundToTick(withFriction, cfg.tickSize, mode);
@@ -197,9 +237,14 @@ function applyFrictionAndRoundWithTrace(params: {
   const slipBps = dynamicSlippageBps(rawPrice, atr14, costOverrides);
   const totalBps = slipBps + cfg.halfSpreadBps;
   const pct = totalBps / 10000;
-  const sign = (side === "long")
-    ? (direction === "entry" ? +1 : -1)
-    : (direction === "entry" ? -1 : +1);
+  const sign =
+    side === "long"
+      ? direction === "entry"
+        ? +1
+        : -1
+      : direction === "entry"
+        ? -1
+        : +1;
   const frictionAdjustedPrice = rawPrice * (1 + sign * pct);
   const mode = roundingMode(side, direction);
   const finalPrice = roundToTick(frictionAdjustedPrice, cfg.tickSize, mode);
@@ -230,7 +275,10 @@ function rawExitFillLong(params: {
   return barClose;
 }
 
-function calculateCommission(shares: number, overrides?: CostOverrides): number {
+function calculateCommission(
+  shares: number,
+  overrides?: CostOverrides,
+): number {
   const cfg = effectiveConfig(overrides);
   const absShares = Math.abs(shares);
   return Math.max(cfg.minCommission, absShares * cfg.commissionPerShare);
@@ -285,7 +333,11 @@ interface HistoricalTickerState {
     realizedR: number;
     riskPerShare: number;
     signalId: string | null;
-    pendingExit: { reason: string; exitType: string; decisionBarIndex: number } | null;
+    pendingExit: {
+      reason: string;
+      exitType: string;
+      decisionBarIndex: number;
+    } | null;
   } | null;
 }
 
@@ -356,7 +408,7 @@ export async function startAutoRun(
   userId: string,
   durationMinutes: number,
   storage: IStorage,
-  exactDays?: number
+  exactDays?: number,
 ): Promise<{ started: boolean; message: string }> {
   if (autoRunState?.active) {
     return { started: false, message: "Auto-run is already active." };
@@ -380,25 +432,39 @@ export async function startAutoRun(
     skippedByLearning: 0,
   };
 
-  log(`[AutoRun] Starting ${durationMinutes}-minute auto-run across ${dates.length} dates`, "historical");
+  log(
+    `[AutoRun] Starting ${durationMinutes}-minute auto-run across ${dates.length} dates`,
+    "historical",
+  );
 
   runAutoRunLoop(userId, storage).catch((err) => {
     log(`[AutoRun] Error: ${err.message}`, "historical");
   });
 
-  return { started: true, message: `Auto-run started for ${durationMinutes} minutes across ${dates.length} trading days.` };
+  return {
+    started: true,
+    message: `Auto-run started for ${durationMinutes} minutes across ${dates.length} trading days.`,
+  };
 }
 
 async function runAutoRunLoop(userId: string, storage: IStorage) {
   if (!autoRunState) return;
 
-  const deadline = autoRunState.startedAt + autoRunState.durationMinutes * 60 * 1000;
+  const deadline =
+    autoRunState.startedAt + autoRunState.durationMinutes * 60 * 1000;
 
-  while (autoRunState.datesRemaining.length > 0 && Date.now() < deadline && !autoRunState.cancel) {
+  while (
+    autoRunState.datesRemaining.length > 0 &&
+    Date.now() < deadline &&
+    !autoRunState.cancel
+  ) {
     const date = autoRunState.datesRemaining.shift()!;
     autoRunState.currentDate = date;
 
-    log(`[AutoRun] Simulating ${date} (${autoRunState.datesCompleted.length + 1}/${autoRunState.datesCompleted.length + autoRunState.datesRemaining.length + 1})`, "historical");
+    log(
+      `[AutoRun] Simulating ${date} (${autoRunState.datesCompleted.length + 1}/${autoRunState.datesCompleted.length + autoRunState.datesRemaining.length + 1})`,
+      "historical",
+    );
 
     const run = await storage.createSimulationRun({
       userId,
@@ -419,14 +485,20 @@ async function runAutoRunLoop(userId: string, storage: IStorage) {
     autoRunState.datesCompleted.push(date);
 
     if (Date.now() >= deadline) {
-      log(`[AutoRun] Time limit reached after ${autoRunState.datesCompleted.length} dates`, "historical");
+      log(
+        `[AutoRun] Time limit reached after ${autoRunState.datesCompleted.length} dates`,
+        "historical",
+      );
       break;
     }
   }
 
   autoRunState.active = false;
   autoRunState.currentDate = null;
-  log(`[AutoRun] Finished: ${autoRunState.datesCompleted.length} dates, ${autoRunState.totalTrades} trades, ${autoRunState.totalLessons} lessons, P&L: $${autoRunState.totalPnl.toFixed(2)}`, "historical");
+  log(
+    `[AutoRun] Finished: ${autoRunState.datesCompleted.length} dates, ${autoRunState.totalTrades} trades, ${autoRunState.totalLessons} lessons, P&L: $${autoRunState.totalPnl.toFixed(2)}`,
+    "historical",
+  );
 }
 
 export function incrementAutoRunSkipped() {
@@ -454,7 +526,7 @@ export async function runHistoricalSimulation(
     costOverrides?: CostOverrides;
     dryRun?: boolean;
     preloadedBars?: SimulationBarData;
-  }
+  },
 ): Promise<DryRunResult | void> {
   const tickers = tickerList ?? BACKTEST_TICKERS;
   const allSymbols = Array.from(new Set([...tickers, "SPY"]));
@@ -486,7 +558,8 @@ export async function runHistoricalSimulation(
         if (!isDryRun) {
           await storage.updateSimulationRun(runId, {
             status: "failed",
-            errorMessage: "Alpaca API keys not configured. Historical data requires Alpaca integration.",
+            errorMessage:
+              "Alpaca API keys not configured. Historical data requires Alpaca integration.",
             completedAt: new Date(),
           });
         }
@@ -502,8 +575,15 @@ export async function runHistoricalSimulation(
       log(`[HistSim] Fetching previous day bars...`, "historical");
       prevDayBars = await fetchDailyBarsForDate(allSymbols, simulationDate);
 
-      log(`[HistSim] Fetching 20-day daily bars for RVOL/ATR baseline...`, "historical");
-      multiDayBars = await fetchMultiDayDailyBars(allSymbols, simulationDate, 20);
+      log(
+        `[HistSim] Fetching 20-day daily bars for RVOL/ATR baseline...`,
+        "historical",
+      );
+      multiDayBars = await fetchMultiDayDailyBars(
+        allSymbols,
+        simulationDate,
+        20,
+      );
     }
 
     const spyBars5m = bars5mMap.get("SPY") ?? [];
@@ -552,10 +632,26 @@ export async function runHistoricalSimulation(
     const tradeRs: number[] = [];
     const tradeGrossPnls: number[] = [];
     const tradeNetPnls: number[] = [];
-    const tradesByRegime: Record<string, { wins: number; losses: number; pnl: number }> = {};
-    const tradesBySession: Record<string, { wins: number; losses: number; pnl: number }> = {};
-    const tradesByTier: Record<string, { wins: number; losses: number; pnl: number }> = {};
-    const skippedSetups: Array<{ ticker: string; score: number; penalty: number; reason: string; barIndex: number; price: number }> = [];
+    const tradesByRegime: Record<
+      string,
+      { wins: number; losses: number; pnl: number }
+    > = {};
+    const tradesBySession: Record<
+      string,
+      { wins: number; losses: number; pnl: number }
+    > = {};
+    const tradesByTier: Record<
+      string,
+      { wins: number; losses: number; pnl: number }
+    > = {};
+    const skippedSetups: Array<{
+      ticker: string;
+      score: number;
+      penalty: number;
+      reason: string;
+      barIndex: number;
+      price: number;
+    }> = [];
     const tradeTraces: TraceStep[] = [];
     const invariantViolations: InvariantViolation[] = [];
 
@@ -580,21 +676,26 @@ export async function runHistoricalSimulation(
 
       if (tickerBars5m.length < 10) {
         processedBars += tickerBars5m.length;
-        log(`[HistSim] ${ticker} skipped - only ${tickerBars5m.length} bars (need 10+)`, "historical");
+        log(
+          `[HistSim] ${ticker} skipped - only ${tickerBars5m.length} bars (need 10+)`,
+          "historical",
+        );
         continue;
       }
 
-      const avgDailyVolume = dailyHistory.length > 1
-        ? dailyHistory.slice(0, -1).reduce((s, b) => s + b.volume, 0) / (dailyHistory.length - 1)
-        : 0;
+      const avgDailyVolume =
+        dailyHistory.length > 1
+          ? dailyHistory.slice(0, -1).reduce((s, b) => s + b.volume, 0) /
+            (dailyHistory.length - 1)
+          : 0;
 
       let dailyATRbaseline = 0;
       if (dailyHistory.length >= 5) {
-        const ranges = dailyHistory.slice(-5).map(b => b.high - b.low);
+        const ranges = dailyHistory.slice(-5).map((b) => b.high - b.low);
         dailyATRbaseline = ranges.reduce((s, r) => s + r, 0) / ranges.length;
-        dailyATRbaseline = dailyATRbaseline / 78 * 1.2;
+        dailyATRbaseline = (dailyATRbaseline / 78) * 1.2;
       } else if (prevDay) {
-        dailyATRbaseline = (prevDay.high - prevDay.low) / 78 * 1.2;
+        dailyATRbaseline = ((prevDay.high - prevDay.low) / 78) * 1.2;
       } else {
         dailyATRbaseline = tickerBars5m[0].open * 0.002;
       }
@@ -619,7 +720,9 @@ export async function runHistoricalSimulation(
         vwap: 0,
         prevDayHigh: prevDay ? prevDay.high : tickerBars5m[0].open * 1.01,
         prevDayLow: prevDay ? prevDay.low : tickerBars5m[0].open * 0.99,
-        yesterdayRange: prevDay ? (prevDay.high - prevDay.low) : tickerBars5m[0].open * 0.02,
+        yesterdayRange: prevDay
+          ? prevDay.high - prevDay.low
+          : tickerBars5m[0].open * 0.02,
         dailyATRbaseline,
         spreadPct: 0.02,
         minutesSinceOpen: 0,
@@ -629,9 +732,19 @@ export async function runHistoricalSimulation(
         activeTrade: null,
       };
 
-      let lastRegimeResult = checkMarketRegime([], DEFAULT_STRATEGY_CONFIG.marketRegime);
+      let lastRegimeResult = checkMarketRegime(
+        [],
+        DEFAULT_STRATEGY_CONFIG.marketRegime,
+      );
 
-      let diag = { resistFound: 0, breakoutsAboveResist: 0, tierSelected: 0, boQualified: 0, retestValid: 0, entryAttempted: 0 };
+      let diag = {
+        resistFound: 0,
+        breakoutsAboveResist: 0,
+        tierSelected: 0,
+        boQualified: 0,
+        retestValid: 0,
+        entryAttempted: 0,
+      };
 
       for (let i = 0; i < tickerBars5m.length; i++) {
         if (control.cancel) break;
@@ -650,15 +763,16 @@ export async function runHistoricalSimulation(
         if (avgDailyVolume > 0 && state.barCount > 0) {
           const fractionOfDay = state.barCount / 78;
           const expectedVolume = avgDailyVolume * fractionOfDay;
-          state.rvol = expectedVolume > 0 ? state.dayVolume / expectedVolume : 1.0;
+          state.rvol =
+            expectedVolume > 0 ? state.dayVolume / expectedVolume : 1.0;
         }
 
         if (state.barCount % 3 === 0 && state.bars5m.length >= 3) {
           const last3 = state.bars5m.slice(-3);
           const bar15m: Candle = {
             open: last3[0].open,
-            high: Math.max(...last3.map(c => c.high)),
-            low: Math.min(...last3.map(c => c.low)),
+            high: Math.max(...last3.map((c) => c.high)),
+            low: Math.min(...last3.map((c) => c.low)),
             close: last3[2].close,
             volume: last3.reduce((s, c) => s + c.volume, 0),
             timestamp: bar.timestamp,
@@ -670,15 +784,20 @@ export async function runHistoricalSimulation(
         state.atr14 = calculateATR(state.bars5m, 14);
         state.vwap = calculateVWAP(state.bars5m);
 
-        const spyBarsToNow = spyBars5m.filter(b => b.timestamp <= bar.timestamp);
-        const regimeResult = checkMarketRegime(spyBarsToNow.slice(-40), DEFAULT_STRATEGY_CONFIG.marketRegime);
+        const spyBarsToNow = spyBars5m.filter(
+          (b) => b.timestamp <= bar.timestamp,
+        );
+        const regimeResult = checkMarketRegime(
+          spyBarsToNow.slice(-40),
+          DEFAULT_STRATEGY_CONFIG.marketRegime,
+        );
         lastRegimeResult = regimeResult;
 
         const volGateResult = checkVolatilityGate(
           state.bars5m,
           state.yesterdayRange,
           state.dailyATRbaseline,
-          DEFAULT_STRATEGY_CONFIG.volatilityGate
+          DEFAULT_STRATEGY_CONFIG.volatilityGate,
         );
 
         if (i < 5) {
@@ -691,7 +810,7 @@ export async function runHistoricalSimulation(
           state.prevDayHigh,
           state.prevDayHigh * 1.005,
           state.price,
-          DEFAULT_STRATEGY_CONFIG.higherTimeframe
+          DEFAULT_STRATEGY_CONFIG.higherTimeframe,
         );
 
         const accountSize = user.accountSize ?? 100000;
@@ -703,7 +822,13 @@ export async function runHistoricalSimulation(
 
           if (trade.pendingExit) {
             const rawFill = bar.open;
-            const exitTrace = applyFrictionAndRoundWithTrace({ rawPrice: rawFill, side: "long", direction: "exit", atr14: state.atr14, costOverrides });
+            const exitTrace = applyFrictionAndRoundWithTrace({
+              rawPrice: rawFill,
+              side: "long",
+              direction: "exit",
+              atr14: state.atr14,
+              costOverrides,
+            });
             const exitPrice = exitTrace.finalPrice;
             const exitReason = trade.pendingExit.reason;
             const shares = trade.shares;
@@ -712,27 +837,68 @@ export async function runHistoricalSimulation(
             const commission = calculateCommission(shares, costOverrides) * 2;
             const pnl = grossPnl - commission;
             const slipBps = exitTrace.slippageBps;
-            log(`[HistSim] ${ticker} PENDING EXIT filled at open $${exitPrice.toFixed(2)} (raw $${rawFill.toFixed(2)}, slip ${slipBps.toFixed(1)}bps)`, "historical");
+            log(
+              `[HistSim] ${ticker} PENDING EXIT filled at open $${exitPrice.toFixed(2)} (raw $${rawFill.toFixed(2)}, slip ${slipBps.toFixed(1)}bps)`,
+              "historical",
+            );
 
             if (SIM_DEBUG) {
-              simAssert(i > trade.pendingExit.decisionBarIndex, "Pending exit fill barIndex must be > decision barIndex", invariantViolations, "PENDING_FILL_BAR_ORDER", i, ticker, { fillBar: i, decisionBar: trade.pendingExit.decisionBarIndex });
-              simAssert(Math.round(exitPrice * 100) === exitPrice * 100, "Tick-rounded price must have ≤2 decimals", invariantViolations, "TICK_PRECISION", i, ticker, { exitPrice });
-              simAssert(exitTrace.frictionAdjustedPrice <= rawFill, "Long exit friction-adjusted price must be <= raw price", invariantViolations, "EXIT_ADVERSE_DIRECTION", i, ticker, { frictionAdjusted: exitTrace.frictionAdjustedPrice, raw: rawFill });
+              simAssert(
+                i > trade.pendingExit.decisionBarIndex,
+                "Pending exit fill barIndex must be > decision barIndex",
+                invariantViolations,
+                "PENDING_FILL_BAR_ORDER",
+                i,
+                ticker,
+                { fillBar: i, decisionBar: trade.pendingExit.decisionBarIndex },
+              );
+             
+              simAssert(
+                exitTrace.frictionAdjustedPrice <= rawFill,
+                "Long exit friction-adjusted price must be <= raw price",
+                invariantViolations,
+                "EXIT_ADVERSE_DIRECTION",
+                i,
+                ticker,
+                {
+                  frictionAdjusted: exitTrace.frictionAdjustedPrice,
+                  raw: rawFill,
+                },
+              );
             }
 
-            const rMultiplePend = riskPerShare > 0 ? (exitPrice - trade.entryPrice) / riskPerShare : 0;
+            const rMultiplePend =
+              riskPerShare > 0
+                ? (exitPrice - trade.entryPrice) / riskPerShare
+                : 0;
             if (tradeTraces.length < 200) {
               tradeTraces.push({
-                step: "PENDING_EXIT_FILL", barIndex: i, barTime: bar.timestamp, ticker,
-                decisionPrice: rawFill, rawFillPrice: rawFill,
-                frictionAdjustedPrice: exitTrace.frictionAdjustedPrice, finalFillPrice: exitPrice,
-                slippageBps: slipBps, commissionTotal: commission,
-                rMultiple: rMultiplePend, pnl, side: "long", direction: "exit",
-                exitKind: "PENDING", exitReason,
+                step: "PENDING_EXIT_FILL",
+                barIndex: i,
+                barTime: bar.timestamp,
+                ticker,
+                decisionPrice: rawFill,
+                rawFillPrice: rawFill,
+                frictionAdjustedPrice: exitTrace.frictionAdjustedPrice,
+                finalFillPrice: exitPrice,
+                slippageBps: slipBps,
+                commissionTotal: commission,
+                rMultiple: rMultiplePend,
+                pnl,
+                side: "long",
+                direction: "exit",
+                exitKind: "PENDING",
+                exitReason,
               });
             }
-            const rMultiple = riskPerShare > 0 ? (exitPrice - trade.entryPrice) / riskPerShare : 0;
-            const pnlPct = trade.entryPrice > 0 ? ((exitPrice - trade.entryPrice) / trade.entryPrice) * 100 : 0;
+            const rMultiple =
+              riskPerShare > 0
+                ? (exitPrice - trade.entryPrice) / riskPerShare
+                : 0;
+            const pnlPct =
+              trade.entryPrice > 0
+                ? ((exitPrice - trade.entryPrice) / trade.entryPrice) * 100
+                : 0;
             const totalR = trade.realizedR + rMultiple;
 
             totalPnl += pnl;
@@ -740,22 +906,51 @@ export async function runHistoricalSimulation(
             else lossCount++;
             grossPnlTotal += grossPnl;
             totalCommissions += commission;
-            const slippageCost = trade.entryPrice * shares * (dynamicSlippageBps(trade.entryPrice, state.atr14, costOverrides) + effectiveConfig(costOverrides).halfSpreadBps) / 10000 * 2;
+            const slippageCost =
+              ((trade.entryPrice *
+                shares *
+                (dynamicSlippageBps(
+                  trade.entryPrice,
+                  state.atr14,
+                  costOverrides,
+                ) +
+                  effectiveConfig(costOverrides).halfSpreadBps)) /
+                10000) *
+              2;
             totalSlippageCosts += slippageCost;
             tradeRs.push(totalR);
             tradeGrossPnls.push(grossPnl);
             tradeNetPnls.push(pnl);
-            const trSession = state.minutesSinceOpen <= 90 ? "open" : state.minutesSinceOpen <= 240 ? "mid" : "power";
-            const trRegime = regimeResult.aligned ? "trending" : regimeResult.chopping ? "choppy" : "neutral";
+            const trSession =
+              state.minutesSinceOpen <= 90
+                ? "open"
+                : state.minutesSinceOpen <= 240
+                  ? "mid"
+                  : "power";
+            const trRegime = regimeResult.aligned
+              ? "trending"
+              : regimeResult.chopping
+                ? "choppy"
+                : "neutral";
             const trTier = trade.tier;
-            if (!tradesByRegime[trRegime]) tradesByRegime[trRegime] = { wins: 0, losses: 0, pnl: 0 };
-            if (!tradesBySession[trSession]) tradesBySession[trSession] = { wins: 0, losses: 0, pnl: 0 };
-            if (!tradesByTier[trTier]) tradesByTier[trTier] = { wins: 0, losses: 0, pnl: 0 };
+            if (!tradesByRegime[trRegime])
+              tradesByRegime[trRegime] = { wins: 0, losses: 0, pnl: 0 };
+            if (!tradesBySession[trSession])
+              tradesBySession[trSession] = { wins: 0, losses: 0, pnl: 0 };
+            if (!tradesByTier[trTier])
+              tradesByTier[trTier] = { wins: 0, losses: 0, pnl: 0 };
             tradesByRegime[trRegime].pnl += pnl;
             tradesBySession[trSession].pnl += pnl;
             tradesByTier[trTier].pnl += pnl;
-            if (pnl > 0) { tradesByRegime[trRegime].wins++; tradesBySession[trSession].wins++; tradesByTier[trTier].wins++; }
-            else { tradesByRegime[trRegime].losses++; tradesBySession[trSession].losses++; tradesByTier[trTier].losses++; }
+            if (pnl > 0) {
+              tradesByRegime[trRegime].wins++;
+              tradesBySession[trSession].wins++;
+              tradesByTier[trTier].wins++;
+            } else {
+              tradesByRegime[trRegime].losses++;
+              tradesBySession[trSession].losses++;
+              tradesByTier[trTier].losses++;
+            }
 
             if (!isDryRun) {
               const tradeRecord = await storage.createTrade({
@@ -776,11 +971,15 @@ export async function runHistoricalSimulation(
                 status: "closed",
                 exitReason: `[SIM] ${exitReason}`,
                 isPartiallyExited: trade.isPartiallyExited,
-                partialExitPrice: trade.partialExitPrice ? Number(trade.partialExitPrice.toFixed(2)) : null,
+                partialExitPrice: trade.partialExitPrice
+                  ? Number(trade.partialExitPrice.toFixed(2))
+                  : null,
                 partialExitShares: trade.partialExitShares,
                 stopMovedToBE: trade.stopMovedToBE,
                 runnerShares: trade.runnerShares,
-                trailingStopPrice: trade.trailingStopPrice ? Number(trade.trailingStopPrice.toFixed(2)) : null,
+                trailingStopPrice: trade.trailingStopPrice
+                  ? Number(trade.trailingStopPrice.toFixed(2))
+                  : null,
                 dollarRisk: Number(trade.dollarRisk.toFixed(2)),
                 score: trade.score,
                 scoreTier: trade.scoreTier,
@@ -792,19 +991,37 @@ export async function runHistoricalSimulation(
               });
               tradesGenerated++;
 
-              const signal = trade.signalId ? (await storage.getSignalById(trade.signalId)) ?? null : null;
+              const signal = trade.signalId
+                ? ((await storage.getSignalById(trade.signalId)) ?? null)
+                : null;
               const lessonResult = analyzeClosedTrade({
-                trade: { ...tradeRecord, enteredAt: new Date(bar.timestamp - minutesSinceEntry * 60000), exitedAt: new Date(bar.timestamp) },
+                trade: {
+                  ...tradeRecord,
+                  enteredAt: new Date(
+                    bar.timestamp - minutesSinceEntry * 60000,
+                  ),
+                  exitedAt: new Date(bar.timestamp),
+                },
                 signal,
                 spyAligned: regimeResult.aligned,
-                isLunchChop: state.minutesSinceOpen >= 120 && state.minutesSinceOpen <= 240,
-                session: state.minutesSinceOpen <= 90 ? "open" : state.minutesSinceOpen <= 240 ? "mid" : "power",
+                isLunchChop:
+                  state.minutesSinceOpen >= 120 &&
+                  state.minutesSinceOpen <= 240,
+                session:
+                  state.minutesSinceOpen <= 90
+                    ? "open"
+                    : state.minutesSinceOpen <= 240
+                      ? "mid"
+                      : "power",
               });
               await storage.createLesson({
                 ...lessonResult,
                 exitReason: `[SIM] ${exitReason}`,
                 lessonDetail: `[Historical Sim ${simulationDate}] ${lessonResult.lessonDetail}`,
-                marketContext: { ...(lessonResult.marketContext as Record<string, any>), simulationDate },
+                marketContext: {
+                  ...(lessonResult.marketContext as Record<string, any>),
+                  simulationDate,
+                },
                 durationMinutes: minutesSinceEntry,
               });
               lessonsGenerated++;
@@ -829,26 +1046,47 @@ export async function runHistoricalSimulation(
             minutesSinceEntry,
             tieredConfig.exits,
             tieredConfig.risk,
-            state.atr14
+            state.atr14,
           );
 
           if (exitResult.shouldExit) {
             const shares = trade.shares;
             const exitType = exitResult.exitType;
 
-            const isIntrabar = exitType === "stop_loss" || exitType === "target" || exitType === "partial" || exitType === "trailing_stop";
+            const isIntrabar =
+              exitType === "stop_loss" ||
+              exitType === "target" ||
+              exitType === "partial" ||
+              exitType === "trailing_stop";
 
             if (!isIntrabar) {
-              trade.pendingExit = { reason: exitResult.reason || "exit", exitType: exitType || "hard_exit", decisionBarIndex: i };
-              log(`[HistSim] ${ticker} PENDING EXIT set: ${exitResult.reason} (will fill at next bar open)`, "historical");
+              trade.pendingExit = {
+                reason: exitResult.reason || "exit",
+                exitType: exitType || "hard_exit",
+                decisionBarIndex: i,
+              };
+              log(
+                `[HistSim] ${ticker} PENDING EXIT set: ${exitResult.reason} (will fill at next bar open)`,
+                "historical",
+              );
               if (tradeTraces.length < 200) {
                 tradeTraces.push({
-                  step: "PENDING_EXIT_SET", barIndex: i, barTime: bar.timestamp, ticker,
-                  decisionPrice: bar.close, rawFillPrice: bar.close,
-                  frictionAdjustedPrice: bar.close, finalFillPrice: bar.close,
-                  slippageBps: 0, commissionTotal: 0,
-                  rMultiple: null, pnl: null, side: "long", direction: "exit",
-                  exitKind: "PENDING", exitReason: exitResult.reason || "exit",
+                  step: "PENDING_EXIT_SET",
+                  barIndex: i,
+                  barTime: bar.timestamp,
+                  ticker,
+                  decisionPrice: bar.close,
+                  rawFillPrice: bar.close,
+                  frictionAdjustedPrice: bar.close,
+                  finalFillPrice: bar.close,
+                  slippageBps: 0,
+                  commissionTotal: 0,
+                  rMultiple: null,
+                  pnl: null,
+                  side: "long",
+                  direction: "exit",
+                  exitKind: "PENDING",
+                  exitReason: exitResult.reason || "exit",
                   notes: `Pending exit set, will fill at next bar open`,
                 });
               }
@@ -857,23 +1095,47 @@ export async function runHistoricalSimulation(
             }
 
             const targetLevel = trade.isPartiallyExited
-              ? trade.entryPrice + riskPerShare * (tieredConfig.exits.finalTargetR ?? 2.5)
-              : trade.entryPrice + riskPerShare * (tieredConfig.exits.partialAtR ?? 1.5);
+              ? trade.entryPrice +
+                riskPerShare * (tieredConfig.exits.finalTargetR ?? 2.5)
+              : trade.entryPrice +
+                riskPerShare * (tieredConfig.exits.partialAtR ?? 1.5);
             let effectiveExitType = exitType;
-            let effectiveExitKind: ExitKind = exitType === "stop_loss" || exitType === "trailing_stop" ? "STOP" : "TARGET";
+            let effectiveExitKind: ExitKind =
+              exitType === "stop_loss" || exitType === "trailing_stop"
+                ? "STOP"
+                : "TARGET";
 
-            const isAmbiguousBar = bar.low <= trade.stopPrice && bar.high >= targetLevel;
+            const isAmbiguousBar =
+              bar.low <= trade.stopPrice && bar.high >= targetLevel;
             if (isAmbiguousBar && effectiveExitKind === "TARGET") {
               effectiveExitKind = "STOP";
               effectiveExitType = "stop_loss";
-              log(`[HistSim] ${ticker} AMBIGUOUS BAR: low $${bar.low.toFixed(2)} <= stop $${trade.stopPrice.toFixed(2)} AND high $${bar.high.toFixed(2)} >= target $${targetLevel.toFixed(2)} → assuming stop hit first`, "historical");
+              log(
+                `[HistSim] ${ticker} AMBIGUOUS BAR: low $${bar.low.toFixed(2)} <= stop $${trade.stopPrice.toFixed(2)} AND high $${bar.high.toFixed(2)} >= target $${targetLevel.toFixed(2)} → assuming stop hit first`,
+                "historical",
+              );
             }
 
             if (SIM_DEBUG && isAmbiguousBar) {
-              simAssert(effectiveExitKind === "STOP", "Ambiguous bar must always choose STOP", invariantViolations, "AMBIGUOUS_BAR_STOP", i, ticker, { effectiveExitKind, barLow: bar.low, stopPrice: trade.stopPrice, barHigh: bar.high, targetLevel });
+              simAssert(
+                effectiveExitKind === "STOP",
+                "Ambiguous bar must always choose STOP",
+                invariantViolations,
+                "AMBIGUOUS_BAR_STOP",
+                i,
+                ticker,
+                {
+                  effectiveExitKind,
+                  barLow: bar.low,
+                  stopPrice: trade.stopPrice,
+                  barHigh: bar.high,
+                  targetLevel,
+                },
+              );
             }
 
-            const exitLevel = effectiveExitKind === "STOP" ? trade.stopPrice : targetLevel;
+            const exitLevel =
+              effectiveExitKind === "STOP" ? trade.stopPrice : targetLevel;
             const rawFill = rawExitFillLong({
               kind: effectiveExitKind,
               level: exitLevel,
@@ -883,18 +1145,40 @@ export async function runHistoricalSimulation(
               barClose: bar.close,
             });
 
-            const gapThroughStop = effectiveExitKind === "STOP" && exitLevel != null && bar.open <= exitLevel;
-            const gapThroughTarget = effectiveExitKind === "TARGET" && exitLevel != null && bar.open >= exitLevel;
+            const gapThroughStop =
+              effectiveExitKind === "STOP" &&
+              exitLevel != null &&
+              bar.open <= exitLevel;
+            const gapThroughTarget =
+              effectiveExitKind === "TARGET" &&
+              exitLevel != null &&
+              bar.open >= exitLevel;
             const gapThrough = gapThroughStop || gapThroughTarget;
 
             if (SIM_DEBUG && gapThroughStop) {
-              simAssert(rawFill === bar.open, "Gap-through stop must fill at bar open", invariantViolations, "GAP_THROUGH_STOP_FILL", i, ticker, { rawFill, barOpen: bar.open, stopLevel: exitLevel });
+              simAssert(
+                rawFill === bar.open,
+                "Gap-through stop must fill at bar open",
+                invariantViolations,
+                "GAP_THROUGH_STOP_FILL",
+                i,
+                ticker,
+                { rawFill, barOpen: bar.open, stopLevel: exitLevel },
+              );
             }
 
             if (exitType === "partial" && effectiveExitKind !== "STOP") {
-              const partialTrace = applyFrictionAndRoundWithTrace({ rawPrice: rawFill, side: "long", direction: "exit", atr14: state.atr14, costOverrides });
+              const partialTrace = applyFrictionAndRoundWithTrace({
+                rawPrice: rawFill,
+                side: "long",
+                direction: "exit",
+                atr14: state.atr14,
+                costOverrides,
+              });
               const partialExitPrice = partialTrace.finalPrice;
-              const partialShares = exitResult.partialShares ?? Math.floor(shares * (tieredConfig.exits.partialPct / 100));
+              const partialShares =
+                exitResult.partialShares ??
+                Math.floor(shares * (tieredConfig.exits.partialPct / 100));
               trade.isPartiallyExited = true;
               trade.partialExitPrice = partialExitPrice;
               trade.partialExitShares = partialShares;
@@ -905,56 +1189,116 @@ export async function runHistoricalSimulation(
               } else {
                 trade.stopPrice = trade.entryPrice;
               }
-              trade.realizedR += (partialExitPrice - trade.entryPrice) / riskPerShare * (partialShares / shares);
+              trade.realizedR +=
+                ((partialExitPrice - trade.entryPrice) / riskPerShare) *
+                (partialShares / shares);
 
               if (SIM_DEBUG) {
-                simAssert(Math.round(partialExitPrice * 100) === partialExitPrice * 100, "Tick-rounded price must have ≤2 decimals", invariantViolations, "TICK_PRECISION", i, ticker, { partialExitPrice });
+                simAssert(
+                  isTickAligned(exitPrice, 0.01),
+                    "Pending exit price must align to $0.01 tick grid",
+                    invariantViolations,
+                    "TICK_ALIGNMENT",
+                    i,
+                    ticker,
+                    { exitPrice }
+                  );
+                    }
               }
               if (tradeTraces.length < 200) {
                 tradeTraces.push({
-                  step: "PARTIAL_EXIT", barIndex: i, barTime: bar.timestamp, ticker,
-                  decisionPrice: exitLevel, rawFillPrice: rawFill,
-                  frictionAdjustedPrice: partialTrace.frictionAdjustedPrice, finalFillPrice: partialExitPrice,
-                  slippageBps: partialTrace.slippageBps, commissionTotal: 0,
-                  rMultiple: null, pnl: null, side: "long", direction: "exit",
-                  exitKind: "TARGET", exitReason: exitResult.reason || "partial",
-                  isAmbiguousBar, gapThrough,
+                  step: "PARTIAL_EXIT",
+                  barIndex: i,
+                  barTime: bar.timestamp,
+                  ticker,
+                  decisionPrice: exitLevel,
+                  rawFillPrice: rawFill,
+                  frictionAdjustedPrice: partialTrace.frictionAdjustedPrice,
+                  finalFillPrice: partialExitPrice,
+                  slippageBps: partialTrace.slippageBps,
+                  commissionTotal: 0,
+                  rMultiple: null,
+                  pnl: null,
+                  side: "long",
+                  direction: "exit",
+                  exitKind: "TARGET",
+                  exitReason: exitResult.reason || "partial",
+                  isAmbiguousBar,
+                  gapThrough,
                 });
               }
               processedBars++;
               continue;
             }
 
-            const intraTrace = applyFrictionAndRoundWithTrace({ rawPrice: rawFill, side: "long", direction: "exit", atr14: state.atr14, costOverrides });
+            const intraTrace = applyFrictionAndRoundWithTrace({
+              rawPrice: rawFill,
+              side: "long",
+              direction: "exit",
+              atr14: state.atr14,
+              costOverrides,
+            });
             const exitPrice = intraTrace.finalPrice;
-            const exitReason = effectiveExitType === "stop_loss" && exitType !== "stop_loss"
-              ? `${exitResult.reason || "exit"} [ambiguous bar → stop]`
-              : (exitResult.reason || "exit");
+            const exitReason =
+              effectiveExitType === "stop_loss" && exitType !== "stop_loss"
+                ? `${exitResult.reason || "exit"} [ambiguous bar → stop]`
+                : exitResult.reason || "exit";
 
             const grossPnl = (exitPrice - trade.entryPrice) * shares;
             const commission = calculateCommission(shares, costOverrides) * 2;
             const pnl = grossPnl - commission;
             const slipBps = intraTrace.slippageBps;
-            log(`[HistSim] ${ticker} EXIT ${effectiveExitKind} at $${exitPrice.toFixed(2)} (raw $${rawFill.toFixed(2)}, slip ${slipBps.toFixed(1)}bps, commission $${commission.toFixed(2)})`, "historical");
+            log(
+              `[HistSim] ${ticker} EXIT ${effectiveExitKind} at $${exitPrice.toFixed(2)} (raw $${rawFill.toFixed(2)}, slip ${slipBps.toFixed(1)}bps, commission $${commission.toFixed(2)})`,
+              "historical",
+            );
 
             if (SIM_DEBUG) {
-              simAssert(Math.round(exitPrice * 100) === exitPrice * 100, "Tick-rounded price must have ≤2 decimals", invariantViolations, "TICK_PRECISION", i, ticker, { exitPrice });
-              simAssert(intraTrace.frictionAdjustedPrice <= rawFill, "Long exit friction-adjusted price must be <= raw price", invariantViolations, "EXIT_ADVERSE_DIRECTION", i, ticker, { frictionAdjusted: intraTrace.frictionAdjustedPrice, raw: rawFill });
+            
+              simAssert(
+                intraTrace.frictionAdjustedPrice <= rawFill,
+                "Long exit friction-adjusted price must be <= raw price",
+                invariantViolations,
+                "EXIT_ADVERSE_DIRECTION",
+                i,
+                ticker,
+                {
+                  frictionAdjusted: intraTrace.frictionAdjustedPrice,
+                  raw: rawFill,
+                },
+              );
             }
-            const rMultiple = riskPerShare > 0 ? (exitPrice - trade.entryPrice) / riskPerShare : 0;
+            const rMultiple =
+              riskPerShare > 0
+                ? (exitPrice - trade.entryPrice) / riskPerShare
+                : 0;
 
             if (tradeTraces.length < 200) {
               tradeTraces.push({
-                step: "INTRABAR_EXIT", barIndex: i, barTime: bar.timestamp, ticker,
-                decisionPrice: exitLevel, rawFillPrice: rawFill,
-                frictionAdjustedPrice: intraTrace.frictionAdjustedPrice, finalFillPrice: exitPrice,
-                slippageBps: slipBps, commissionTotal: commission,
-                rMultiple, pnl, side: "long", direction: "exit",
-                exitKind: effectiveExitKind, exitReason,
-                isAmbiguousBar, gapThrough,
+                step: "INTRABAR_EXIT",
+                barIndex: i,
+                barTime: bar.timestamp,
+                ticker,
+                decisionPrice: exitLevel,
+                rawFillPrice: rawFill,
+                frictionAdjustedPrice: intraTrace.frictionAdjustedPrice,
+                finalFillPrice: exitPrice,
+                slippageBps: slipBps,
+                commissionTotal: commission,
+                rMultiple,
+                pnl,
+                side: "long",
+                direction: "exit",
+                exitKind: effectiveExitKind,
+                exitReason,
+                isAmbiguousBar,
+                gapThrough,
               });
             }
-            const pnlPct = trade.entryPrice > 0 ? ((exitPrice - trade.entryPrice) / trade.entryPrice) * 100 : 0;
+            const pnlPct =
+              trade.entryPrice > 0
+                ? ((exitPrice - trade.entryPrice) / trade.entryPrice) * 100
+                : 0;
             const totalR = trade.realizedR + rMultiple;
 
             totalPnl += pnl;
@@ -962,22 +1306,51 @@ export async function runHistoricalSimulation(
             else lossCount++;
             grossPnlTotal += grossPnl;
             totalCommissions += commission;
-            const slippageCost = trade.entryPrice * shares * (dynamicSlippageBps(trade.entryPrice, state.atr14, costOverrides) + effectiveConfig(costOverrides).halfSpreadBps) / 10000 * 2;
+            const slippageCost =
+              ((trade.entryPrice *
+                shares *
+                (dynamicSlippageBps(
+                  trade.entryPrice,
+                  state.atr14,
+                  costOverrides,
+                ) +
+                  effectiveConfig(costOverrides).halfSpreadBps)) /
+                10000) *
+              2;
             totalSlippageCosts += slippageCost;
             tradeRs.push(totalR);
             tradeGrossPnls.push(grossPnl);
             tradeNetPnls.push(pnl);
-            const trSession = state.minutesSinceOpen <= 90 ? "open" : state.minutesSinceOpen <= 240 ? "mid" : "power";
-            const trRegime = regimeResult.aligned ? "trending" : regimeResult.chopping ? "choppy" : "neutral";
+            const trSession =
+              state.minutesSinceOpen <= 90
+                ? "open"
+                : state.minutesSinceOpen <= 240
+                  ? "mid"
+                  : "power";
+            const trRegime = regimeResult.aligned
+              ? "trending"
+              : regimeResult.chopping
+                ? "choppy"
+                : "neutral";
             const trTier = trade.tier;
-            if (!tradesByRegime[trRegime]) tradesByRegime[trRegime] = { wins: 0, losses: 0, pnl: 0 };
-            if (!tradesBySession[trSession]) tradesBySession[trSession] = { wins: 0, losses: 0, pnl: 0 };
-            if (!tradesByTier[trTier]) tradesByTier[trTier] = { wins: 0, losses: 0, pnl: 0 };
+            if (!tradesByRegime[trRegime])
+              tradesByRegime[trRegime] = { wins: 0, losses: 0, pnl: 0 };
+            if (!tradesBySession[trSession])
+              tradesBySession[trSession] = { wins: 0, losses: 0, pnl: 0 };
+            if (!tradesByTier[trTier])
+              tradesByTier[trTier] = { wins: 0, losses: 0, pnl: 0 };
             tradesByRegime[trRegime].pnl += pnl;
             tradesBySession[trSession].pnl += pnl;
             tradesByTier[trTier].pnl += pnl;
-            if (pnl > 0) { tradesByRegime[trRegime].wins++; tradesBySession[trSession].wins++; tradesByTier[trTier].wins++; }
-            else { tradesByRegime[trRegime].losses++; tradesBySession[trSession].losses++; tradesByTier[trTier].losses++; }
+            if (pnl > 0) {
+              tradesByRegime[trRegime].wins++;
+              tradesBySession[trSession].wins++;
+              tradesByTier[trTier].wins++;
+            } else {
+              tradesByRegime[trRegime].losses++;
+              tradesBySession[trSession].losses++;
+              tradesByTier[trTier].losses++;
+            }
 
             if (!isDryRun) {
               const tradeRecord = await storage.createTrade({
@@ -998,11 +1371,15 @@ export async function runHistoricalSimulation(
                 status: "closed",
                 exitReason: `[SIM] ${exitReason}`,
                 isPartiallyExited: trade.isPartiallyExited,
-                partialExitPrice: trade.partialExitPrice ? Number(trade.partialExitPrice.toFixed(2)) : null,
+                partialExitPrice: trade.partialExitPrice
+                  ? Number(trade.partialExitPrice.toFixed(2))
+                  : null,
                 partialExitShares: trade.partialExitShares,
                 stopMovedToBE: trade.stopMovedToBE,
                 runnerShares: trade.runnerShares,
-                trailingStopPrice: trade.trailingStopPrice ? Number(trade.trailingStopPrice.toFixed(2)) : null,
+                trailingStopPrice: trade.trailingStopPrice
+                  ? Number(trade.trailingStopPrice.toFixed(2))
+                  : null,
                 dollarRisk: Number(trade.dollarRisk.toFixed(2)),
                 score: trade.score,
                 scoreTier: trade.scoreTier,
@@ -1014,19 +1391,37 @@ export async function runHistoricalSimulation(
               });
               tradesGenerated++;
 
-              const signal = trade.signalId ? (await storage.getSignalById(trade.signalId)) ?? null : null;
+              const signal = trade.signalId
+                ? ((await storage.getSignalById(trade.signalId)) ?? null)
+                : null;
               const lessonResult = analyzeClosedTrade({
-                trade: { ...tradeRecord, enteredAt: new Date(bar.timestamp - minutesSinceEntry * 60000), exitedAt: new Date(bar.timestamp) },
+                trade: {
+                  ...tradeRecord,
+                  enteredAt: new Date(
+                    bar.timestamp - minutesSinceEntry * 60000,
+                  ),
+                  exitedAt: new Date(bar.timestamp),
+                },
                 signal,
                 spyAligned: regimeResult.aligned,
-                isLunchChop: state.minutesSinceOpen >= 120 && state.minutesSinceOpen <= 240,
-                session: state.minutesSinceOpen <= 90 ? "open" : state.minutesSinceOpen <= 240 ? "mid" : "power",
+                isLunchChop:
+                  state.minutesSinceOpen >= 120 &&
+                  state.minutesSinceOpen <= 240,
+                session:
+                  state.minutesSinceOpen <= 90
+                    ? "open"
+                    : state.minutesSinceOpen <= 240
+                      ? "mid"
+                      : "power",
               });
               await storage.createLesson({
                 ...lessonResult,
                 exitReason: `[SIM] ${exitReason}`,
                 lessonDetail: `[Historical Sim ${simulationDate}] ${lessonResult.lessonDetail}`,
-                marketContext: { ...(lessonResult.marketContext as Record<string, any>), simulationDate },
+                marketContext: {
+                  ...(lessonResult.marketContext as Record<string, any>),
+                  simulationDate,
+                },
                 durationMinutes: minutesSinceEntry,
               });
               lessonsGenerated++;
@@ -1036,7 +1431,10 @@ export async function runHistoricalSimulation(
 
             state.activeTrade = null;
             state.signalState = "IDLE";
-          } else if (exitResult.newStopPrice && exitResult.newStopPrice > trade.stopPrice) {
+          } else if (
+            exitResult.newStopPrice &&
+            exitResult.newStopPrice > trade.stopPrice
+          ) {
             trade.trailingStopPrice = exitResult.newStopPrice;
             trade.stopPrice = exitResult.newStopPrice;
           }
@@ -1045,11 +1443,17 @@ export async function runHistoricalSimulation(
           continue;
         }
 
-        if (state.signalState === "IDLE" && (i - state.lastBreakoutBarIndex) > 10) {
+        if (
+          state.signalState === "IDLE" &&
+          i - state.lastBreakoutBarIndex > 10
+        ) {
           const resistance = findResistance(state.bars5m, 30);
           if (resistance) {
             diag.resistFound++;
-            const resistDistPct = state.price > 0 ? Math.abs(resistance.level - state.price) / state.price : 1;
+            const resistDistPct =
+              state.price > 0
+                ? Math.abs(resistance.level - state.price) / state.price
+                : 1;
             if (resistDistPct <= 0.03) {
               state.resistanceLevel = resistance.level;
             }
@@ -1057,21 +1461,32 @@ export async function runHistoricalSimulation(
 
           if (state.resistanceLevel && bar.close > state.resistanceLevel) {
             diag.breakoutsAboveResist++;
-            const avgVol = state.bars5m.length > 20
-              ? state.bars5m.slice(-21, -1).reduce((s, b) => s + b.volume, 0) / 20
-              : state.bars5m.slice(0, -1).reduce((s, b) => s + b.volume, 0) / Math.max(state.bars5m.length - 1, 1);
+            const avgVol =
+              state.bars5m.length > 20
+                ? state.bars5m
+                    .slice(-21, -1)
+                    .reduce((s, b) => s + b.volume, 0) / 20
+                : state.bars5m.slice(0, -1).reduce((s, b) => s + b.volume, 0) /
+                  Math.max(state.bars5m.length - 1, 1);
             const volRatio = bar.volume / Math.max(avgVol, 1);
 
             const rawAtr = calculateATR(state.bars5m, 14);
-            const atrRatio = state.dailyATRbaseline > 0 ? rawAtr / state.dailyATRbaseline : 1.0;
+            const atrRatio =
+              state.dailyATRbaseline > 0
+                ? rawAtr / state.dailyATRbaseline
+                : 1.0;
 
             const tier = selectTier(volRatio, atrRatio, tieredConfig);
 
             if (tier) {
               diag.tierSelected++;
               const breakoutResult = checkTieredBreakout(
-                bar, state.bars5m.slice(0, -1), state.resistanceLevel,
-                "RESISTANCE", tieredConfig.tiers[tier], tieredConfig.strategy
+                bar,
+                state.bars5m.slice(0, -1),
+                state.resistanceLevel,
+                "RESISTANCE",
+                tieredConfig.tiers[tier],
+                tieredConfig.strategy,
               );
 
               if (breakoutResult.qualified) {
@@ -1100,10 +1515,19 @@ export async function runHistoricalSimulation(
                     rejectionCount: 2,
                     score: Math.round(volRatio * 30 + atrRatio * 20),
                     scoreTier: tier,
-                    marketRegime: regimeResult.chopping ? "choppy" : regimeResult.aligned ? "aligned" : "misaligned",
+                    marketRegime: regimeResult.chopping
+                      ? "choppy"
+                      : regimeResult.aligned
+                        ? "aligned"
+                        : "misaligned",
                     spyAligned: regimeResult.aligned,
                     volatilityGatePassed: volGateResult.passes,
-                    scoreBreakdown: { volRatio, atrRatio, tier, simDate: simulationDate },
+                    scoreBreakdown: {
+                      volRatio,
+                      atrRatio,
+                      tier,
+                      simDate: simulationDate,
+                    },
                     relStrengthVsSpy: 0,
                     isPowerSetup: false,
                     tier,
@@ -1112,13 +1536,21 @@ export async function runHistoricalSimulation(
                   });
                 }
 
-                log(`[HistSim] ${ticker} BREAKOUT at $${state.price.toFixed(2)} (Tier ${tier}) on ${simulationDate}`, "historical");
+                log(
+                  `[HistSim] ${ticker} BREAKOUT at $${state.price.toFixed(2)} (Tier ${tier}) on ${simulationDate}`,
+                  "historical",
+                );
               }
             }
           }
         }
 
-        if (state.signalState === "BREAKOUT" && state.resistanceLevel && state.breakoutCandle && state.selectedTier) {
+        if (
+          state.signalState === "BREAKOUT" &&
+          state.resistanceLevel &&
+          state.breakoutCandle &&
+          state.selectedTier
+        ) {
           state.retestBarsSinceBreakout++;
           const tierConfig = tieredConfig.tiers[state.selectedTier];
 
@@ -1129,39 +1561,104 @@ export async function runHistoricalSimulation(
             state.retestBars = [];
           } else {
             const retestResult = checkTieredRetest(
-              bar, state.breakoutCandle, state.retestBars, state.resistanceLevel,
-              "RESISTANCE", state.bars5m, tierConfig, "LONG"
+              bar,
+              state.breakoutCandle,
+              state.retestBars,
+              state.resistanceLevel,
+              "RESISTANCE",
+              state.bars5m,
+              tierConfig,
+              "LONG",
             );
 
-            if (retestResult.valid && retestResult.entryPrice && retestResult.stopPrice) {
+            if (
+              retestResult.valid &&
+              retestResult.entryPrice &&
+              retestResult.stopPrice
+            ) {
               diag.retestValid++;
-              const entryTraceResult = applyFrictionAndRoundWithTrace({ rawPrice: retestResult.entryPrice, side: "long", direction: "entry", atr14: state.atr14, costOverrides });
+              const entryTraceResult = applyFrictionAndRoundWithTrace({
+                rawPrice: retestResult.entryPrice,
+                side: "long",
+                direction: "entry",
+                atr14: state.atr14,
+                costOverrides,
+              });
               const entryPrice = entryTraceResult.finalPrice;
               const stopPrice = retestResult.stopPrice;
               const riskPerShare = Math.abs(entryPrice - stopPrice);
 
               if (SIM_DEBUG) {
-                simAssert(Math.round(entryPrice * 100) === entryPrice * 100, "Tick-rounded entry price must have ≤2 decimals", invariantViolations, "TICK_PRECISION", i, ticker, { entryPrice });
-                simAssert(entryTraceResult.frictionAdjustedPrice >= retestResult.entryPrice, "Long entry friction-adjusted price must be >= raw price", invariantViolations, "ENTRY_ADVERSE_DIRECTION", i, ticker, { frictionAdjusted: entryTraceResult.frictionAdjustedPrice, raw: retestResult.entryPrice });
+               function isTickAligned(price: number, tick = 0.01, eps = 1e-6){
+                 const q = price / tick;
+                 return Math.abs(q - Math.round(q)) < eps;
+               }
+                simAssert(
+                  isTickAligned(entryPrice, 0.01),
+                  "Entry price must align to $0.01 tick grid",
+                  invariantViolations,
+                  "TICK_ALIGNMENT",
+                  {
+                    frictionAdjusted: entryTraceResult.frictionAdjustedPrice,
+                    raw: retestResult.entryPrice,
+                  },
+                );
               }
 
               if (riskPerShare > 0) {
-                const dollarRisk = accountSize * tieredConfig.tiers[state.selectedTier].riskPct;
-                const shares = Math.max(1, Math.floor(dollarRisk / riskPerShare));
-                const target1 = entryPrice + riskPerShare * (tieredConfig.exits.partialAtR ?? 1.5);
-                const target2 = entryPrice + riskPerShare * (tieredConfig.exits.finalTargetR ?? 2.5);
-                const rvolScore = state.rvol >= 2.0 ? 20 : state.rvol >= 1.5 ? 18 : state.rvol >= 1.0 ? 14 : state.rvol >= 0.7 ? 10 : 5;
+                const dollarRisk =
+                  accountSize * tieredConfig.tiers[state.selectedTier].riskPct;
+                const shares = Math.max(
+                  1,
+                  Math.floor(dollarRisk / riskPerShare),
+                );
+                const target1 =
+                  entryPrice +
+                  riskPerShare * (tieredConfig.exits.partialAtR ?? 1.5);
+                const target2 =
+                  entryPrice +
+                  riskPerShare * (tieredConfig.exits.finalTargetR ?? 2.5);
+                const rvolScore =
+                  state.rvol >= 2.0
+                    ? 20
+                    : state.rvol >= 1.5
+                      ? 18
+                      : state.rvol >= 1.0
+                        ? 14
+                        : state.rvol >= 0.7
+                          ? 10
+                          : 5;
                 const trendScore = biasResult.aligned ? 15 : 8;
                 const boVolScore = 20;
                 const retestScore = 15;
-                const regimeScore = regimeResult.aligned ? 15 : regimeResult.chopping ? 0 : 8;
-                const atrScore = state.atr14 > state.dailyATRbaseline * 1.3 ? 10 : 5;
-                let score = Math.min(100, rvolScore + trendScore + boVolScore + retestScore + regimeScore + atrScore);
+                const regimeScore = regimeResult.aligned
+                  ? 15
+                  : regimeResult.chopping
+                    ? 0
+                    : 8;
+                const atrScore =
+                  state.atr14 > state.dailyATRbaseline * 1.3 ? 10 : 5;
+                let score = Math.min(
+                  100,
+                  rvolScore +
+                    trendScore +
+                    boVolScore +
+                    retestScore +
+                    regimeScore +
+                    atrScore,
+                );
 
-                const session = state.minutesSinceOpen <= 90 ? "open" : state.minutesSinceOpen <= 240 ? "mid" : "power";
+                const session =
+                  state.minutesSinceOpen <= 90
+                    ? "open"
+                    : state.minutesSinceOpen <= 240
+                      ? "mid"
+                      : "power";
                 let appliedPenalty = 0;
                 try {
-                  const recentLessons = (await storage.getRecentLessons(100)).filter(l => {
+                  const recentLessons = (
+                    await storage.getRecentLessons(100)
+                  ).filter((l) => {
                     const ctx = l.marketContext as Record<string, any> | null;
                     if (ctx?.simulationDate) {
                       return ctx.simulationDate < simulationDate;
@@ -1169,7 +1666,7 @@ export async function runHistoricalSimulation(
                     return true;
                   });
                   const penaltyResult = computeLearningPenalty(
-                    recentLessons.map(l => ({
+                    recentLessons.map((l) => ({
                       ticker: l.ticker,
                       tier: l.tier,
                       outcomeCategory: l.outcomeCategory,
@@ -1181,22 +1678,31 @@ export async function runHistoricalSimulation(
                     ticker,
                     state.selectedTier ?? "C",
                     regimeResult.aligned,
-                    session
+                    session,
                   );
 
                   if (penaltyResult.penalty > 0) {
                     const cappedPenalty = Math.min(penaltyResult.penalty, 20);
                     appliedPenalty = cappedPenalty;
                     score = Math.max(0, score - cappedPenalty);
-                    log(`[HistSim] ${ticker} LEARNING PENALTY: -${cappedPenalty} pts (raw: -${penaltyResult.penalty}), score ${score + cappedPenalty} -> ${score}. ${penaltyResult.reasons.join("; ")}`, "historical");
+                    log(
+                      `[HistSim] ${ticker} LEARNING PENALTY: -${cappedPenalty} pts (raw: -${penaltyResult.penalty}), score ${score + cappedPenalty} -> ${score}. ${penaltyResult.reasons.join("; ")}`,
+                      "historical",
+                    );
                   }
                 } catch (lpErr) {
-                  log(`[HistSim] Learning penalty error: ${lpErr}`, "historical");
+                  log(
+                    `[HistSim] Learning penalty error: ${lpErr}`,
+                    "historical",
+                  );
                 }
 
                 const minScore = DEFAULT_STRATEGY_CONFIG.scoring.halfSizeMin;
                 if (score < minScore) {
-                  log(`[HistSim] ${ticker} SKIPPED entry - score ${score} below threshold ${minScore} after learning penalty`, "historical");
+                  log(
+                    `[HistSim] ${ticker} SKIPPED entry - score ${score} below threshold ${minScore} after learning penalty`,
+                    "historical",
+                  );
                   incrementAutoRunSkipped();
                   skippedSetups.push({
                     ticker,
@@ -1211,7 +1717,10 @@ export async function runHistoricalSimulation(
                   processedBars++;
                   continue;
                 }
-                log(`[ENTRY GATE] ${ticker} score=${score} tier=${state.selectedTier} penalty=${appliedPenalty} regime=${regimeResult.aligned ? "trending" : "neutral"}`, "scanner");
+                log(
+                  `[ENTRY GATE] ${ticker} score=${score} tier=${state.selectedTier} penalty=${appliedPenalty} regime=${regimeResult.aligned ? "trending" : "neutral"}`,
+                  "scanner",
+                );
 
                 state.signalState = "TRIGGERED";
                 state.activeTrade = {
@@ -1239,16 +1748,32 @@ export async function runHistoricalSimulation(
                   pendingExit: null,
                 };
 
-                log(`[HistSim] ${ticker} ENTRY at $${entryPrice.toFixed(2)} stop=$${stopPrice.toFixed(2)} (Tier ${state.selectedTier}) on ${simulationDate}`, "historical");
+                log(
+                  `[HistSim] ${ticker} ENTRY at $${entryPrice.toFixed(2)} stop=$${stopPrice.toFixed(2)} (Tier ${state.selectedTier}) on ${simulationDate}`,
+                  "historical",
+                );
 
                 if (tradeTraces.length < 200) {
-                  const entryCommission = calculateCommission(shares, costOverrides);
+                  const entryCommission = calculateCommission(
+                    shares,
+                    costOverrides,
+                  );
                   tradeTraces.push({
-                    step: "ENTRY", barIndex: i, barTime: bar.timestamp, ticker,
-                    decisionPrice: retestResult.entryPrice, rawFillPrice: retestResult.entryPrice,
-                    frictionAdjustedPrice: entryTraceResult.frictionAdjustedPrice, finalFillPrice: entryPrice,
-                    slippageBps: entryTraceResult.slippageBps, commissionTotal: entryCommission,
-                    rMultiple: null, pnl: null, side: "long", direction: "entry",
+                    step: "ENTRY",
+                    barIndex: i,
+                    barTime: bar.timestamp,
+                    ticker,
+                    decisionPrice: retestResult.entryPrice,
+                    rawFillPrice: retestResult.entryPrice,
+                    frictionAdjustedPrice:
+                      entryTraceResult.frictionAdjustedPrice,
+                    finalFillPrice: entryPrice,
+                    slippageBps: entryTraceResult.slippageBps,
+                    commissionTotal: entryCommission,
+                    rMultiple: null,
+                    pnl: null,
+                    side: "long",
+                    direction: "entry",
                   });
                 }
               } else {
@@ -1273,7 +1798,10 @@ export async function runHistoricalSimulation(
         }
       }
 
-      log(`[HistSim] ${ticker} pipeline: bars=${tickerBars5m.length}, resistFound=${diag.resistFound}, closedAbove=${diag.breakoutsAboveResist}, tierOk=${diag.tierSelected}, boQualified=${diag.boQualified}, retestValid=${diag.retestValid}, rvol=${state.rvol.toFixed(2)}, atrBase=${state.dailyATRbaseline.toFixed(4)}`, "historical");
+      log(
+        `[HistSim] ${ticker} pipeline: bars=${tickerBars5m.length}, resistFound=${diag.resistFound}, closedAbove=${diag.breakoutsAboveResist}, tierOk=${diag.tierSelected}, boQualified=${diag.boQualified}, retestValid=${diag.retestValid}, rvol=${state.rvol.toFixed(2)}, atrBase=${state.dailyATRbaseline.toFixed(4)}`,
+        "historical",
+      );
 
       if (state.activeTrade) {
         const lastBar = tickerBars5m[tickerBars5m.length - 1];
@@ -1281,28 +1809,51 @@ export async function runHistoricalSimulation(
         const eodExitReason = trade.pendingExit
           ? `${trade.pendingExit.reason} [EOD close - no next bar]`
           : "End of day close";
-        const eodTrace = applyFrictionAndRoundWithTrace({ rawPrice: lastBar.close, side: "long", direction: "exit", atr14: state.atr14, costOverrides });
+        const eodTrace = applyFrictionAndRoundWithTrace({
+          rawPrice: lastBar.close,
+          side: "long",
+          direction: "exit",
+          atr14: state.atr14,
+          costOverrides,
+        });
         const exitPrice = eodTrace.finalPrice;
         const grossPnl = (exitPrice - trade.entryPrice) * trade.shares;
         const commission = calculateCommission(trade.shares, costOverrides) * 2;
         const pnl = grossPnl - commission;
         const slipBps2 = eodTrace.slippageBps;
-        log(`[HistSim] ${ticker} EOD EXIT at $${exitPrice.toFixed(2)} (raw $${lastBar.close.toFixed(2)}, slip ${slipBps2.toFixed(1)}bps, commission $${commission.toFixed(2)})`, "historical");
+        log(
+          `[HistSim] ${ticker} EOD EXIT at $${exitPrice.toFixed(2)} (raw $${lastBar.close.toFixed(2)}, slip ${slipBps2.toFixed(1)}bps, commission $${commission.toFixed(2)})`,
+          "historical",
+        );
 
         if (SIM_DEBUG) {
-          simAssert(Math.round(exitPrice * 100) === exitPrice * 100, "Tick-rounded EOD exit price must have ≤2 decimals", invariantViolations, "TICK_PRECISION", tickerBars5m.length - 1, ticker, { exitPrice });
-        }
+          
+          
+      
 
-        const rMultiple = trade.riskPerShare > 0 ? (exitPrice - trade.entryPrice) / trade.riskPerShare : 0;
+        const rMultiple =
+          trade.riskPerShare > 0
+            ? (exitPrice - trade.entryPrice) / trade.riskPerShare
+            : 0;
 
         if (tradeTraces.length < 200) {
           tradeTraces.push({
-            step: "EOD_EXIT", barIndex: tickerBars5m.length - 1, barTime: lastBar.timestamp, ticker,
-            decisionPrice: lastBar.close, rawFillPrice: lastBar.close,
-            frictionAdjustedPrice: eodTrace.frictionAdjustedPrice, finalFillPrice: exitPrice,
-            slippageBps: slipBps2, commissionTotal: commission,
-            rMultiple, pnl, side: "long", direction: "exit",
-            exitKind: "EOD", exitReason: eodExitReason,
+            step: "EOD_EXIT",
+            barIndex: tickerBars5m.length - 1,
+            barTime: lastBar.timestamp,
+            ticker,
+            decisionPrice: lastBar.close,
+            rawFillPrice: lastBar.close,
+            frictionAdjustedPrice: eodTrace.frictionAdjustedPrice,
+            finalFillPrice: exitPrice,
+            slippageBps: slipBps2,
+            commissionTotal: commission,
+            rMultiple,
+            pnl,
+            side: "long",
+            direction: "exit",
+            exitKind: "EOD",
+            exitReason: eodExitReason,
           });
         }
         const totalR = trade.realizedR + rMultiple;
@@ -1311,21 +1862,41 @@ export async function runHistoricalSimulation(
         else lossCount++;
         grossPnlTotal += grossPnl;
         totalCommissions += commission;
-        const slippageCost2 = trade.entryPrice * trade.shares * (dynamicSlippageBps(trade.entryPrice, state.atr14, costOverrides) + effectiveConfig(costOverrides).halfSpreadBps) / 10000 * 2;
+        const slippageCost2 =
+          ((trade.entryPrice *
+            trade.shares *
+            (dynamicSlippageBps(trade.entryPrice, state.atr14, costOverrides) +
+              effectiveConfig(costOverrides).halfSpreadBps)) /
+            10000) *
+          2;
         totalSlippageCosts += slippageCost2;
         tradeRs.push(totalR);
         tradeGrossPnls.push(grossPnl);
         tradeNetPnls.push(pnl);
-        const trRegime2 = lastRegimeResult.aligned ? "trending" : lastRegimeResult.chopping ? "choppy" : "neutral";
+        const trRegime2 = lastRegimeResult.aligned
+          ? "trending"
+          : lastRegimeResult.chopping
+            ? "choppy"
+            : "neutral";
         const trTier2 = trade.tier;
-        if (!tradesByRegime[trRegime2]) tradesByRegime[trRegime2] = { wins: 0, losses: 0, pnl: 0 };
-        if (!tradesBySession["power"]) tradesBySession["power"] = { wins: 0, losses: 0, pnl: 0 };
-        if (!tradesByTier[trTier2]) tradesByTier[trTier2] = { wins: 0, losses: 0, pnl: 0 };
+        if (!tradesByRegime[trRegime2])
+          tradesByRegime[trRegime2] = { wins: 0, losses: 0, pnl: 0 };
+        if (!tradesBySession["power"])
+          tradesBySession["power"] = { wins: 0, losses: 0, pnl: 0 };
+        if (!tradesByTier[trTier2])
+          tradesByTier[trTier2] = { wins: 0, losses: 0, pnl: 0 };
         tradesByRegime[trRegime2].pnl += pnl;
         tradesBySession["power"].pnl += pnl;
         tradesByTier[trTier2].pnl += pnl;
-        if (pnl > 0) { tradesByRegime[trRegime2].wins++; tradesBySession["power"].wins++; tradesByTier[trTier2].wins++; }
-        else { tradesByRegime[trRegime2].losses++; tradesBySession["power"].losses++; tradesByTier[trTier2].losses++; }
+        if (pnl > 0) {
+          tradesByRegime[trRegime2].wins++;
+          tradesBySession["power"].wins++;
+          tradesByTier[trTier2].wins++;
+        } else {
+          tradesByRegime[trRegime2].losses++;
+          tradesBySession["power"].losses++;
+          tradesByTier[trTier2].losses++;
+        }
 
         if (!isDryRun) {
           const tradeRecord = await storage.createTrade({
@@ -1341,16 +1912,25 @@ export async function runHistoricalSimulation(
             target2: Number(trade.target2.toFixed(2)),
             shares: trade.shares,
             pnl: Number(pnl.toFixed(2)),
-            pnlPercent: Number(((exitPrice - trade.entryPrice) / trade.entryPrice * 100).toFixed(2)),
+            pnlPercent: Number(
+              (
+                ((exitPrice - trade.entryPrice) / trade.entryPrice) *
+                100
+              ).toFixed(2),
+            ),
             rMultiple: Number(totalR.toFixed(2)),
             status: "closed",
             exitReason: `[SIM] ${eodExitReason}`,
             isPartiallyExited: trade.isPartiallyExited,
-            partialExitPrice: trade.partialExitPrice ? Number(trade.partialExitPrice.toFixed(2)) : null,
+            partialExitPrice: trade.partialExitPrice
+              ? Number(trade.partialExitPrice.toFixed(2))
+              : null,
             partialExitShares: trade.partialExitShares,
             stopMovedToBE: trade.stopMovedToBE,
             runnerShares: trade.runnerShares,
-            trailingStopPrice: trade.trailingStopPrice ? Number(trade.trailingStopPrice.toFixed(2)) : null,
+            trailingStopPrice: trade.trailingStopPrice
+              ? Number(trade.trailingStopPrice.toFixed(2))
+              : null,
             dollarRisk: Number(trade.dollarRisk.toFixed(2)),
             score: trade.score,
             scoreTier: trade.scoreTier,
@@ -1366,7 +1946,10 @@ export async function runHistoricalSimulation(
           const lessonResult = analyzeClosedTrade({
             trade: {
               ...tradeRecord,
-              enteredAt: new Date(lastBar.timestamp - (tickerBars5m.length - trade.entryBarIndex) * 5 * 60000),
+              enteredAt: new Date(
+                lastBar.timestamp -
+                  (tickerBars5m.length - trade.entryBarIndex) * 5 * 60000,
+              ),
               exitedAt: new Date(lastBar.timestamp),
             },
             signal: null,
@@ -1379,7 +1962,10 @@ export async function runHistoricalSimulation(
             ...lessonResult,
             exitReason: `[SIM] ${eodExitReason}`,
             lessonDetail: `[Historical Sim ${simulationDate}] ${lessonResult.lessonDetail}`,
-            marketContext: { ...(lessonResult.marketContext as Record<string, any>), simulationDate },
+            marketContext: {
+              ...(lessonResult.marketContext as Record<string, any>),
+              simulationDate,
+            },
             durationMinutes: (tickerBars5m.length - trade.entryBarIndex) * 5,
           });
           lessonsGenerated++;
@@ -1412,9 +1998,11 @@ export async function runHistoricalSimulation(
       let ema5 = bars[0].close;
       let ema20 = bars[0].close;
       let baselineEntry: number | null = null;
-      const k5 = 2 / 6, k20 = 2 / 21;
+      const k5 = 2 / 6,
+        k20 = 2 / 21;
       for (let bi = 1; bi < bars.length; bi++) {
-        const prevEma5 = ema5, prevEma20 = ema20;
+        const prevEma5 = ema5,
+          prevEma20 = ema20;
         ema5 = bars[bi].close * k5 + ema5 * (1 - k5);
         ema20 = bars[bi].close * k20 + ema20 * (1 - k20);
         if (prevEma5 <= prevEma20 && ema5 > ema20 && !baselineEntry && bi > 5) {
@@ -1429,12 +2017,22 @@ export async function runHistoricalSimulation(
 
     const totalTrades = winCount + lossCount;
     const winRate = totalTrades > 0 ? (winCount / totalTrades) * 100 : null;
-    const avgR = tradeRs.length > 0 ? tradeRs.reduce((a, b) => a + b, 0) / tradeRs.length : 0;
-    const grossWins = tradeNetPnls.filter(p => p > 0).reduce((a, b) => a + b, 0);
-    const grossLosses = Math.abs(tradeNetPnls.filter(p => p <= 0).reduce((a, b) => a + b, 0));
-    const profitFactor = grossLosses > 0 ? grossWins / grossLosses : grossWins > 0 ? 999 : 0;
+    const avgR =
+      tradeRs.length > 0
+        ? tradeRs.reduce((a, b) => a + b, 0) / tradeRs.length
+        : 0;
+    const grossWins = tradeNetPnls
+      .filter((p) => p > 0)
+      .reduce((a, b) => a + b, 0);
+    const grossLosses = Math.abs(
+      tradeNetPnls.filter((p) => p <= 0).reduce((a, b) => a + b, 0),
+    );
+    const profitFactor =
+      grossLosses > 0 ? grossWins / grossLosses : grossWins > 0 ? 999 : 0;
 
-    let peak = 0, maxDD = 0, equity = 0;
+    let peak = 0,
+      maxDD = 0,
+      equity = 0;
     for (const pnl of tradeNetPnls) {
       equity += pnl;
       if (equity > peak) peak = equity;
@@ -1459,8 +2057,17 @@ export async function runHistoricalSimulation(
       } as DryRunResult;
     }
 
-    const avgPnl = tradeNetPnls.length > 0 ? tradeNetPnls.reduce((a, b) => a + b, 0) / tradeNetPnls.length : 0;
-    const stdPnl = tradeNetPnls.length > 1 ? Math.sqrt(tradeNetPnls.reduce((s, p) => s + (p - avgPnl) ** 2, 0) / (tradeNetPnls.length - 1)) : 0;
+    const avgPnl =
+      tradeNetPnls.length > 0
+        ? tradeNetPnls.reduce((a, b) => a + b, 0) / tradeNetPnls.length
+        : 0;
+    const stdPnl =
+      tradeNetPnls.length > 1
+        ? Math.sqrt(
+            tradeNetPnls.reduce((s, p) => s + (p - avgPnl) ** 2, 0) /
+              (tradeNetPnls.length - 1),
+          )
+        : 0;
     const sharpe = stdPnl > 0 ? (avgPnl / stdPnl) * Math.sqrt(252) : 0;
     const avgSlippage = totalTrades > 0 ? totalSlippageCosts / totalTrades : 0;
 
@@ -1485,7 +2092,10 @@ export async function runHistoricalSimulation(
         maxDrawdown: Number(maxDD.toFixed(2)),
         sharpe: Number(sharpe.toFixed(2)),
         avgSlippagePerTrade: Number(avgSlippage.toFixed(2)),
-        avgCommissionPerTrade: totalTrades > 0 ? Number((totalCommissions / totalTrades).toFixed(2)) : 0,
+        avgCommissionPerTrade:
+          totalTrades > 0
+            ? Number((totalCommissions / totalTrades).toFixed(2))
+            : 0,
         totalR: Number(tradeRs.reduce((a, b) => a + b, 0).toFixed(2)),
         tradeTraces: tradeTraces.slice(0, 200),
         invariantViolations: invariantViolations.slice(0, 100),
@@ -1499,7 +2109,10 @@ export async function runHistoricalSimulation(
       completedAt: new Date(),
     });
 
-    log(`[HistSim] Completed simulation for ${simulationDate}: ${tradesGenerated} trades, ${lessonsGenerated} lessons, P&L: $${totalPnl.toFixed(2)}`, "historical");
+    log(
+      `[HistSim] Completed simulation for ${simulationDate}: ${tradesGenerated} trades, ${lessonsGenerated} lessons, P&L: $${totalPnl.toFixed(2)}`,
+      "historical",
+    );
   } catch (error: any) {
     log(`[HistSim] Error: ${error.message}`, "historical");
     if (!isDryRun) {
@@ -1570,7 +2183,16 @@ export interface WalkForwardResult {
   };
 }
 
-let activeWalkForward: { active: boolean; cancel: boolean; progress: { currentWindow: number; totalWindows: number; currentDate: string; phase: "train" | "test" } } | null = null;
+let activeWalkForward: {
+  active: boolean;
+  cancel: boolean;
+  progress: {
+    currentWindow: number;
+    totalWindows: number;
+    currentDate: string;
+    phase: "train" | "test";
+  };
+} | null = null;
 
 export function getWalkForwardStatus() {
   return activeWalkForward;
@@ -1589,10 +2211,13 @@ export async function runWalkForwardEvaluation(
   trainDays: number,
   testDays: number,
   totalWindows: number,
-  storage: IStorage
+  storage: IStorage,
 ): Promise<WalkForwardResult | { error: string }> {
   if (!isAlpacaConfigured()) {
-    return { error: "Alpaca API keys not configured. Walk-forward evaluation requires market data." };
+    return {
+      error:
+        "Alpaca API keys not configured. Walk-forward evaluation requires market data.",
+    };
   }
 
   if (activeWalkForward?.active) {
@@ -1602,7 +2227,12 @@ export async function runWalkForwardEvaluation(
   activeWalkForward = {
     active: true,
     cancel: false,
-    progress: { currentWindow: 0, totalWindows, currentDate: "", phase: "train" }
+    progress: {
+      currentWindow: 0,
+      totalWindows,
+      currentDate: "",
+      phase: "train",
+    },
   };
 
   try {
@@ -1613,13 +2243,16 @@ export async function runWalkForwardEvaluation(
     allDates.reverse();
 
     if (allDates.length < totalDaysNeeded) {
-      return { error: `Not enough trading days available. Need ${totalDaysNeeded}, got ${allDates.length}.` };
+      return {
+        error: `Not enough trading days available. Need ${totalDaysNeeded}, got ${allDates.length}.`,
+      };
     }
 
     const windows: WalkForwardWindow[] = [];
     const allTestRs: number[] = [];
     let cumulativePnl = 0;
-    const equityCurve: Array<{ windowIndex: number; cumulativePnl: number }> = [];
+    const equityCurve: Array<{ windowIndex: number; cumulativePnl: number }> =
+      [];
 
     for (let w = 0; w < totalWindows; w++) {
       if (activeWalkForward.cancel) {
@@ -1627,10 +2260,21 @@ export async function runWalkForwardEvaluation(
       }
 
       const windowStart = w * daysPerWindow;
-      const trainDatesList = allDates.slice(windowStart, windowStart + trainDays);
-      const testDatesList = allDates.slice(windowStart + trainDays, windowStart + daysPerWindow);
+      const trainDatesList = allDates.slice(
+        windowStart,
+        windowStart + trainDays,
+      );
+      const testDatesList = allDates.slice(
+        windowStart + trainDays,
+        windowStart + daysPerWindow,
+      );
 
-      activeWalkForward.progress = { currentWindow: w + 1, totalWindows, currentDate: trainDatesList[0] || "", phase: "train" };
+      activeWalkForward.progress = {
+        currentWindow: w + 1,
+        totalWindows,
+        currentDate: trainDatesList[0] || "",
+        phase: "train",
+      };
 
       let trainTrades = 0;
       let trainPnl = 0;
@@ -1638,12 +2282,14 @@ export async function runWalkForwardEvaluation(
         if (activeWalkForward.cancel) break;
         activeWalkForward.progress.currentDate = date;
         try {
-          const result = await runHistoricalSimulation(
+          const result = (await runHistoricalSimulation(
             `wf-${w}-train-${date}`,
-            date, userId, storage,
+            date,
+            userId,
+            storage,
             undefined,
-            { dryRun: true }
-          ) as DryRunResult | void;
+            { dryRun: true },
+          )) as DryRunResult | void;
           if (result) {
             trainTrades += result.trades;
             trainPnl += result.netPnl;
@@ -1654,8 +2300,11 @@ export async function runWalkForwardEvaluation(
       }
 
       activeWalkForward.progress.phase = "test";
-      let testWins = 0, testLosses = 0;
-      let testGrossPnl = 0, testNetPnl = 0, testTotalCosts = 0;
+      let testWins = 0,
+        testLosses = 0;
+      let testGrossPnl = 0,
+        testNetPnl = 0,
+        testTotalCosts = 0;
       const testRs: number[] = [];
       const windowByRegime: Record<string, BreakdownBucket> = {};
       const windowBySession: Record<string, BreakdownBucket> = {};
@@ -1665,30 +2314,42 @@ export async function runWalkForwardEvaluation(
         if (activeWalkForward.cancel) break;
         activeWalkForward.progress.currentDate = date;
         try {
-          const result = await runHistoricalSimulation(
+          const result = (await runHistoricalSimulation(
             `wf-${w}-test-${date}`,
-            date, userId, storage,
+            date,
+            userId,
+            storage,
             undefined,
-            { dryRun: true }
-          ) as DryRunResult | void;
+            { dryRun: true },
+          )) as DryRunResult | void;
           if (result) {
             testWins += result.wins;
             testLosses += result.losses;
             testGrossPnl += result.grossPnl;
             testNetPnl += result.netPnl;
-            testTotalCosts += result.totalCommissions + result.totalSlippageCosts;
+            testTotalCosts +=
+              result.totalCommissions + result.totalSlippageCosts;
             testRs.push(...result.tradeRs);
             for (const [k, v] of Object.entries(result.byRegime)) {
-              if (!windowByRegime[k]) windowByRegime[k] = { wins: 0, losses: 0, pnl: 0 };
-              windowByRegime[k].wins += v.wins; windowByRegime[k].losses += v.losses; windowByRegime[k].pnl += v.pnl;
+              if (!windowByRegime[k])
+                windowByRegime[k] = { wins: 0, losses: 0, pnl: 0 };
+              windowByRegime[k].wins += v.wins;
+              windowByRegime[k].losses += v.losses;
+              windowByRegime[k].pnl += v.pnl;
             }
             for (const [k, v] of Object.entries(result.bySession)) {
-              if (!windowBySession[k]) windowBySession[k] = { wins: 0, losses: 0, pnl: 0 };
-              windowBySession[k].wins += v.wins; windowBySession[k].losses += v.losses; windowBySession[k].pnl += v.pnl;
+              if (!windowBySession[k])
+                windowBySession[k] = { wins: 0, losses: 0, pnl: 0 };
+              windowBySession[k].wins += v.wins;
+              windowBySession[k].losses += v.losses;
+              windowBySession[k].pnl += v.pnl;
             }
             for (const [k, v] of Object.entries(result.byTier)) {
-              if (!windowByTier[k]) windowByTier[k] = { wins: 0, losses: 0, pnl: 0 };
-              windowByTier[k].wins += v.wins; windowByTier[k].losses += v.losses; windowByTier[k].pnl += v.pnl;
+              if (!windowByTier[k])
+                windowByTier[k] = { wins: 0, losses: 0, pnl: 0 };
+              windowByTier[k].wins += v.wins;
+              windowByTier[k].losses += v.losses;
+              windowByTier[k].pnl += v.pnl;
             }
           }
         } catch (err) {
@@ -1697,14 +2358,23 @@ export async function runWalkForwardEvaluation(
       }
 
       const testTrades = testWins + testLosses;
-      const avgR = testRs.length > 0 ? testRs.reduce((a, b) => a + b, 0) / testRs.length : 0;
-      const winPnls = testRs.filter(r => r > 0);
-      const lossPnls = testRs.filter(r => r <= 0);
-      const pf = lossPnls.length > 0
-        ? Math.abs(winPnls.reduce((a, b) => a + b, 0)) / Math.abs(lossPnls.reduce((a, b) => a + b, 0))
-        : winPnls.length > 0 ? 999 : 0;
+      const avgR =
+        testRs.length > 0
+          ? testRs.reduce((a, b) => a + b, 0) / testRs.length
+          : 0;
+      const winPnls = testRs.filter((r) => r > 0);
+      const lossPnls = testRs.filter((r) => r <= 0);
+      const pf =
+        lossPnls.length > 0
+          ? Math.abs(winPnls.reduce((a, b) => a + b, 0)) /
+            Math.abs(lossPnls.reduce((a, b) => a + b, 0))
+          : winPnls.length > 0
+            ? 999
+            : 0;
 
-      let wPeak = 0, wMaxDD = 0, wEquity = 0;
+      let wPeak = 0,
+        wMaxDD = 0,
+        wEquity = 0;
       for (const r of testRs) {
         wEquity += r;
         if (wEquity > wPeak) wPeak = wEquity;
@@ -1728,7 +2398,10 @@ export async function runWalkForwardEvaluation(
           trades: testTrades,
           wins: testWins,
           losses: testLosses,
-          winRate: testTrades > 0 ? Number(((testWins / testTrades) * 100).toFixed(1)) : 0,
+          winRate:
+            testTrades > 0
+              ? Number(((testWins / testTrades) * 100).toFixed(1))
+              : 0,
           expectancyR: Number(avgR.toFixed(3)),
           profitFactor: Number(pf.toFixed(2)),
           maxDrawdown: Number(wMaxDD.toFixed(2)),
@@ -1745,20 +2418,38 @@ export async function runWalkForwardEvaluation(
         },
       });
 
-      log(`[WalkForward] Window ${w + 1}/${totalWindows} complete: test trades=${testTrades}, expectancy=${avgR.toFixed(3)}R, PnL=$${testNetPnl.toFixed(2)}`, "historical");
+      log(
+        `[WalkForward] Window ${w + 1}/${totalWindows} complete: test trades=${testTrades}, expectancy=${avgR.toFixed(3)}R, PnL=$${testNetPnl.toFixed(2)}`,
+        "historical",
+      );
     }
 
-    const totalTestTrades = windows.reduce((s, w) => s + w.testMetrics.trades, 0);
+    const totalTestTrades = windows.reduce(
+      (s, w) => s + w.testMetrics.trades,
+      0,
+    );
     const totalTestWins = windows.reduce((s, w) => s + w.testMetrics.wins, 0);
-    const totalTestLosses = windows.reduce((s, w) => s + w.testMetrics.losses, 0);
-    const overallAvgR = allTestRs.length > 0 ? allTestRs.reduce((a, b) => a + b, 0) / allTestRs.length : 0;
-    const allWinRs = allTestRs.filter(r => r > 0);
-    const allLossRs = allTestRs.filter(r => r <= 0);
-    const overallPF = allLossRs.length > 0
-      ? Math.abs(allWinRs.reduce((a, b) => a + b, 0)) / Math.abs(allLossRs.reduce((a, b) => a + b, 0))
-      : allWinRs.length > 0 ? 999 : 0;
+    const totalTestLosses = windows.reduce(
+      (s, w) => s + w.testMetrics.losses,
+      0,
+    );
+    const overallAvgR =
+      allTestRs.length > 0
+        ? allTestRs.reduce((a, b) => a + b, 0) / allTestRs.length
+        : 0;
+    const allWinRs = allTestRs.filter((r) => r > 0);
+    const allLossRs = allTestRs.filter((r) => r <= 0);
+    const overallPF =
+      allLossRs.length > 0
+        ? Math.abs(allWinRs.reduce((a, b) => a + b, 0)) /
+          Math.abs(allLossRs.reduce((a, b) => a + b, 0))
+        : allWinRs.length > 0
+          ? 999
+          : 0;
 
-    let agPeak = 0, agMaxDD = 0, agEquity = 0;
+    let agPeak = 0,
+      agMaxDD = 0,
+      agEquity = 0;
     for (const r of allTestRs) {
       agEquity += r;
       if (agEquity > agPeak) agPeak = agEquity;
@@ -1772,22 +2463,32 @@ export async function runWalkForwardEvaluation(
     for (const win of windows) {
       for (const [k, v] of Object.entries(win.testMetrics.byRegime)) {
         if (!aggRegime[k]) aggRegime[k] = { wins: 0, losses: 0, pnl: 0 };
-        aggRegime[k].wins += v.wins; aggRegime[k].losses += v.losses; aggRegime[k].pnl += v.pnl;
+        aggRegime[k].wins += v.wins;
+        aggRegime[k].losses += v.losses;
+        aggRegime[k].pnl += v.pnl;
       }
       for (const [k, v] of Object.entries(win.testMetrics.bySession)) {
         if (!aggSession[k]) aggSession[k] = { wins: 0, losses: 0, pnl: 0 };
-        aggSession[k].wins += v.wins; aggSession[k].losses += v.losses; aggSession[k].pnl += v.pnl;
+        aggSession[k].wins += v.wins;
+        aggSession[k].losses += v.losses;
+        aggSession[k].pnl += v.pnl;
       }
       for (const [k, v] of Object.entries(win.testMetrics.byTier)) {
         if (!aggTier[k]) aggTier[k] = { wins: 0, losses: 0, pnl: 0 };
-        aggTier[k].wins += v.wins; aggTier[k].losses += v.losses; aggTier[k].pnl += v.pnl;
+        aggTier[k].wins += v.wins;
+        aggTier[k].losses += v.losses;
+        aggTier[k].pnl += v.pnl;
       }
     }
     const addWinRate = (rec: Record<string, BreakdownBucket>) => {
       const out: Record<string, BreakdownBucket & { winRate: number }> = {};
       for (const [k, v] of Object.entries(rec)) {
         const total = v.wins + v.losses;
-        out[k] = { ...v, pnl: Number(v.pnl.toFixed(2)), winRate: total > 0 ? Number(((v.wins / total) * 100).toFixed(1)) : 0 };
+        out[k] = {
+          ...v,
+          pnl: Number(v.pnl.toFixed(2)),
+          winRate: total > 0 ? Number(((v.wins / total) * 100).toFixed(1)) : 0,
+        };
       }
       return out;
     };
@@ -1798,7 +2499,10 @@ export async function runWalkForwardEvaluation(
         totalTestTrades,
         totalTestWins,
         totalTestLosses,
-        overallWinRate: totalTestTrades > 0 ? Number(((totalTestWins / totalTestTrades) * 100).toFixed(1)) : 0,
+        overallWinRate:
+          totalTestTrades > 0
+            ? Number(((totalTestWins / totalTestTrades) * 100).toFixed(1))
+            : 0,
         overallExpectancyR: Number(overallAvgR.toFixed(3)),
         overallProfitFactor: Number(overallPF.toFixed(2)),
         maxDrawdown: Number(agMaxDD.toFixed(2)),
@@ -1826,21 +2530,37 @@ export async function runWalkForwardEvaluation(
 export async function runCostSensitivity(
   runId: string,
   userId: string,
-  storage: IStorage
+  storage: IStorage,
 ): Promise<{ grid: CostSensitivityResult[] } | { error: string }> {
   const run = await storage.getSimulationRun(runId);
   if (!run) return { error: "Simulation run not found" };
-  if (run.status !== "completed") return { error: "Simulation must be completed before running cost sensitivity" };
+  if (run.status !== "completed")
+    return {
+      error: "Simulation must be completed before running cost sensitivity",
+    };
 
   const simulationDate = run.simulationDate;
   const tickers = (run.tickers as string[]) || BACKTEST_TICKERS;
   const allSymbols = Array.from(new Set([...tickers, "SPY"]));
 
   const bars5mMap = await fetchBarsForDate(allSymbols, simulationDate, "5Min");
-  const bars15mMap = await fetchBarsForDate(allSymbols, simulationDate, "15Min");
+  const bars15mMap = await fetchBarsForDate(
+    allSymbols,
+    simulationDate,
+    "15Min",
+  );
   const prevDayBars = await fetchDailyBarsForDate(allSymbols, simulationDate);
-  const multiDayBars = await fetchMultiDayDailyBars(allSymbols, simulationDate, 20);
-  const preloadedBars: SimulationBarData = { bars5mMap, bars15mMap, prevDayBars, multiDayBars };
+  const multiDayBars = await fetchMultiDayDailyBars(
+    allSymbols,
+    simulationDate,
+    20,
+  );
+  const preloadedBars: SimulationBarData = {
+    bars5mMap,
+    bars15mMap,
+    prevDayBars,
+    multiDayBars,
+  };
 
   const slippageOptions = [0, 5, 10];
   const spreadOptions = [1, 3, 5];
@@ -1852,26 +2572,42 @@ export async function runCostSensitivity(
         baseSlippageBps: slip,
         halfSpreadBps: spread,
       };
-      const isBaseline = slip === SIM_CONFIG.baseSlippageBps && spread === SIM_CONFIG.halfSpreadBps;
+      const isBaseline =
+        slip === SIM_CONFIG.baseSlippageBps &&
+        spread === SIM_CONFIG.halfSpreadBps;
 
-      const result = await runHistoricalSimulation(
+      const result = (await runHistoricalSimulation(
         `${runId}-cost-${slip}-${spread}`,
         simulationDate,
         userId,
         storage,
         tickers,
-        { costOverrides, dryRun: true, preloadedBars }
-      ) as DryRunResult;
+        { costOverrides, dryRun: true, preloadedBars },
+      )) as DryRunResult;
 
       if (result) {
         const totalTrades = result.wins + result.losses;
         const winRate = totalTrades > 0 ? result.wins / totalTrades : 0;
-        const avgR = result.tradeRs.length > 0 ? result.tradeRs.reduce((a, b) => a + b, 0) / result.tradeRs.length : 0;
-        const winPnls = result.tradeRs.filter(r => r > 0);
-        const lossPnls = result.tradeRs.filter(r => r <= 0);
-        const avgWin = winPnls.length > 0 ? winPnls.reduce((a, b) => a + b, 0) / winPnls.length : 0;
-        const avgLoss = lossPnls.length > 0 ? Math.abs(lossPnls.reduce((a, b) => a + b, 0) / lossPnls.length) : 0;
-        const profitFactor = avgLoss > 0 ? (avgWin * winPnls.length) / (avgLoss * lossPnls.length) : avgWin > 0 ? Infinity : 0;
+        const avgR =
+          result.tradeRs.length > 0
+            ? result.tradeRs.reduce((a, b) => a + b, 0) / result.tradeRs.length
+            : 0;
+        const winPnls = result.tradeRs.filter((r) => r > 0);
+        const lossPnls = result.tradeRs.filter((r) => r <= 0);
+        const avgWin =
+          winPnls.length > 0
+            ? winPnls.reduce((a, b) => a + b, 0) / winPnls.length
+            : 0;
+        const avgLoss =
+          lossPnls.length > 0
+            ? Math.abs(lossPnls.reduce((a, b) => a + b, 0) / lossPnls.length)
+            : 0;
+        const profitFactor =
+          avgLoss > 0
+            ? (avgWin * winPnls.length) / (avgLoss * lossPnls.length)
+            : avgWin > 0
+              ? Infinity
+              : 0;
 
         grid.push({
           baseSlippageBps: slip,
@@ -1883,7 +2619,9 @@ export async function runCostSensitivity(
           maxDrawdown: Number(result.maxDrawdown.toFixed(2)),
           netPnl: Number(result.netPnl.toFixed(2)),
           grossPnl: Number(result.grossPnl.toFixed(2)),
-          totalCosts: Number((result.totalCommissions + result.totalSlippageCosts).toFixed(2)),
+          totalCosts: Number(
+            (result.totalCommissions + result.totalSlippageCosts).toFixed(2),
+          ),
           isBaseline,
         });
       }
