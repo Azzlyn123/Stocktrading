@@ -27,6 +27,61 @@ type Side = "long" | "short";
 type FillDirection = "entry" | "exit";
 type ExitKind = "STOP" | "TARGET" | "MARKET" | "EOD";
 
+const SIM_DEBUG = true;
+
+interface TraceStep {
+  step: string;
+  barIndex: number;
+  barTime: number;
+  ticker: string;
+  decisionPrice: number;
+  rawFillPrice: number;
+  frictionAdjustedPrice: number;
+  finalFillPrice: number;
+  slippageBps: number;
+  commissionTotal: number;
+  rMultiple: number | null;
+  pnl: number | null;
+  side: "long";
+  direction: "entry" | "exit";
+  exitKind?: string;
+  exitReason?: string;
+  isAmbiguousBar?: boolean;
+  gapThrough?: boolean;
+  notes?: string;
+}
+
+interface InvariantViolation {
+  rule: string;
+  message: string;
+  barIndex: number;
+  ticker: string;
+  context: Record<string, any>;
+}
+
+const SIM_ASSERT_THROW = false;
+
+function simAssert(
+  condition: boolean,
+  message: string,
+  violations: InvariantViolation[],
+  rule: string,
+  barIndex: number,
+  ticker: string,
+  context?: Record<string, any>
+): void {
+  if (!SIM_DEBUG) return;
+  if (!condition) {
+    const ctxStr = context ? ` | Context: ${JSON.stringify(context)}` : '';
+    const err = `[SIM ASSERT FAILED] ${message}${ctxStr}`;
+    log(err, "historical");
+    violations.push({ rule, message, barIndex, ticker, context: context ?? {} });
+    if (SIM_ASSERT_THROW) {
+      throw new Error(err);
+    }
+  }
+}
+
 const SIM_CONFIG = {
   baseSlippageBps: 5,
   halfSpreadBps: 3,
@@ -71,7 +126,9 @@ interface CostSensitivityResult {
   isBaseline: boolean;
 }
 
-interface DryRunResult {
+type BreakdownBucket = { wins: number; losses: number; pnl: number };
+
+export interface DryRunResult {
   trades: number;
   wins: number;
   losses: number;
@@ -81,6 +138,9 @@ interface DryRunResult {
   totalSlippageCosts: number;
   tradeRs: number[];
   maxDrawdown: number;
+  byRegime: Record<string, BreakdownBucket>;
+  bySession: Record<string, BreakdownBucket>;
+  byTier: Record<string, BreakdownBucket>;
 }
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -123,6 +183,27 @@ function applyFrictionAndRound(params: {
   const withFriction = rawPrice * (1 + sign * pct);
   const mode = roundingMode(side, direction);
   return roundToTick(withFriction, cfg.tickSize, mode);
+}
+
+function applyFrictionAndRoundWithTrace(params: {
+  rawPrice: number;
+  side: Side;
+  direction: FillDirection;
+  atr14: number;
+  costOverrides?: CostOverrides;
+}): { finalPrice: number; frictionAdjustedPrice: number; slippageBps: number } {
+  const { rawPrice, side, direction, atr14, costOverrides } = params;
+  const cfg = effectiveConfig(costOverrides);
+  const slipBps = dynamicSlippageBps(rawPrice, atr14, costOverrides);
+  const totalBps = slipBps + cfg.halfSpreadBps;
+  const pct = totalBps / 10000;
+  const sign = (side === "long")
+    ? (direction === "entry" ? +1 : -1)
+    : (direction === "entry" ? -1 : +1);
+  const frictionAdjustedPrice = rawPrice * (1 + sign * pct);
+  const mode = roundingMode(side, direction);
+  const finalPrice = roundToTick(frictionAdjustedPrice, cfg.tickSize, mode);
+  return { finalPrice, frictionAdjustedPrice, slippageBps: slipBps };
 }
 
 function rawExitFillLong(params: {
@@ -204,7 +285,7 @@ interface HistoricalTickerState {
     realizedR: number;
     riskPerShare: number;
     signalId: string | null;
-    pendingExit: { reason: string; exitType: string } | null;
+    pendingExit: { reason: string; exitType: string; decisionBarIndex: number } | null;
   } | null;
 }
 
@@ -258,7 +339,7 @@ export function cancelAutoRun(): boolean {
   return false;
 }
 
-function getWeekdaysGoingBack(fromDate: Date, count: number): string[] {
+export function getWeekdaysGoingBack(fromDate: Date, count: number): string[] {
   const dates: string[] = [];
   const d = new Date(fromDate);
   d.setDate(d.getDate() - 1);
@@ -474,6 +555,8 @@ export async function runHistoricalSimulation(
     const tradesBySession: Record<string, { wins: number; losses: number; pnl: number }> = {};
     const tradesByTier: Record<string, { wins: number; losses: number; pnl: number }> = {};
     const skippedSetups: Array<{ ticker: string; score: number; penalty: number; reason: string; barIndex: number; price: number }> = [];
+    const tradeTraces: TraceStep[] = [];
+    const invariantViolations: InvariantViolation[] = [];
 
     for (const ticker of tickers) {
       if (control.cancel) {
@@ -619,15 +702,34 @@ export async function runHistoricalSimulation(
 
           if (trade.pendingExit) {
             const rawFill = bar.open;
-            const exitPrice = applyFrictionAndRound({ rawPrice: rawFill, side: "long", direction: "exit", atr14: state.atr14, costOverrides });
+            const exitTrace = applyFrictionAndRoundWithTrace({ rawPrice: rawFill, side: "long", direction: "exit", atr14: state.atr14, costOverrides });
+            const exitPrice = exitTrace.finalPrice;
             const exitReason = trade.pendingExit.reason;
             const shares = trade.shares;
 
             const grossPnl = (exitPrice - trade.entryPrice) * shares;
             const commission = calculateCommission(shares, costOverrides) * 2;
             const pnl = grossPnl - commission;
-            const slipBps = dynamicSlippageBps(exitPrice, state.atr14, costOverrides);
+            const slipBps = exitTrace.slippageBps;
             log(`[HistSim] ${ticker} PENDING EXIT filled at open $${exitPrice.toFixed(2)} (raw $${rawFill.toFixed(2)}, slip ${slipBps.toFixed(1)}bps)`, "historical");
+
+            if (SIM_DEBUG) {
+              simAssert(i > trade.pendingExit.decisionBarIndex, "Pending exit fill barIndex must be > decision barIndex", invariantViolations, "PENDING_FILL_BAR_ORDER", i, ticker, { fillBar: i, decisionBar: trade.pendingExit.decisionBarIndex });
+              simAssert(Math.round(exitPrice * 100) === exitPrice * 100, "Tick-rounded price must have ≤2 decimals", invariantViolations, "TICK_PRECISION", i, ticker, { exitPrice });
+              simAssert(exitTrace.frictionAdjustedPrice <= rawFill, "Long exit friction-adjusted price must be <= raw price", invariantViolations, "EXIT_ADVERSE_DIRECTION", i, ticker, { frictionAdjusted: exitTrace.frictionAdjustedPrice, raw: rawFill });
+            }
+
+            const rMultiplePend = riskPerShare > 0 ? (exitPrice - trade.entryPrice) / riskPerShare : 0;
+            if (tradeTraces.length < 200) {
+              tradeTraces.push({
+                step: "PENDING_EXIT_FILL", barIndex: i, barTime: bar.timestamp, ticker,
+                decisionPrice: rawFill, rawFillPrice: rawFill,
+                frictionAdjustedPrice: exitTrace.frictionAdjustedPrice, finalFillPrice: exitPrice,
+                slippageBps: slipBps, commissionTotal: commission,
+                rMultiple: rMultiplePend, pnl, side: "long", direction: "exit",
+                exitKind: "PENDING", exitReason,
+              });
+            }
             const rMultiple = riskPerShare > 0 ? (exitPrice - trade.entryPrice) / riskPerShare : 0;
             const pnlPct = trade.entryPrice > 0 ? ((exitPrice - trade.entryPrice) / trade.entryPrice) * 100 : 0;
             const totalR = trade.realizedR + rMultiple;
@@ -736,8 +838,19 @@ export async function runHistoricalSimulation(
             const isIntrabar = exitType === "stop_loss" || exitType === "target" || exitType === "partial" || exitType === "trailing_stop";
 
             if (!isIntrabar) {
-              trade.pendingExit = { reason: exitResult.reason || "exit", exitType: exitType || "hard_exit" };
+              trade.pendingExit = { reason: exitResult.reason || "exit", exitType: exitType || "hard_exit", decisionBarIndex: i };
               log(`[HistSim] ${ticker} PENDING EXIT set: ${exitResult.reason} (will fill at next bar open)`, "historical");
+              if (tradeTraces.length < 200) {
+                tradeTraces.push({
+                  step: "PENDING_EXIT_SET", barIndex: i, barTime: bar.timestamp, ticker,
+                  decisionPrice: bar.close, rawFillPrice: bar.close,
+                  frictionAdjustedPrice: bar.close, finalFillPrice: bar.close,
+                  slippageBps: 0, commissionTotal: 0,
+                  rMultiple: null, pnl: null, side: "long", direction: "exit",
+                  exitKind: "PENDING", exitReason: exitResult.reason || "exit",
+                  notes: `Pending exit set, will fill at next bar open`,
+                });
+              }
               processedBars++;
               continue;
             }
@@ -748,23 +861,38 @@ export async function runHistoricalSimulation(
             let effectiveExitType = exitType;
             let effectiveExitKind: ExitKind = exitType === "stop_loss" || exitType === "trailing_stop" ? "STOP" : "TARGET";
 
-            if (bar.low <= trade.stopPrice && bar.high >= targetLevel && effectiveExitKind === "TARGET") {
+            const isAmbiguousBar = bar.low <= trade.stopPrice && bar.high >= targetLevel;
+            if (isAmbiguousBar && effectiveExitKind === "TARGET") {
               effectiveExitKind = "STOP";
               effectiveExitType = "stop_loss";
               log(`[HistSim] ${ticker} AMBIGUOUS BAR: low $${bar.low.toFixed(2)} <= stop $${trade.stopPrice.toFixed(2)} AND high $${bar.high.toFixed(2)} >= target $${targetLevel.toFixed(2)} → assuming stop hit first`, "historical");
             }
 
+            if (SIM_DEBUG && isAmbiguousBar) {
+              simAssert(effectiveExitKind === "STOP", "Ambiguous bar must always choose STOP", invariantViolations, "AMBIGUOUS_BAR_STOP", i, ticker, { effectiveExitKind, barLow: bar.low, stopPrice: trade.stopPrice, barHigh: bar.high, targetLevel });
+            }
+
+            const exitLevel = effectiveExitKind === "STOP" ? trade.stopPrice : targetLevel;
             const rawFill = rawExitFillLong({
               kind: effectiveExitKind,
-              level: effectiveExitKind === "STOP" ? trade.stopPrice : targetLevel,
+              level: exitLevel,
               barOpen: bar.open,
               barHigh: bar.high,
               barLow: bar.low,
               barClose: bar.close,
             });
 
+            const gapThroughStop = effectiveExitKind === "STOP" && exitLevel != null && bar.open <= exitLevel;
+            const gapThroughTarget = effectiveExitKind === "TARGET" && exitLevel != null && bar.open >= exitLevel;
+            const gapThrough = gapThroughStop || gapThroughTarget;
+
+            if (SIM_DEBUG && gapThroughStop) {
+              simAssert(rawFill === bar.open, "Gap-through stop must fill at bar open", invariantViolations, "GAP_THROUGH_STOP_FILL", i, ticker, { rawFill, barOpen: bar.open, stopLevel: exitLevel });
+            }
+
             if (exitType === "partial" && effectiveExitKind !== "STOP") {
-              const partialExitPrice = applyFrictionAndRound({ rawPrice: rawFill, side: "long", direction: "exit", atr14: state.atr14, costOverrides });
+              const partialTrace = applyFrictionAndRoundWithTrace({ rawPrice: rawFill, side: "long", direction: "exit", atr14: state.atr14, costOverrides });
+              const partialExitPrice = partialTrace.finalPrice;
               const partialShares = exitResult.partialShares ?? Math.floor(shares * (tieredConfig.exits.partialPct / 100));
               trade.isPartiallyExited = true;
               trade.partialExitPrice = partialExitPrice;
@@ -777,11 +905,27 @@ export async function runHistoricalSimulation(
                 trade.stopPrice = trade.entryPrice;
               }
               trade.realizedR += (partialExitPrice - trade.entryPrice) / riskPerShare * (partialShares / shares);
+
+              if (SIM_DEBUG) {
+                simAssert(Math.round(partialExitPrice * 100) === partialExitPrice * 100, "Tick-rounded price must have ≤2 decimals", invariantViolations, "TICK_PRECISION", i, ticker, { partialExitPrice });
+              }
+              if (tradeTraces.length < 200) {
+                tradeTraces.push({
+                  step: "PARTIAL_EXIT", barIndex: i, barTime: bar.timestamp, ticker,
+                  decisionPrice: exitLevel, rawFillPrice: rawFill,
+                  frictionAdjustedPrice: partialTrace.frictionAdjustedPrice, finalFillPrice: partialExitPrice,
+                  slippageBps: partialTrace.slippageBps, commissionTotal: 0,
+                  rMultiple: null, pnl: null, side: "long", direction: "exit",
+                  exitKind: "TARGET", exitReason: exitResult.reason || "partial",
+                  isAmbiguousBar, gapThrough,
+                });
+              }
               processedBars++;
               continue;
             }
 
-            const exitPrice = applyFrictionAndRound({ rawPrice: rawFill, side: "long", direction: "exit", atr14: state.atr14, costOverrides });
+            const intraTrace = applyFrictionAndRoundWithTrace({ rawPrice: rawFill, side: "long", direction: "exit", atr14: state.atr14, costOverrides });
+            const exitPrice = intraTrace.finalPrice;
             const exitReason = effectiveExitType === "stop_loss" && exitType !== "stop_loss"
               ? `${exitResult.reason || "exit"} [ambiguous bar → stop]`
               : (exitResult.reason || "exit");
@@ -789,9 +933,26 @@ export async function runHistoricalSimulation(
             const grossPnl = (exitPrice - trade.entryPrice) * shares;
             const commission = calculateCommission(shares, costOverrides) * 2;
             const pnl = grossPnl - commission;
-            const slipBps = dynamicSlippageBps(exitPrice, state.atr14, costOverrides);
+            const slipBps = intraTrace.slippageBps;
             log(`[HistSim] ${ticker} EXIT ${effectiveExitKind} at $${exitPrice.toFixed(2)} (raw $${rawFill.toFixed(2)}, slip ${slipBps.toFixed(1)}bps, commission $${commission.toFixed(2)})`, "historical");
+
+            if (SIM_DEBUG) {
+              simAssert(Math.round(exitPrice * 100) === exitPrice * 100, "Tick-rounded price must have ≤2 decimals", invariantViolations, "TICK_PRECISION", i, ticker, { exitPrice });
+              simAssert(intraTrace.frictionAdjustedPrice <= rawFill, "Long exit friction-adjusted price must be <= raw price", invariantViolations, "EXIT_ADVERSE_DIRECTION", i, ticker, { frictionAdjusted: intraTrace.frictionAdjustedPrice, raw: rawFill });
+            }
             const rMultiple = riskPerShare > 0 ? (exitPrice - trade.entryPrice) / riskPerShare : 0;
+
+            if (tradeTraces.length < 200) {
+              tradeTraces.push({
+                step: "INTRABAR_EXIT", barIndex: i, barTime: bar.timestamp, ticker,
+                decisionPrice: exitLevel, rawFillPrice: rawFill,
+                frictionAdjustedPrice: intraTrace.frictionAdjustedPrice, finalFillPrice: exitPrice,
+                slippageBps: slipBps, commissionTotal: commission,
+                rMultiple, pnl, side: "long", direction: "exit",
+                exitKind: effectiveExitKind, exitReason,
+                isAmbiguousBar, gapThrough,
+              });
+            }
             const pnlPct = trade.entryPrice > 0 ? ((exitPrice - trade.entryPrice) / trade.entryPrice) * 100 : 0;
             const totalR = trade.realizedR + rMultiple;
 
@@ -973,9 +1134,15 @@ export async function runHistoricalSimulation(
 
             if (retestResult.valid && retestResult.entryPrice && retestResult.stopPrice) {
               diag.retestValid++;
-              const entryPrice = applyFrictionAndRound({ rawPrice: retestResult.entryPrice, side: "long", direction: "entry", atr14: state.atr14, costOverrides });
+              const entryTraceResult = applyFrictionAndRoundWithTrace({ rawPrice: retestResult.entryPrice, side: "long", direction: "entry", atr14: state.atr14, costOverrides });
+              const entryPrice = entryTraceResult.finalPrice;
               const stopPrice = retestResult.stopPrice;
               const riskPerShare = Math.abs(entryPrice - stopPrice);
+
+              if (SIM_DEBUG) {
+                simAssert(Math.round(entryPrice * 100) === entryPrice * 100, "Tick-rounded entry price must have ≤2 decimals", invariantViolations, "TICK_PRECISION", i, ticker, { entryPrice });
+                simAssert(entryTraceResult.frictionAdjustedPrice >= retestResult.entryPrice, "Long entry friction-adjusted price must be >= raw price", invariantViolations, "ENTRY_ADVERSE_DIRECTION", i, ticker, { frictionAdjusted: entryTraceResult.frictionAdjustedPrice, raw: retestResult.entryPrice });
+              }
 
               if (riskPerShare > 0) {
                 const dollarRisk = accountSize * tieredConfig.tiers[state.selectedTier].riskPct;
@@ -1071,6 +1238,17 @@ export async function runHistoricalSimulation(
                 };
 
                 log(`[HistSim] ${ticker} ENTRY at $${entryPrice.toFixed(2)} stop=$${stopPrice.toFixed(2)} (Tier ${state.selectedTier}) on ${simulationDate}`, "historical");
+
+                if (tradeTraces.length < 200) {
+                  const entryCommission = calculateCommission(shares, costOverrides);
+                  tradeTraces.push({
+                    step: "ENTRY", barIndex: i, barTime: bar.timestamp, ticker,
+                    decisionPrice: retestResult.entryPrice, rawFillPrice: retestResult.entryPrice,
+                    frictionAdjustedPrice: entryTraceResult.frictionAdjustedPrice, finalFillPrice: entryPrice,
+                    slippageBps: entryTraceResult.slippageBps, commissionTotal: entryCommission,
+                    rMultiple: null, pnl: null, side: "long", direction: "entry",
+                  });
+                }
               } else {
                 state.signalState = "IDLE";
                 state.selectedTier = null;
@@ -1101,13 +1279,30 @@ export async function runHistoricalSimulation(
         const eodExitReason = trade.pendingExit
           ? `${trade.pendingExit.reason} [EOD close - no next bar]`
           : "End of day close";
-        const exitPrice = applyFrictionAndRound({ rawPrice: lastBar.close, side: "long", direction: "exit", atr14: state.atr14, costOverrides });
+        const eodTrace = applyFrictionAndRoundWithTrace({ rawPrice: lastBar.close, side: "long", direction: "exit", atr14: state.atr14, costOverrides });
+        const exitPrice = eodTrace.finalPrice;
         const grossPnl = (exitPrice - trade.entryPrice) * trade.shares;
         const commission = calculateCommission(trade.shares, costOverrides) * 2;
         const pnl = grossPnl - commission;
-        const slipBps2 = dynamicSlippageBps(exitPrice, state.atr14, costOverrides);
+        const slipBps2 = eodTrace.slippageBps;
         log(`[HistSim] ${ticker} EOD EXIT at $${exitPrice.toFixed(2)} (raw $${lastBar.close.toFixed(2)}, slip ${slipBps2.toFixed(1)}bps, commission $${commission.toFixed(2)})`, "historical");
+
+        if (SIM_DEBUG) {
+          simAssert(Math.round(exitPrice * 100) === exitPrice * 100, "Tick-rounded EOD exit price must have ≤2 decimals", invariantViolations, "TICK_PRECISION", tickerBars5m.length - 1, ticker, { exitPrice });
+        }
+
         const rMultiple = trade.riskPerShare > 0 ? (exitPrice - trade.entryPrice) / trade.riskPerShare : 0;
+
+        if (tradeTraces.length < 200) {
+          tradeTraces.push({
+            step: "EOD_EXIT", barIndex: tickerBars5m.length - 1, barTime: lastBar.timestamp, ticker,
+            decisionPrice: lastBar.close, rawFillPrice: lastBar.close,
+            frictionAdjustedPrice: eodTrace.frictionAdjustedPrice, finalFillPrice: exitPrice,
+            slippageBps: slipBps2, commissionTotal: commission,
+            rMultiple, pnl, side: "long", direction: "exit",
+            exitKind: "EOD", exitReason: eodExitReason,
+          });
+        }
         const totalR = trade.realizedR + rMultiple;
         totalPnl += pnl;
         if (pnl > 0) winCount++;
@@ -1256,6 +1451,9 @@ export async function runHistoricalSimulation(
         totalSlippageCosts,
         tradeRs,
         maxDrawdown: maxDD,
+        byRegime: tradesByRegime,
+        bySession: tradesBySession,
+        byTier: tradesByTier,
       } as DryRunResult;
     }
 
@@ -1287,6 +1485,8 @@ export async function runHistoricalSimulation(
         avgSlippagePerTrade: Number(avgSlippage.toFixed(2)),
         avgCommissionPerTrade: totalTrades > 0 ? Number((totalCommissions / totalTrades).toFixed(2)) : 0,
         totalR: Number(tradeRs.reduce((a, b) => a + b, 0).toFixed(2)),
+        tradeTraces: tradeTraces.slice(0, 200),
+        invariantViolations: invariantViolations.slice(0, 100),
       },
       breakdown: {
         byRegime: tradesByRegime,
@@ -1310,6 +1510,313 @@ export async function runHistoricalSimulation(
   } finally {
     if (!isDryRun) {
       activeSimulations.delete(runId);
+    }
+  }
+}
+
+export interface WalkForwardWindow {
+  windowIndex: number;
+  trainStart: string;
+  trainEnd: string;
+  testStart: string;
+  testEnd: string;
+  trainDates: string[];
+  testDates: string[];
+  testMetrics: {
+    trades: number;
+    wins: number;
+    losses: number;
+    winRate: number;
+    expectancyR: number;
+    profitFactor: number;
+    maxDrawdown: number;
+    netPnl: number;
+    grossPnl: number;
+    totalCosts: number;
+    byRegime: Record<string, BreakdownBucket>;
+    bySession: Record<string, BreakdownBucket>;
+    byTier: Record<string, BreakdownBucket>;
+  };
+  trainSummary: {
+    totalTrades: number;
+    totalPnl: number;
+  };
+}
+
+export interface WalkForwardResult {
+  windows: WalkForwardWindow[];
+  aggregate: {
+    totalTestTrades: number;
+    totalTestWins: number;
+    totalTestLosses: number;
+    overallWinRate: number;
+    overallExpectancyR: number;
+    overallProfitFactor: number;
+    maxDrawdown: number;
+    totalNetPnl: number;
+    equityCurve: Array<{ windowIndex: number; cumulativePnl: number }>;
+    regimeBreakdown: Record<string, BreakdownBucket & { winRate: number }>;
+    sessionBreakdown: Record<string, BreakdownBucket & { winRate: number }>;
+    tierBreakdown: Record<string, BreakdownBucket & { winRate: number }>;
+  };
+  config: {
+    trainDays: number;
+    testDays: number;
+    totalWindows: number;
+    startDate: string;
+    endDate: string;
+  };
+}
+
+let activeWalkForward: { active: boolean; cancel: boolean; progress: { currentWindow: number; totalWindows: number; currentDate: string; phase: "train" | "test" } } | null = null;
+
+export function getWalkForwardStatus() {
+  return activeWalkForward;
+}
+
+export function cancelWalkForward(): boolean {
+  if (activeWalkForward?.active) {
+    activeWalkForward.cancel = true;
+    return true;
+  }
+  return false;
+}
+
+export async function runWalkForwardEvaluation(
+  userId: string,
+  trainDays: number,
+  testDays: number,
+  totalWindows: number,
+  storage: IStorage
+): Promise<WalkForwardResult | { error: string }> {
+  if (!isAlpacaConfigured()) {
+    return { error: "Alpaca API keys not configured. Walk-forward evaluation requires market data." };
+  }
+
+  if (activeWalkForward?.active) {
+    return { error: "Walk-forward evaluation is already running." };
+  }
+
+  activeWalkForward = {
+    active: true,
+    cancel: false,
+    progress: { currentWindow: 0, totalWindows, currentDate: "", phase: "train" }
+  };
+
+  try {
+    const daysPerWindow = trainDays + testDays;
+    const totalDaysNeeded = totalWindows * daysPerWindow;
+
+    const allDates = getWeekdaysGoingBack(new Date(), totalDaysNeeded);
+    allDates.reverse();
+
+    if (allDates.length < totalDaysNeeded) {
+      return { error: `Not enough trading days available. Need ${totalDaysNeeded}, got ${allDates.length}.` };
+    }
+
+    const windows: WalkForwardWindow[] = [];
+    const allTestRs: number[] = [];
+    let cumulativePnl = 0;
+    const equityCurve: Array<{ windowIndex: number; cumulativePnl: number }> = [];
+
+    for (let w = 0; w < totalWindows; w++) {
+      if (activeWalkForward.cancel) {
+        return { error: "Walk-forward evaluation cancelled." };
+      }
+
+      const windowStart = w * daysPerWindow;
+      const trainDatesList = allDates.slice(windowStart, windowStart + trainDays);
+      const testDatesList = allDates.slice(windowStart + trainDays, windowStart + daysPerWindow);
+
+      activeWalkForward.progress = { currentWindow: w + 1, totalWindows, currentDate: trainDatesList[0] || "", phase: "train" };
+
+      let trainTrades = 0;
+      let trainPnl = 0;
+      for (const date of trainDatesList) {
+        if (activeWalkForward.cancel) break;
+        activeWalkForward.progress.currentDate = date;
+        try {
+          const result = await runHistoricalSimulation(
+            `wf-${w}-train-${date}`,
+            date, userId, storage,
+            undefined,
+            { dryRun: true }
+          ) as DryRunResult | void;
+          if (result) {
+            trainTrades += result.trades;
+            trainPnl += result.netPnl;
+          }
+        } catch (err) {
+          log(`[WalkForward] Train date ${date} error: ${err}`, "historical");
+        }
+      }
+
+      activeWalkForward.progress.phase = "test";
+      let testWins = 0, testLosses = 0;
+      let testGrossPnl = 0, testNetPnl = 0, testTotalCosts = 0;
+      const testRs: number[] = [];
+      const windowByRegime: Record<string, BreakdownBucket> = {};
+      const windowBySession: Record<string, BreakdownBucket> = {};
+      const windowByTier: Record<string, BreakdownBucket> = {};
+
+      for (const date of testDatesList) {
+        if (activeWalkForward.cancel) break;
+        activeWalkForward.progress.currentDate = date;
+        try {
+          const result = await runHistoricalSimulation(
+            `wf-${w}-test-${date}`,
+            date, userId, storage,
+            undefined,
+            { dryRun: true }
+          ) as DryRunResult | void;
+          if (result) {
+            testWins += result.wins;
+            testLosses += result.losses;
+            testGrossPnl += result.grossPnl;
+            testNetPnl += result.netPnl;
+            testTotalCosts += result.totalCommissions + result.totalSlippageCosts;
+            testRs.push(...result.tradeRs);
+            for (const [k, v] of Object.entries(result.byRegime)) {
+              if (!windowByRegime[k]) windowByRegime[k] = { wins: 0, losses: 0, pnl: 0 };
+              windowByRegime[k].wins += v.wins; windowByRegime[k].losses += v.losses; windowByRegime[k].pnl += v.pnl;
+            }
+            for (const [k, v] of Object.entries(result.bySession)) {
+              if (!windowBySession[k]) windowBySession[k] = { wins: 0, losses: 0, pnl: 0 };
+              windowBySession[k].wins += v.wins; windowBySession[k].losses += v.losses; windowBySession[k].pnl += v.pnl;
+            }
+            for (const [k, v] of Object.entries(result.byTier)) {
+              if (!windowByTier[k]) windowByTier[k] = { wins: 0, losses: 0, pnl: 0 };
+              windowByTier[k].wins += v.wins; windowByTier[k].losses += v.losses; windowByTier[k].pnl += v.pnl;
+            }
+          }
+        } catch (err) {
+          log(`[WalkForward] Test date ${date} error: ${err}`, "historical");
+        }
+      }
+
+      const testTrades = testWins + testLosses;
+      const avgR = testRs.length > 0 ? testRs.reduce((a, b) => a + b, 0) / testRs.length : 0;
+      const winPnls = testRs.filter(r => r > 0);
+      const lossPnls = testRs.filter(r => r <= 0);
+      const pf = lossPnls.length > 0
+        ? Math.abs(winPnls.reduce((a, b) => a + b, 0)) / Math.abs(lossPnls.reduce((a, b) => a + b, 0))
+        : winPnls.length > 0 ? 999 : 0;
+
+      let wPeak = 0, wMaxDD = 0, wEquity = 0;
+      for (const r of testRs) {
+        wEquity += r;
+        if (wEquity > wPeak) wPeak = wEquity;
+        const dd = wPeak - wEquity;
+        if (dd > wMaxDD) wMaxDD = dd;
+      }
+
+      cumulativePnl += testNetPnl;
+      allTestRs.push(...testRs);
+      equityCurve.push({ windowIndex: w, cumulativePnl });
+
+      windows.push({
+        windowIndex: w,
+        trainStart: trainDatesList[0] || "",
+        trainEnd: trainDatesList[trainDatesList.length - 1] || "",
+        testStart: testDatesList[0] || "",
+        testEnd: testDatesList[testDatesList.length - 1] || "",
+        trainDates: trainDatesList,
+        testDates: testDatesList,
+        testMetrics: {
+          trades: testTrades,
+          wins: testWins,
+          losses: testLosses,
+          winRate: testTrades > 0 ? Number(((testWins / testTrades) * 100).toFixed(1)) : 0,
+          expectancyR: Number(avgR.toFixed(3)),
+          profitFactor: Number(pf.toFixed(2)),
+          maxDrawdown: Number(wMaxDD.toFixed(2)),
+          netPnl: Number(testNetPnl.toFixed(2)),
+          grossPnl: Number(testGrossPnl.toFixed(2)),
+          totalCosts: Number(testTotalCosts.toFixed(2)),
+          byRegime: windowByRegime,
+          bySession: windowBySession,
+          byTier: windowByTier,
+        },
+        trainSummary: {
+          totalTrades: trainTrades,
+          totalPnl: Number(trainPnl.toFixed(2)),
+        },
+      });
+
+      log(`[WalkForward] Window ${w + 1}/${totalWindows} complete: test trades=${testTrades}, expectancy=${avgR.toFixed(3)}R, PnL=$${testNetPnl.toFixed(2)}`, "historical");
+    }
+
+    const totalTestTrades = windows.reduce((s, w) => s + w.testMetrics.trades, 0);
+    const totalTestWins = windows.reduce((s, w) => s + w.testMetrics.wins, 0);
+    const totalTestLosses = windows.reduce((s, w) => s + w.testMetrics.losses, 0);
+    const overallAvgR = allTestRs.length > 0 ? allTestRs.reduce((a, b) => a + b, 0) / allTestRs.length : 0;
+    const allWinRs = allTestRs.filter(r => r > 0);
+    const allLossRs = allTestRs.filter(r => r <= 0);
+    const overallPF = allLossRs.length > 0
+      ? Math.abs(allWinRs.reduce((a, b) => a + b, 0)) / Math.abs(allLossRs.reduce((a, b) => a + b, 0))
+      : allWinRs.length > 0 ? 999 : 0;
+
+    let agPeak = 0, agMaxDD = 0, agEquity = 0;
+    for (const r of allTestRs) {
+      agEquity += r;
+      if (agEquity > agPeak) agPeak = agEquity;
+      const dd = agPeak - agEquity;
+      if (dd > agMaxDD) agMaxDD = dd;
+    }
+
+    const aggRegime: Record<string, BreakdownBucket> = {};
+    const aggSession: Record<string, BreakdownBucket> = {};
+    const aggTier: Record<string, BreakdownBucket> = {};
+    for (const win of windows) {
+      for (const [k, v] of Object.entries(win.testMetrics.byRegime)) {
+        if (!aggRegime[k]) aggRegime[k] = { wins: 0, losses: 0, pnl: 0 };
+        aggRegime[k].wins += v.wins; aggRegime[k].losses += v.losses; aggRegime[k].pnl += v.pnl;
+      }
+      for (const [k, v] of Object.entries(win.testMetrics.bySession)) {
+        if (!aggSession[k]) aggSession[k] = { wins: 0, losses: 0, pnl: 0 };
+        aggSession[k].wins += v.wins; aggSession[k].losses += v.losses; aggSession[k].pnl += v.pnl;
+      }
+      for (const [k, v] of Object.entries(win.testMetrics.byTier)) {
+        if (!aggTier[k]) aggTier[k] = { wins: 0, losses: 0, pnl: 0 };
+        aggTier[k].wins += v.wins; aggTier[k].losses += v.losses; aggTier[k].pnl += v.pnl;
+      }
+    }
+    const addWinRate = (rec: Record<string, BreakdownBucket>) => {
+      const out: Record<string, BreakdownBucket & { winRate: number }> = {};
+      for (const [k, v] of Object.entries(rec)) {
+        const total = v.wins + v.losses;
+        out[k] = { ...v, pnl: Number(v.pnl.toFixed(2)), winRate: total > 0 ? Number(((v.wins / total) * 100).toFixed(1)) : 0 };
+      }
+      return out;
+    };
+
+    return {
+      windows,
+      aggregate: {
+        totalTestTrades,
+        totalTestWins,
+        totalTestLosses,
+        overallWinRate: totalTestTrades > 0 ? Number(((totalTestWins / totalTestTrades) * 100).toFixed(1)) : 0,
+        overallExpectancyR: Number(overallAvgR.toFixed(3)),
+        overallProfitFactor: Number(overallPF.toFixed(2)),
+        maxDrawdown: Number(agMaxDD.toFixed(2)),
+        totalNetPnl: Number(cumulativePnl.toFixed(2)),
+        equityCurve,
+        regimeBreakdown: addWinRate(aggRegime),
+        sessionBreakdown: addWinRate(aggSession),
+        tierBreakdown: addWinRate(aggTier),
+      },
+      config: {
+        trainDays,
+        testDays,
+        totalWindows,
+        startDate: allDates[0] || "",
+        endDate: allDates[allDates.length - 1] || "",
+      },
+    };
+  } finally {
+    if (activeWalkForward) {
+      activeWalkForward.active = false;
     }
   }
 }

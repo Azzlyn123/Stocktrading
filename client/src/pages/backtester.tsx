@@ -29,6 +29,7 @@ import {
   DollarSign,
   Target,
   Activity,
+  Layers,
 } from "lucide-react";
 import type { SimulationRun } from "@shared/schema";
 
@@ -598,6 +599,481 @@ function RunCard({ run, onCancel }: { run: SimulationRun; onCancel: (id: string)
   );
 }
 
+interface WalkForwardStatus {
+  active: boolean;
+  progress: {
+    currentWindow: number;
+    totalWindows: number;
+    currentDate: string;
+    phase: "train" | "test";
+  };
+}
+
+type BreakdownBucketUI = { wins: number; losses: number; pnl: number };
+type BreakdownBucketWithWR = BreakdownBucketUI & { winRate: number };
+
+interface WalkForwardWindowData {
+  windowIndex: number;
+  trainStart: string;
+  trainEnd: string;
+  testStart: string;
+  testEnd: string;
+  testMetrics: {
+    trades: number;
+    wins: number;
+    losses: number;
+    winRate: number;
+    expectancyR: number;
+    profitFactor: number;
+    maxDrawdown: number;
+    netPnl: number;
+    grossPnl: number;
+    totalCosts: number;
+    byRegime: Record<string, BreakdownBucketUI>;
+    bySession: Record<string, BreakdownBucketUI>;
+    byTier: Record<string, BreakdownBucketUI>;
+  };
+  trainSummary: {
+    totalTrades: number;
+    totalPnl: number;
+  };
+}
+
+interface WalkForwardResultData {
+  windows: WalkForwardWindowData[];
+  aggregate: {
+    totalTestTrades: number;
+    totalTestWins: number;
+    totalTestLosses: number;
+    overallWinRate: number;
+    overallExpectancyR: number;
+    overallProfitFactor: number;
+    maxDrawdown: number;
+    totalNetPnl: number;
+    equityCurve: Array<{ windowIndex: number; cumulativePnl: number }>;
+    regimeBreakdown: Record<string, BreakdownBucketWithWR>;
+    sessionBreakdown: Record<string, BreakdownBucketWithWR>;
+    tierBreakdown: Record<string, BreakdownBucketWithWR>;
+  };
+  config: {
+    trainDays: number;
+    testDays: number;
+    totalWindows: number;
+    startDate: string;
+    endDate: string;
+  };
+  error?: string;
+}
+
+function WalkForwardPanel() {
+  const [trainDays, setTrainDays] = useState(60);
+  const [testDays, setTestDays] = useState(10);
+  const [totalWindows, setTotalWindows] = useState(3);
+  const [showResults, setShowResults] = useState(false);
+  const [expandedWindow, setExpandedWindow] = useState<number | null>(null);
+
+  const { toast } = useToast();
+
+  const { data: wfStatus } = useQuery<WalkForwardStatus>({
+    queryKey: ["/api/walk-forward/status"],
+    refetchInterval: 2000,
+  });
+
+  const { data: wfResults } = useQuery<WalkForwardResultData | null>({
+    queryKey: ["/api/walk-forward/results"],
+    refetchInterval: wfStatus?.active ? 5000 : false,
+  });
+
+  const startWF = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/walk-forward", { trainDays, testDays, totalWindows });
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/walk-forward/status"] });
+      toast({ title: "Walk-Forward Started", description: data.message });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Failed to start walk-forward", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const cancelWF = useMutation({
+    mutationFn: async () => {
+      await apiRequest("POST", "/api/walk-forward/cancel");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/walk-forward/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/walk-forward/results"] });
+      toast({ title: "Walk-forward cancelled" });
+    },
+  });
+
+  const isActive = wfStatus?.active ?? false;
+  const hasResults = wfResults && !wfResults.error && wfResults.windows?.length > 0;
+  const hasError = wfResults && "error" in wfResults && wfResults.error;
+
+  const progressPct = isActive && wfStatus?.progress
+    ? ((wfStatus.progress.currentWindow - 1) / wfStatus.progress.totalWindows) * 100
+    : 0;
+
+  return (
+    <Card className="border-primary/20" data-testid="card-walk-forward">
+      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2 p-4">
+        <div className="flex items-center gap-2">
+          <Layers className="w-4 h-4 text-primary" />
+          <h3 className="text-sm font-medium">Walk-Forward Evaluation</h3>
+        </div>
+        <div className="flex items-center gap-1">
+          <Activity className="w-3.5 h-3.5 text-muted-foreground" />
+          <span className="text-[10px] text-muted-foreground">Out-of-sample testing</span>
+        </div>
+      </CardHeader>
+      <CardContent className="p-4 pt-0 space-y-3">
+        <p className="text-[10px] text-muted-foreground">
+          Splits historical data into rolling train/test windows to measure strategy robustness on unseen data. Each window trains on past days, then tests on the next period.
+        </p>
+
+        <div className="flex items-end gap-3 flex-wrap">
+          <div className="space-y-1.5">
+            <label className="text-xs text-muted-foreground" htmlFor="wf-train-days">Train Days</label>
+            <Input
+              id="wf-train-days"
+              type="number"
+              min={5}
+              max={200}
+              value={trainDays}
+              onChange={(e) => setTrainDays(Math.min(200, Math.max(5, Number(e.target.value) || 60)))}
+              className="w-20"
+              disabled={isActive}
+              data-testid="input-wf-train-days"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs text-muted-foreground" htmlFor="wf-test-days">Test Days</label>
+            <Input
+              id="wf-test-days"
+              type="number"
+              min={3}
+              max={60}
+              value={testDays}
+              onChange={(e) => setTestDays(Math.min(60, Math.max(3, Number(e.target.value) || 10)))}
+              className="w-20"
+              disabled={isActive}
+              data-testid="input-wf-test-days"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs text-muted-foreground" htmlFor="wf-windows">Windows</label>
+            <Input
+              id="wf-windows"
+              type="number"
+              min={1}
+              max={10}
+              value={totalWindows}
+              onChange={(e) => setTotalWindows(Math.min(10, Math.max(1, Number(e.target.value) || 3)))}
+              className="w-20"
+              disabled={isActive}
+              data-testid="input-wf-windows"
+            />
+          </div>
+          {isActive ? (
+            <Button
+              variant="destructive"
+              onClick={() => cancelWF.mutate()}
+              disabled={cancelWF.isPending}
+              data-testid="button-cancel-wf"
+            >
+              <Square className="w-4 h-4 mr-2" />
+              Stop
+            </Button>
+          ) : (
+            <Button
+              onClick={() => startWF.mutate()}
+              disabled={startWF.isPending}
+              data-testid="button-start-wf"
+            >
+              {startWF.isPending ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Layers className="w-4 h-4 mr-2" />
+              )}
+              Run Evaluation
+            </Button>
+          )}
+        </div>
+
+        {isActive && wfStatus?.progress && (
+          <div className="space-y-2">
+            <div className="w-full h-2 bg-accent rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary transition-all duration-500 rounded-full"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+            <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
+              <span className="flex items-center gap-1">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Window {wfStatus.progress.currentWindow}/{wfStatus.progress.totalWindows}
+              </span>
+              <Badge variant="outline" className="text-[10px] px-1.5 min-h-5">
+                {wfStatus.progress.phase === "train" ? "Training" : "Testing"}
+              </Badge>
+              {wfStatus.progress.currentDate && (
+                <span className="flex items-center gap-1">
+                  <Calendar className="w-3 h-3" />
+                  {formatDate(wfStatus.progress.currentDate)}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {hasError && (
+          <div className="flex items-center gap-2 text-xs text-red-500 bg-red-500/10 rounded-md px-3 py-2">
+            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+            <span>{wfResults!.error}</span>
+          </div>
+        )}
+
+        {hasResults && (
+          <>
+            <button
+              onClick={() => setShowResults(!showResults)}
+              className="flex items-center gap-1 text-xs text-muted-foreground font-medium hover-elevate rounded-md px-1 py-0.5"
+              data-testid="button-toggle-wf-results"
+            >
+              {showResults ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              {showResults ? "Hide Results" : "Show Results"}
+              <Badge variant="default" className="text-[10px] px-1.5 min-h-5 ml-1">
+                <CheckCircle2 className="w-3 h-3 mr-1" />
+                {wfResults!.windows.length} windows
+              </Badge>
+            </button>
+
+            {showResults && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="text-center" data-testid="wf-total-trades">
+                    <p className="text-[10px] text-muted-foreground">Test Trades</p>
+                    <p className="text-sm font-semibold">{wfResults!.aggregate.totalTestTrades}</p>
+                  </div>
+                  <div className="text-center" data-testid="wf-win-rate">
+                    <p className="text-[10px] text-muted-foreground">Win Rate</p>
+                    <p className="text-sm font-semibold">{wfResults!.aggregate.overallWinRate}%</p>
+                  </div>
+                  <div className="text-center" data-testid="wf-expectancy">
+                    <p className="text-[10px] text-muted-foreground">Expectancy</p>
+                    <p className={`text-sm font-semibold ${wfResults!.aggregate.overallExpectancyR >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                      {wfResults!.aggregate.overallExpectancyR > 0 ? "+" : ""}{wfResults!.aggregate.overallExpectancyR}R
+                    </p>
+                  </div>
+                  <div className="text-center" data-testid="wf-net-pnl">
+                    <p className="text-[10px] text-muted-foreground">Net P&L</p>
+                    <p className={`text-sm font-semibold ${wfResults!.aggregate.totalNetPnl >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                      {wfResults!.aggregate.totalNetPnl >= 0 ? "+" : ""}{formatCurrency(wfResults!.aggregate.totalNetPnl)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="text-center">
+                    <p className="text-[10px] text-muted-foreground">Profit Factor</p>
+                    <p className="text-sm font-semibold">
+                      {wfResults!.aggregate.overallProfitFactor === 999 ? "N/A" : wfResults!.aggregate.overallProfitFactor.toFixed(2)}
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[10px] text-muted-foreground">Max Drawdown</p>
+                    <p className="text-sm font-semibold text-red-500">{wfResults!.aggregate.maxDrawdown.toFixed(2)}R</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[10px] text-muted-foreground">Date Range</p>
+                    <p className="text-[10px] font-medium">
+                      {wfResults!.config.startDate} to {wfResults!.config.endDate}
+                    </p>
+                  </div>
+                </div>
+
+                {wfResults!.aggregate.equityCurve.length > 0 && (
+                  <div data-testid="wf-equity-curve">
+                    <p className="text-[10px] text-muted-foreground font-medium mb-1.5">Cumulative P&L by Window</p>
+                    <div className="flex items-end gap-1 h-16">
+                      {wfResults!.aggregate.equityCurve.map((point, idx) => {
+                        const maxAbs = Math.max(
+                          ...wfResults!.aggregate.equityCurve.map(p => Math.abs(p.cumulativePnl)),
+                          1
+                        );
+                        const height = Math.abs(point.cumulativePnl) / maxAbs * 100;
+                        const isPositive = point.cumulativePnl >= 0;
+                        return (
+                          <div
+                            key={idx}
+                            className="flex-1 flex flex-col justify-end items-center"
+                          >
+                            <div
+                              className={`w-full rounded-sm ${isPositive ? "bg-emerald-500/60" : "bg-red-500/60"}`}
+                              style={{ height: `${Math.max(height, 4)}%` }}
+                            />
+                            <span className="text-[8px] text-muted-foreground mt-0.5">W{idx + 1}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {(wfResults!.aggregate.regimeBreakdown && Object.keys(wfResults!.aggregate.regimeBreakdown).length > 0) && (
+                  <div data-testid="wf-aggregate-breakdowns">
+                    <p className="text-[10px] text-muted-foreground font-medium mb-2">Aggregate Breakdowns</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {[
+                        { label: "By Regime", data: wfResults!.aggregate.regimeBreakdown },
+                        { label: "By Session", data: wfResults!.aggregate.sessionBreakdown },
+                        { label: "By Tier", data: wfResults!.aggregate.tierBreakdown },
+                      ].filter(s => Object.keys(s.data).length > 0).map(section => (
+                        <div key={section.label}>
+                          <p className="text-[9px] text-muted-foreground mb-1">{section.label}</p>
+                          <div className="space-y-1">
+                            {Object.entries(section.data).map(([key, val]) => {
+                              const total = val.wins + val.losses;
+                              return (
+                                <div key={key} className="flex items-center justify-between text-[10px] gap-1">
+                                  <span className="font-medium capitalize">{key}</span>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-muted-foreground">{val.winRate}%</span>
+                                    <span className={val.pnl >= 0 ? "text-emerald-500" : "text-red-500"}>
+                                      {val.pnl >= 0 ? "+" : ""}{formatCurrency(val.pnl)}
+                                    </span>
+                                    <span className="text-muted-foreground">({total})</span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <p className="text-[10px] text-muted-foreground font-medium mb-2">Per-Window Breakdown</p>
+                  <div className="space-y-2">
+                    {wfResults!.windows.map((win) => (
+                      <Card key={win.windowIndex} data-testid={`card-wf-window-${win.windowIndex}`}>
+                        <CardContent className="p-3">
+                          <button
+                            onClick={() => setExpandedWindow(expandedWindow === win.windowIndex ? null : win.windowIndex)}
+                            className="w-full flex items-center justify-between gap-2"
+                            data-testid={`button-toggle-window-${win.windowIndex}`}
+                          >
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs font-medium">Window {win.windowIndex + 1}</span>
+                              <Badge variant="outline" className="text-[9px] px-1 min-h-4">
+                                Test: {win.testStart} to {win.testEnd}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className={`text-xs font-semibold ${win.testMetrics.netPnl >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                                {win.testMetrics.netPnl >= 0 ? "+" : ""}{formatCurrency(win.testMetrics.netPnl)}
+                              </span>
+                              {expandedWindow === win.windowIndex ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                            </div>
+                          </button>
+
+                          {expandedWindow === win.windowIndex && (
+                            <div className="mt-3 space-y-2">
+                              <div className="grid grid-cols-2 gap-2 text-[10px]">
+                                <div>
+                                  <span className="text-muted-foreground">Train:</span>{" "}
+                                  <span className="font-medium">{win.trainStart} to {win.trainEnd}</span>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Train Trades:</span>{" "}
+                                  <span className="font-medium">{win.trainSummary.totalTrades}</span>
+                                  <span className={`ml-1 ${win.trainSummary.totalPnl >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                                    ({win.trainSummary.totalPnl >= 0 ? "+" : ""}{formatCurrency(win.trainSummary.totalPnl)})
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-4 gap-2">
+                                <div className="text-center">
+                                  <p className="text-[9px] text-muted-foreground">Trades</p>
+                                  <p className="text-xs font-semibold">{win.testMetrics.trades}</p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-[9px] text-muted-foreground">Win Rate</p>
+                                  <p className="text-xs font-semibold">{win.testMetrics.winRate}%</p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-[9px] text-muted-foreground">Expectancy</p>
+                                  <p className={`text-xs font-semibold ${win.testMetrics.expectancyR >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                                    {win.testMetrics.expectancyR > 0 ? "+" : ""}{win.testMetrics.expectancyR}R
+                                  </p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-[9px] text-muted-foreground">PF</p>
+                                  <p className="text-xs font-semibold">
+                                    {win.testMetrics.profitFactor === 999 ? "N/A" : win.testMetrics.profitFactor.toFixed(2)}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-3 gap-2">
+                                <div className="text-center">
+                                  <p className="text-[9px] text-muted-foreground">Gross P&L</p>
+                                  <p className={`text-xs font-semibold ${win.testMetrics.grossPnl >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                                    {win.testMetrics.grossPnl >= 0 ? "+" : ""}{formatCurrency(win.testMetrics.grossPnl)}
+                                  </p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-[9px] text-muted-foreground">Costs</p>
+                                  <p className="text-xs font-semibold text-red-500">-{formatCurrency(win.testMetrics.totalCosts)}</p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-[9px] text-muted-foreground">Max DD</p>
+                                  <p className="text-xs font-semibold text-red-500">{win.testMetrics.maxDrawdown.toFixed(2)}R</p>
+                                </div>
+                              </div>
+                              {(win.testMetrics.byRegime && Object.keys(win.testMetrics.byRegime).length > 0) && (
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 border-t border-border/50">
+                                  {[
+                                    { label: "Regime", data: win.testMetrics.byRegime },
+                                    { label: "Session", data: win.testMetrics.bySession },
+                                    { label: "Tier", data: win.testMetrics.byTier },
+                                  ].filter(s => Object.keys(s.data).length > 0).map(section => (
+                                    <div key={section.label}>
+                                      <p className="text-[9px] text-muted-foreground mb-0.5">{section.label}</p>
+                                      {Object.entries(section.data).map(([key, val]) => {
+                                        const total = val.wins + val.losses;
+                                        const wr = total > 0 ? ((val.wins / total) * 100).toFixed(0) : "0";
+                                        return (
+                                          <div key={key} className="flex items-center justify-between text-[9px] gap-1">
+                                            <span className="capitalize">{key}</span>
+                                            <span className="text-muted-foreground">{wr}% ({total})</span>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function LoadingSkeleton() {
   return (
     <div className="p-4 md:p-6 space-y-6 max-w-5xl mx-auto">
@@ -801,6 +1277,8 @@ export default function Backtester() {
           onCancel={() => cancelAutoRunMutation.mutate()}
         />
       )}
+
+      <WalkForwardPanel />
 
       <Card data-testid="card-new-simulation">
         <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2 p-4">

@@ -9,7 +9,7 @@ import type { User } from "@shared/schema";
 import { startSimulatedDataFeed, registerUser, unregisterUser, getScannerData, getDataSource, isLiveConnected, getSharedUserId } from "./simulator";
 import { seedDemoData } from "./seed";
 import { generateAdaptiveInsights } from "./strategy/learning";
-import { runHistoricalSimulation, getActiveSimulations, cancelSimulation, startAutoRun, getAutoRunStatus, cancelAutoRun, runCostSensitivity } from "./historicalSimulator";
+import { runHistoricalSimulation, getActiveSimulations, cancelSimulation, startAutoRun, getAutoRunStatus, cancelAutoRun, runCostSensitivity, runWalkForwardEvaluation, getWalkForwardStatus, cancelWalkForward } from "./historicalSimulator";
 
 declare global {
   namespace Express {
@@ -76,6 +76,8 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   setupAuth(app);
+
+  const walkForwardResults = new Map<string, any>();
 
   // Auth routes
   app.post("/api/register", async (req, res, next) => {
@@ -338,6 +340,51 @@ export async function registerRoutes(
       console.error("Cost sensitivity error:", err);
       res.status(500).json({ error: err.message || "Cost sensitivity analysis failed" });
     }
+  });
+
+  app.post("/api/walk-forward", requireAuth, async (req, res) => {
+    const { trainDays = 60, testDays = 10, totalWindows = 3 } = req.body;
+
+    if (trainDays < 5 || trainDays > 200) {
+      return res.status(400).json({ error: "trainDays must be between 5 and 200" });
+    }
+    if (testDays < 3 || testDays > 60) {
+      return res.status(400).json({ error: "testDays must be between 3 and 60" });
+    }
+    if (totalWindows < 1 || totalWindows > 10) {
+      return res.status(400).json({ error: "totalWindows must be between 1 and 10" });
+    }
+
+    const userId = (req.user as User).id;
+
+    runWalkForwardEvaluation(userId, trainDays, testDays, totalWindows, storage)
+      .then(result => {
+        walkForwardResults.set(userId, result);
+      })
+      .catch(err => {
+        walkForwardResults.set(userId, { error: err.message });
+      });
+
+    res.json({ started: true, message: `Walk-forward evaluation started: ${totalWindows} windows, ${trainDays} train / ${testDays} test days each` });
+  });
+
+  app.get("/api/walk-forward/status", requireAuth, (_req, res) => {
+    const status = getWalkForwardStatus();
+    res.json(status || { active: false });
+  });
+
+  app.get("/api/walk-forward/results", requireAuth, (req, res) => {
+    const userId = (req.user as User).id;
+    const result = walkForwardResults.get(userId);
+    if (!result) {
+      return res.json(null);
+    }
+    res.json(result);
+  });
+
+  app.post("/api/walk-forward/cancel", requireAuth, (_req, res) => {
+    const cancelled = cancelWalkForward();
+    res.json({ cancelled });
   });
 
   // Data source status
