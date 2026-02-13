@@ -23,24 +23,136 @@ const BACKTEST_TICKERS = [
   "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD", "JPM", "V", "NFLX", "CRM", "AVGO", "LLY"
 ];
 
+type Side = "long" | "short";
+type FillDirection = "entry" | "exit";
+type ExitKind = "STOP" | "TARGET" | "MARKET" | "EOD";
+
 const SIM_CONFIG = {
-  slippageBps: 5,
-  spreadBps: 3,
+  baseSlippageBps: 5,
+  halfSpreadBps: 3,
+  slippageK: 0.25,
   commissionPerShare: 0.005,
   minCommission: 1.0,
+  tickSize: 0.01,
 };
 
-function applySlippage(price: number, direction: "entry" | "exit", side: "long"): number {
-  const totalBps = SIM_CONFIG.slippageBps + SIM_CONFIG.spreadBps;
-  const pctAdj = totalBps / 10000;
-  if (side === "long") {
-    return direction === "entry" ? price * (1 + pctAdj) : price * (1 - pctAdj);
-  }
-  return price;
+interface CostOverrides {
+  baseSlippageBps?: number;
+  halfSpreadBps?: number;
+  slippageK?: number;
+  commissionPerShare?: number;
+  minCommission?: number;
+  tickSize?: number;
 }
 
-function calculateCommission(shares: number): number {
-  return Math.max(SIM_CONFIG.minCommission, shares * SIM_CONFIG.commissionPerShare);
+function effectiveConfig(overrides?: CostOverrides) {
+  if (!overrides) return SIM_CONFIG;
+  return { ...SIM_CONFIG, ...overrides };
+}
+
+interface SimulationBarData {
+  bars5mMap: Map<string, Candle[]>;
+  bars15mMap: Map<string, Candle[]>;
+  prevDayBars: Map<string, any>;
+  multiDayBars: Map<string, any[]>;
+}
+
+interface CostSensitivityResult {
+  baseSlippageBps: number;
+  halfSpreadBps: number;
+  trades: number;
+  winRate: number;
+  expectancyR: number;
+  profitFactor: number;
+  maxDrawdown: number;
+  netPnl: number;
+  grossPnl: number;
+  totalCosts: number;
+  isBaseline: boolean;
+}
+
+interface DryRunResult {
+  trades: number;
+  wins: number;
+  losses: number;
+  grossPnl: number;
+  netPnl: number;
+  totalCommissions: number;
+  totalSlippageCosts: number;
+  tradeRs: number[];
+  maxDrawdown: number;
+}
+
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, n));
+}
+
+function dynamicSlippageBps(price: number, atr14: number, overrides?: CostOverrides): number {
+  const cfg = effectiveConfig(overrides);
+  const ratioBps = price > 0 ? (atr14 / price) * 10000 : 0;
+  const unclamped = cfg.baseSlippageBps + cfg.slippageK * ratioBps;
+  return clamp(unclamped, cfg.baseSlippageBps, 50);
+}
+
+function roundToTick(price: number, tick: number, mode: "up" | "down"): number {
+  const q = price / tick;
+  const rq = mode === "up" ? Math.ceil(q) : Math.floor(q);
+  return Number((rq * tick).toFixed(2));
+}
+
+function roundingMode(side: Side, direction: FillDirection): "up" | "down" {
+  if (side === "long") return direction === "entry" ? "up" : "down";
+  return direction === "entry" ? "down" : "up";
+}
+
+function applyFrictionAndRound(params: {
+  rawPrice: number;
+  side: Side;
+  direction: FillDirection;
+  atr14: number;
+  costOverrides?: CostOverrides;
+}): number {
+  const { rawPrice, side, direction, atr14, costOverrides } = params;
+  const cfg = effectiveConfig(costOverrides);
+  const slipBps = dynamicSlippageBps(rawPrice, atr14, costOverrides);
+  const totalBps = slipBps + cfg.halfSpreadBps;
+  const pct = totalBps / 10000;
+  const sign = (side === "long")
+    ? (direction === "entry" ? +1 : -1)
+    : (direction === "entry" ? -1 : +1);
+  const withFriction = rawPrice * (1 + sign * pct);
+  const mode = roundingMode(side, direction);
+  return roundToTick(withFriction, cfg.tickSize, mode);
+}
+
+function rawExitFillLong(params: {
+  kind: ExitKind;
+  level?: number;
+  barOpen: number;
+  barHigh: number;
+  barLow: number;
+  barClose: number;
+}): number {
+  const { kind, level, barOpen, barHigh, barLow, barClose } = params;
+  if (kind === "MARKET" || kind === "EOD") {
+    return barOpen;
+  }
+  if (kind === "STOP") {
+    if (level == null) return barClose;
+    if (barOpen <= level) return barOpen;
+    if (barLow <= level) return level;
+    return barClose;
+  }
+  if (level == null) return barClose;
+  if (barOpen >= level) return level;
+  if (barHigh >= level) return level;
+  return barClose;
+}
+
+function calculateCommission(shares: number, overrides?: CostOverrides): number {
+  const cfg = effectiveConfig(overrides);
+  const absShares = Math.abs(shares);
+  return Math.max(cfg.minCommission, absShares * cfg.commissionPerShare);
 }
 
 interface HistoricalTickerState {
@@ -92,6 +204,7 @@ interface HistoricalTickerState {
     realizedR: number;
     riskPerShare: number;
     signalId: string | null;
+    pendingExit: { reason: string; exitType: string } | null;
   } | null;
 }
 
@@ -254,45 +367,72 @@ export async function runHistoricalSimulation(
   simulationDate: string,
   userId: string,
   storage: IStorage,
-  tickerList?: string[]
-): Promise<void> {
+  tickerList?: string[],
+  options?: {
+    costOverrides?: CostOverrides;
+    dryRun?: boolean;
+    preloadedBars?: SimulationBarData;
+  }
+): Promise<DryRunResult | void> {
   const tickers = tickerList ?? BACKTEST_TICKERS;
   const allSymbols = Array.from(new Set([...tickers, "SPY"]));
+  const isDryRun = options?.dryRun ?? false;
+  const costOverrides = options?.costOverrides;
 
   const control = { cancel: false };
-  activeSimulations.set(runId, control);
+  if (!isDryRun) {
+    activeSimulations.set(runId, control);
+  }
 
   try {
-    await storage.updateSimulationRun(runId, { status: "running", tickers });
-
-    if (!isAlpacaConfigured()) {
-      await storage.updateSimulationRun(runId, {
-        status: "failed",
-        errorMessage: "Alpaca API keys not configured. Historical data requires Alpaca integration.",
-        completedAt: new Date(),
-      });
-      return;
+    if (!isDryRun) {
+      await storage.updateSimulationRun(runId, { status: "running", tickers });
     }
 
-    log(`[HistSim] Fetching 5m bars for ${simulationDate}...`, "historical");
-    const bars5mMap = await fetchBarsForDate(allSymbols, simulationDate, "5Min");
+    let bars5mMap: Map<string, Candle[]>;
+    let bars15mMap: Map<string, Candle[]>;
+    let prevDayBars: Map<string, any>;
+    let multiDayBars: Map<string, any[]>;
 
-    log(`[HistSim] Fetching 15m bars for ${simulationDate}...`, "historical");
-    const bars15mMap = await fetchBarsForDate(allSymbols, simulationDate, "15Min");
+    if (options?.preloadedBars) {
+      bars5mMap = options.preloadedBars.bars5mMap;
+      bars15mMap = options.preloadedBars.bars15mMap;
+      prevDayBars = options.preloadedBars.prevDayBars;
+      multiDayBars = options.preloadedBars.multiDayBars;
+    } else {
+      if (!isAlpacaConfigured()) {
+        if (!isDryRun) {
+          await storage.updateSimulationRun(runId, {
+            status: "failed",
+            errorMessage: "Alpaca API keys not configured. Historical data requires Alpaca integration.",
+            completedAt: new Date(),
+          });
+        }
+        return;
+      }
 
-    log(`[HistSim] Fetching previous day bars...`, "historical");
-    const prevDayBars = await fetchDailyBarsForDate(allSymbols, simulationDate);
+      log(`[HistSim] Fetching 5m bars for ${simulationDate}...`, "historical");
+      bars5mMap = await fetchBarsForDate(allSymbols, simulationDate, "5Min");
 
-    log(`[HistSim] Fetching 20-day daily bars for RVOL/ATR baseline...`, "historical");
-    const multiDayBars = await fetchMultiDayDailyBars(allSymbols, simulationDate, 20);
+      log(`[HistSim] Fetching 15m bars for ${simulationDate}...`, "historical");
+      bars15mMap = await fetchBarsForDate(allSymbols, simulationDate, "15Min");
+
+      log(`[HistSim] Fetching previous day bars...`, "historical");
+      prevDayBars = await fetchDailyBarsForDate(allSymbols, simulationDate);
+
+      log(`[HistSim] Fetching 20-day daily bars for RVOL/ATR baseline...`, "historical");
+      multiDayBars = await fetchMultiDayDailyBars(allSymbols, simulationDate, 20);
+    }
 
     const spyBars5m = bars5mMap.get("SPY") ?? [];
     if (spyBars5m.length === 0) {
-      await storage.updateSimulationRun(runId, {
-        status: "failed",
-        errorMessage: `No SPY data available for ${simulationDate}. Markets may have been closed.`,
-        completedAt: new Date(),
-      });
+      if (!isDryRun) {
+        await storage.updateSimulationRun(runId, {
+          status: "failed",
+          errorMessage: `No SPY data available for ${simulationDate}. Markets may have been closed.`,
+          completedAt: new Date(),
+        });
+      }
       return;
     }
 
@@ -301,15 +441,19 @@ export async function runHistoricalSimulation(
       totalBars += (bars5mMap.get(t) ?? []).length;
     }
 
-    await storage.updateSimulationRun(runId, { totalBars });
+    if (!isDryRun) {
+      await storage.updateSimulationRun(runId, { totalBars });
+    }
 
     const user = await storage.getUser(userId);
     if (!user) {
-      await storage.updateSimulationRun(runId, {
-        status: "failed",
-        errorMessage: "User not found",
-        completedAt: new Date(),
-      });
+      if (!isDryRun) {
+        await storage.updateSimulationRun(runId, {
+          status: "failed",
+          errorMessage: "User not found",
+          completedAt: new Date(),
+        });
+      }
       return;
     }
 
@@ -333,14 +477,16 @@ export async function runHistoricalSimulation(
 
     for (const ticker of tickers) {
       if (control.cancel) {
-        await storage.updateSimulationRun(runId, {
-          status: "cancelled",
-          processedBars,
-          tradesGenerated,
-          lessonsGenerated,
-          totalPnl: Number(totalPnl.toFixed(2)),
-          completedAt: new Date(),
-        });
+        if (!isDryRun) {
+          await storage.updateSimulationRun(runId, {
+            status: "cancelled",
+            processedBars,
+            tradesGenerated,
+            lessonsGenerated,
+            totalPnl: Number(totalPnl.toFixed(2)),
+            completedAt: new Date(),
+          });
+        }
         return;
       }
 
@@ -471,46 +617,17 @@ export async function runHistoricalSimulation(
           const riskPerShare = trade.riskPerShare;
           const minutesSinceEntry = (i - trade.entryBarIndex) * 5;
 
-          const exitResult = checkTieredExitRules(
-            bar,
-            state.bars5m.slice(-10),
-            trade.entryPrice,
-            trade.stopPrice,
-            trade.shares,
-            trade.isPartiallyExited,
-            riskPerShare,
-            minutesSinceEntry,
-            tieredConfig.exits,
-            tieredConfig.risk,
-            state.atr14
-          );
-
-          if (exitResult.shouldExit) {
-            let exitPrice = applySlippage(exitResult.exitPrice ?? bar.close, "exit", "long");
-            let exitReason = exitResult.reason || "exit";
+          if (trade.pendingExit) {
+            const rawFill = bar.open;
+            const exitPrice = applyFrictionAndRound({ rawPrice: rawFill, side: "long", direction: "exit", atr14: state.atr14, costOverrides });
+            const exitReason = trade.pendingExit.reason;
             const shares = trade.shares;
 
-            if (exitResult.exitType === "partial") {
-              const partialShares = exitResult.partialShares ?? Math.floor(shares * (tieredConfig.exits.partialPct / 100));
-              trade.isPartiallyExited = true;
-              trade.partialExitPrice = exitPrice;
-              trade.partialExitShares = partialShares;
-              trade.runnerShares = shares - partialShares;
-              trade.stopMovedToBE = true;
-              if (exitResult.newStopPrice) {
-                trade.stopPrice = exitResult.newStopPrice;
-              } else {
-                trade.stopPrice = trade.entryPrice;
-              }
-              trade.realizedR += (exitPrice - trade.entryPrice) / riskPerShare * (partialShares / shares);
-              processedBars++;
-              continue;
-            }
-
             const grossPnl = (exitPrice - trade.entryPrice) * shares;
-            const commission = calculateCommission(shares) * 2;
+            const commission = calculateCommission(shares, costOverrides) * 2;
             const pnl = grossPnl - commission;
-            log(`[HistSim] ${ticker} slippage cost: $${(grossPnl - pnl).toFixed(2)}`, "historical");
+            const slipBps = dynamicSlippageBps(exitPrice, state.atr14, costOverrides);
+            log(`[HistSim] ${ticker} PENDING EXIT filled at open $${exitPrice.toFixed(2)} (raw $${rawFill.toFixed(2)}, slip ${slipBps.toFixed(1)}bps)`, "historical");
             const rMultiple = riskPerShare > 0 ? (exitPrice - trade.entryPrice) / riskPerShare : 0;
             const pnlPct = trade.entryPrice > 0 ? ((exitPrice - trade.entryPrice) / trade.entryPrice) * 100 : 0;
             const totalR = trade.realizedR + rMultiple;
@@ -520,7 +637,7 @@ export async function runHistoricalSimulation(
             else lossCount++;
             grossPnlTotal += grossPnl;
             totalCommissions += commission;
-            const slippageCost = trade.entryPrice * shares * (SIM_CONFIG.slippageBps + SIM_CONFIG.spreadBps) / 10000 * 2;
+            const slippageCost = trade.entryPrice * shares * (dynamicSlippageBps(trade.entryPrice, state.atr14, costOverrides) + effectiveConfig(costOverrides).halfSpreadBps) / 10000 * 2;
             totalSlippageCosts += slippageCost;
             tradeRs.push(totalR);
             tradeGrossPnls.push(grossPnl);
@@ -537,62 +654,223 @@ export async function runHistoricalSimulation(
             if (pnl > 0) { tradesByRegime[trRegime].wins++; tradesBySession[trSession].wins++; tradesByTier[trTier].wins++; }
             else { tradesByRegime[trRegime].losses++; tradesBySession[trSession].losses++; tradesByTier[trTier].losses++; }
 
-            const tradeRecord = await storage.createTrade({
-              userId,
-              signalId: trade.signalId,
-              ticker,
-              side: "long",
-              entryPrice: Number(trade.entryPrice.toFixed(2)),
-              exitPrice: Number(exitPrice.toFixed(2)),
-              stopPrice: Number(trade.originalStopPrice.toFixed(2)),
-              originalStopPrice: Number(trade.originalStopPrice.toFixed(2)),
-              target1: Number(trade.target1.toFixed(2)),
-              target2: Number(trade.target2.toFixed(2)),
-              shares,
-              pnl: Number(pnl.toFixed(2)),
-              pnlPercent: Number(pnlPct.toFixed(2)),
-              rMultiple: Number(totalR.toFixed(2)),
-              status: "closed",
-              exitReason: `[SIM] ${exitReason}`,
-              isPartiallyExited: trade.isPartiallyExited,
-              partialExitPrice: trade.partialExitPrice ? Number(trade.partialExitPrice.toFixed(2)) : null,
-              partialExitShares: trade.partialExitShares,
-              stopMovedToBE: trade.stopMovedToBE,
-              runnerShares: trade.runnerShares,
-              trailingStopPrice: trade.trailingStopPrice ? Number(trade.trailingStopPrice.toFixed(2)) : null,
-              dollarRisk: Number(trade.dollarRisk.toFixed(2)),
-              score: trade.score,
-              scoreTier: trade.scoreTier,
-              entryMode: "conservative",
-              isPowerSetup: false,
-              realizedR: Number(totalR.toFixed(2)),
-              tier: trade.tier,
-              direction: "LONG",
+            if (!isDryRun) {
+              const tradeRecord = await storage.createTrade({
+                userId,
+                signalId: trade.signalId,
+                ticker,
+                side: "long",
+                entryPrice: Number(trade.entryPrice.toFixed(2)),
+                exitPrice: Number(exitPrice.toFixed(2)),
+                stopPrice: Number(trade.originalStopPrice.toFixed(2)),
+                originalStopPrice: Number(trade.originalStopPrice.toFixed(2)),
+                target1: Number(trade.target1.toFixed(2)),
+                target2: Number(trade.target2.toFixed(2)),
+                shares,
+                pnl: Number(pnl.toFixed(2)),
+                pnlPercent: Number(pnlPct.toFixed(2)),
+                rMultiple: Number(totalR.toFixed(2)),
+                status: "closed",
+                exitReason: `[SIM] ${exitReason}`,
+                isPartiallyExited: trade.isPartiallyExited,
+                partialExitPrice: trade.partialExitPrice ? Number(trade.partialExitPrice.toFixed(2)) : null,
+                partialExitShares: trade.partialExitShares,
+                stopMovedToBE: trade.stopMovedToBE,
+                runnerShares: trade.runnerShares,
+                trailingStopPrice: trade.trailingStopPrice ? Number(trade.trailingStopPrice.toFixed(2)) : null,
+                dollarRisk: Number(trade.dollarRisk.toFixed(2)),
+                score: trade.score,
+                scoreTier: trade.scoreTier,
+                entryMode: "conservative",
+                isPowerSetup: false,
+                realizedR: Number(totalR.toFixed(2)),
+                tier: trade.tier,
+                direction: "LONG",
+              });
+              tradesGenerated++;
+
+              const signal = trade.signalId ? (await storage.getSignalById(trade.signalId)) ?? null : null;
+              const lessonResult = analyzeClosedTrade({
+                trade: { ...tradeRecord, enteredAt: new Date(bar.timestamp - minutesSinceEntry * 60000), exitedAt: new Date(bar.timestamp) },
+                signal,
+                spyAligned: regimeResult.aligned,
+                isLunchChop: state.minutesSinceOpen >= 120 && state.minutesSinceOpen <= 240,
+                session: state.minutesSinceOpen <= 90 ? "open" : state.minutesSinceOpen <= 240 ? "mid" : "power",
+              });
+              await storage.createLesson({
+                ...lessonResult,
+                exitReason: `[SIM] ${exitReason}`,
+                lessonDetail: `[Historical Sim ${simulationDate}] ${lessonResult.lessonDetail}`,
+                marketContext: { ...(lessonResult.marketContext as Record<string, any>), simulationDate },
+                durationMinutes: minutesSinceEntry,
+              });
+              lessonsGenerated++;
+            } else {
+              tradesGenerated++;
+            }
+
+            state.activeTrade = null;
+            state.signalState = "IDLE";
+            processedBars++;
+            continue;
+          }
+
+          const exitResult = checkTieredExitRules(
+            bar,
+            state.bars5m.slice(-10),
+            trade.entryPrice,
+            trade.stopPrice,
+            trade.shares,
+            trade.isPartiallyExited,
+            riskPerShare,
+            minutesSinceEntry,
+            tieredConfig.exits,
+            tieredConfig.risk,
+            state.atr14
+          );
+
+          if (exitResult.shouldExit) {
+            const shares = trade.shares;
+            const exitType = exitResult.exitType;
+
+            const isIntrabar = exitType === "stop_loss" || exitType === "target" || exitType === "partial" || exitType === "trailing_stop";
+
+            if (!isIntrabar) {
+              trade.pendingExit = { reason: exitResult.reason || "exit", exitType: exitType || "hard_exit" };
+              log(`[HistSim] ${ticker} PENDING EXIT set: ${exitResult.reason} (will fill at next bar open)`, "historical");
+              processedBars++;
+              continue;
+            }
+
+            const targetLevel = trade.isPartiallyExited
+              ? trade.entryPrice + riskPerShare * (tieredConfig.exits.finalTargetR ?? 2.5)
+              : trade.entryPrice + riskPerShare * (tieredConfig.exits.partialAtR ?? 1.5);
+            let effectiveExitType = exitType;
+            let effectiveExitKind: ExitKind = exitType === "stop_loss" || exitType === "trailing_stop" ? "STOP" : "TARGET";
+
+            if (bar.low <= trade.stopPrice && bar.high >= targetLevel && effectiveExitKind === "TARGET") {
+              effectiveExitKind = "STOP";
+              effectiveExitType = "stop_loss";
+              log(`[HistSim] ${ticker} AMBIGUOUS BAR: low $${bar.low.toFixed(2)} <= stop $${trade.stopPrice.toFixed(2)} AND high $${bar.high.toFixed(2)} >= target $${targetLevel.toFixed(2)} → assuming stop hit first`, "historical");
+            }
+
+            const rawFill = rawExitFillLong({
+              kind: effectiveExitKind,
+              level: effectiveExitKind === "STOP" ? trade.stopPrice : targetLevel,
+              barOpen: bar.open,
+              barHigh: bar.high,
+              barLow: bar.low,
+              barClose: bar.close,
             });
 
-            tradesGenerated++;
+            if (exitType === "partial" && effectiveExitKind !== "STOP") {
+              const partialExitPrice = applyFrictionAndRound({ rawPrice: rawFill, side: "long", direction: "exit", atr14: state.atr14, costOverrides });
+              const partialShares = exitResult.partialShares ?? Math.floor(shares * (tieredConfig.exits.partialPct / 100));
+              trade.isPartiallyExited = true;
+              trade.partialExitPrice = partialExitPrice;
+              trade.partialExitShares = partialShares;
+              trade.runnerShares = shares - partialShares;
+              trade.stopMovedToBE = true;
+              if (exitResult.newStopPrice) {
+                trade.stopPrice = exitResult.newStopPrice;
+              } else {
+                trade.stopPrice = trade.entryPrice;
+              }
+              trade.realizedR += (partialExitPrice - trade.entryPrice) / riskPerShare * (partialShares / shares);
+              processedBars++;
+              continue;
+            }
 
-            const signal = trade.signalId ? (await storage.getSignalById(trade.signalId)) ?? null : null;
-            const lessonResult = analyzeClosedTrade({
-              trade: {
-                ...tradeRecord,
-                enteredAt: new Date(bar.timestamp - minutesSinceEntry * 60000),
-                exitedAt: new Date(bar.timestamp),
-              },
-              signal,
-              spyAligned: regimeResult.aligned,
-              isLunchChop: state.minutesSinceOpen >= 120 && state.minutesSinceOpen <= 240,
-              session: state.minutesSinceOpen <= 90 ? "open" : state.minutesSinceOpen <= 240 ? "mid" : "power",
-            });
+            const exitPrice = applyFrictionAndRound({ rawPrice: rawFill, side: "long", direction: "exit", atr14: state.atr14, costOverrides });
+            const exitReason = effectiveExitType === "stop_loss" && exitType !== "stop_loss"
+              ? `${exitResult.reason || "exit"} [ambiguous bar → stop]`
+              : (exitResult.reason || "exit");
 
-            await storage.createLesson({
-              ...lessonResult,
-              exitReason: `[SIM] ${exitReason}`,
-              lessonDetail: `[Historical Sim ${simulationDate}] ${lessonResult.lessonDetail}`,
-              marketContext: { ...(lessonResult.marketContext as Record<string, any>), simulationDate },
-              durationMinutes: minutesSinceEntry,
-            });
-            lessonsGenerated++;
+            const grossPnl = (exitPrice - trade.entryPrice) * shares;
+            const commission = calculateCommission(shares, costOverrides) * 2;
+            const pnl = grossPnl - commission;
+            const slipBps = dynamicSlippageBps(exitPrice, state.atr14, costOverrides);
+            log(`[HistSim] ${ticker} EXIT ${effectiveExitKind} at $${exitPrice.toFixed(2)} (raw $${rawFill.toFixed(2)}, slip ${slipBps.toFixed(1)}bps, commission $${commission.toFixed(2)})`, "historical");
+            const rMultiple = riskPerShare > 0 ? (exitPrice - trade.entryPrice) / riskPerShare : 0;
+            const pnlPct = trade.entryPrice > 0 ? ((exitPrice - trade.entryPrice) / trade.entryPrice) * 100 : 0;
+            const totalR = trade.realizedR + rMultiple;
+
+            totalPnl += pnl;
+            if (pnl > 0) winCount++;
+            else lossCount++;
+            grossPnlTotal += grossPnl;
+            totalCommissions += commission;
+            const slippageCost = trade.entryPrice * shares * (dynamicSlippageBps(trade.entryPrice, state.atr14, costOverrides) + effectiveConfig(costOverrides).halfSpreadBps) / 10000 * 2;
+            totalSlippageCosts += slippageCost;
+            tradeRs.push(totalR);
+            tradeGrossPnls.push(grossPnl);
+            tradeNetPnls.push(pnl);
+            const trSession = state.minutesSinceOpen <= 90 ? "open" : state.minutesSinceOpen <= 240 ? "mid" : "power";
+            const trRegime = regimeResult.aligned ? "trending" : regimeResult.chopping ? "choppy" : "neutral";
+            const trTier = trade.tier;
+            if (!tradesByRegime[trRegime]) tradesByRegime[trRegime] = { wins: 0, losses: 0, pnl: 0 };
+            if (!tradesBySession[trSession]) tradesBySession[trSession] = { wins: 0, losses: 0, pnl: 0 };
+            if (!tradesByTier[trTier]) tradesByTier[trTier] = { wins: 0, losses: 0, pnl: 0 };
+            tradesByRegime[trRegime].pnl += pnl;
+            tradesBySession[trSession].pnl += pnl;
+            tradesByTier[trTier].pnl += pnl;
+            if (pnl > 0) { tradesByRegime[trRegime].wins++; tradesBySession[trSession].wins++; tradesByTier[trTier].wins++; }
+            else { tradesByRegime[trRegime].losses++; tradesBySession[trSession].losses++; tradesByTier[trTier].losses++; }
+
+            if (!isDryRun) {
+              const tradeRecord = await storage.createTrade({
+                userId,
+                signalId: trade.signalId,
+                ticker,
+                side: "long",
+                entryPrice: Number(trade.entryPrice.toFixed(2)),
+                exitPrice: Number(exitPrice.toFixed(2)),
+                stopPrice: Number(trade.originalStopPrice.toFixed(2)),
+                originalStopPrice: Number(trade.originalStopPrice.toFixed(2)),
+                target1: Number(trade.target1.toFixed(2)),
+                target2: Number(trade.target2.toFixed(2)),
+                shares,
+                pnl: Number(pnl.toFixed(2)),
+                pnlPercent: Number(pnlPct.toFixed(2)),
+                rMultiple: Number(totalR.toFixed(2)),
+                status: "closed",
+                exitReason: `[SIM] ${exitReason}`,
+                isPartiallyExited: trade.isPartiallyExited,
+                partialExitPrice: trade.partialExitPrice ? Number(trade.partialExitPrice.toFixed(2)) : null,
+                partialExitShares: trade.partialExitShares,
+                stopMovedToBE: trade.stopMovedToBE,
+                runnerShares: trade.runnerShares,
+                trailingStopPrice: trade.trailingStopPrice ? Number(trade.trailingStopPrice.toFixed(2)) : null,
+                dollarRisk: Number(trade.dollarRisk.toFixed(2)),
+                score: trade.score,
+                scoreTier: trade.scoreTier,
+                entryMode: "conservative",
+                isPowerSetup: false,
+                realizedR: Number(totalR.toFixed(2)),
+                tier: trade.tier,
+                direction: "LONG",
+              });
+              tradesGenerated++;
+
+              const signal = trade.signalId ? (await storage.getSignalById(trade.signalId)) ?? null : null;
+              const lessonResult = analyzeClosedTrade({
+                trade: { ...tradeRecord, enteredAt: new Date(bar.timestamp - minutesSinceEntry * 60000), exitedAt: new Date(bar.timestamp) },
+                signal,
+                spyAligned: regimeResult.aligned,
+                isLunchChop: state.minutesSinceOpen >= 120 && state.minutesSinceOpen <= 240,
+                session: state.minutesSinceOpen <= 90 ? "open" : state.minutesSinceOpen <= 240 ? "mid" : "power",
+              });
+              await storage.createLesson({
+                ...lessonResult,
+                exitReason: `[SIM] ${exitReason}`,
+                lessonDetail: `[Historical Sim ${simulationDate}] ${lessonResult.lessonDetail}`,
+                marketContext: { ...(lessonResult.marketContext as Record<string, any>), simulationDate },
+                durationMinutes: minutesSinceEntry,
+              });
+              lessonsGenerated++;
+            } else {
+              tradesGenerated++;
+            }
 
             state.activeTrade = null;
             state.signalState = "IDLE";
@@ -642,33 +920,35 @@ export async function runHistoricalSimulation(
                 state.retestBarsSinceBreakout = 0;
                 state.lastBreakoutBarIndex = i;
 
-                await storage.createSignal({
-                  userId,
-                  ticker,
-                  state: "BREAKOUT",
-                  resistanceLevel: Number(state.resistanceLevel.toFixed(2)),
-                  currentPrice: Number(state.price.toFixed(2)),
-                  breakoutPrice: Number(state.price.toFixed(2)),
-                  breakoutVolume: bar.volume,
-                  trendConfirmed: biasResult.aligned,
-                  volumeConfirmed: true,
-                  atrExpansion: atrRatio >= 1.1,
-                  timeframe: "5m",
-                  rvol: Number(state.rvol.toFixed(2)),
-                  atrValue: Number(state.atr14.toFixed(4)),
-                  rejectionCount: 2,
-                  score: Math.round(volRatio * 30 + atrRatio * 20),
-                  scoreTier: tier,
-                  marketRegime: regimeResult.chopping ? "choppy" : regimeResult.aligned ? "aligned" : "misaligned",
-                  spyAligned: regimeResult.aligned,
-                  volatilityGatePassed: volGateResult.passes,
-                  scoreBreakdown: { volRatio, atrRatio, tier, simDate: simulationDate },
-                  relStrengthVsSpy: 0,
-                  isPowerSetup: false,
-                  tier,
-                  direction: "LONG",
-                  notes: `[SIM ${simulationDate}] Tier ${tier} breakout above $${state.resistanceLevel.toFixed(2)}`,
-                });
+                if (!isDryRun) {
+                  await storage.createSignal({
+                    userId,
+                    ticker,
+                    state: "BREAKOUT",
+                    resistanceLevel: Number(state.resistanceLevel.toFixed(2)),
+                    currentPrice: Number(state.price.toFixed(2)),
+                    breakoutPrice: Number(state.price.toFixed(2)),
+                    breakoutVolume: bar.volume,
+                    trendConfirmed: biasResult.aligned,
+                    volumeConfirmed: true,
+                    atrExpansion: atrRatio >= 1.1,
+                    timeframe: "5m",
+                    rvol: Number(state.rvol.toFixed(2)),
+                    atrValue: Number(state.atr14.toFixed(4)),
+                    rejectionCount: 2,
+                    score: Math.round(volRatio * 30 + atrRatio * 20),
+                    scoreTier: tier,
+                    marketRegime: regimeResult.chopping ? "choppy" : regimeResult.aligned ? "aligned" : "misaligned",
+                    spyAligned: regimeResult.aligned,
+                    volatilityGatePassed: volGateResult.passes,
+                    scoreBreakdown: { volRatio, atrRatio, tier, simDate: simulationDate },
+                    relStrengthVsSpy: 0,
+                    isPowerSetup: false,
+                    tier,
+                    direction: "LONG",
+                    notes: `[SIM ${simulationDate}] Tier ${tier} breakout above $${state.resistanceLevel.toFixed(2)}`,
+                  });
+                }
 
                 log(`[HistSim] ${ticker} BREAKOUT at $${state.price.toFixed(2)} (Tier ${tier}) on ${simulationDate}`, "historical");
               }
@@ -693,7 +973,7 @@ export async function runHistoricalSimulation(
 
             if (retestResult.valid && retestResult.entryPrice && retestResult.stopPrice) {
               diag.retestValid++;
-              const entryPrice = applySlippage(retestResult.entryPrice, "entry", "long");
+              const entryPrice = applyFrictionAndRound({ rawPrice: retestResult.entryPrice, side: "long", direction: "entry", atr14: state.atr14, costOverrides });
               const stopPrice = retestResult.stopPrice;
               const riskPerShare = Math.abs(entryPrice - stopPrice);
 
@@ -787,6 +1067,7 @@ export async function runHistoricalSimulation(
                   realizedR: 0,
                   riskPerShare,
                   signalId: null,
+                  pendingExit: null,
                 };
 
                 log(`[HistSim] ${ticker} ENTRY at $${entryPrice.toFixed(2)} stop=$${stopPrice.toFixed(2)} (Tier ${state.selectedTier}) on ${simulationDate}`, "historical");
@@ -802,7 +1083,7 @@ export async function runHistoricalSimulation(
 
         processedBars++;
 
-        if (processedBars % 20 === 0) {
+        if (!isDryRun && processedBars % 20 === 0) {
           await storage.updateSimulationRun(runId, {
             processedBars,
             tradesGenerated,
@@ -817,11 +1098,15 @@ export async function runHistoricalSimulation(
       if (state.activeTrade) {
         const lastBar = tickerBars5m[tickerBars5m.length - 1];
         const trade = state.activeTrade;
-        const exitPrice = applySlippage(lastBar.close, "exit", "long");
+        const eodExitReason = trade.pendingExit
+          ? `${trade.pendingExit.reason} [EOD close - no next bar]`
+          : "End of day close";
+        const exitPrice = applyFrictionAndRound({ rawPrice: lastBar.close, side: "long", direction: "exit", atr14: state.atr14, costOverrides });
         const grossPnl = (exitPrice - trade.entryPrice) * trade.shares;
-        const commission = calculateCommission(trade.shares) * 2;
+        const commission = calculateCommission(trade.shares, costOverrides) * 2;
         const pnl = grossPnl - commission;
-        log(`[HistSim] ${ticker} slippage cost: $${(grossPnl - pnl).toFixed(2)}`, "historical");
+        const slipBps2 = dynamicSlippageBps(exitPrice, state.atr14, costOverrides);
+        log(`[HistSim] ${ticker} EOD EXIT at $${exitPrice.toFixed(2)} (raw $${lastBar.close.toFixed(2)}, slip ${slipBps2.toFixed(1)}bps, commission $${commission.toFixed(2)})`, "historical");
         const rMultiple = trade.riskPerShare > 0 ? (exitPrice - trade.entryPrice) / trade.riskPerShare : 0;
         const totalR = trade.realizedR + rMultiple;
         totalPnl += pnl;
@@ -829,7 +1114,7 @@ export async function runHistoricalSimulation(
         else lossCount++;
         grossPnlTotal += grossPnl;
         totalCommissions += commission;
-        const slippageCost2 = trade.entryPrice * trade.shares * (SIM_CONFIG.slippageBps + SIM_CONFIG.spreadBps) / 10000 * 2;
+        const slippageCost2 = trade.entryPrice * trade.shares * (dynamicSlippageBps(trade.entryPrice, state.atr14, costOverrides) + effectiveConfig(costOverrides).halfSpreadBps) / 10000 * 2;
         totalSlippageCosts += slippageCost2;
         tradeRs.push(totalR);
         tradeGrossPnls.push(grossPnl);
@@ -845,61 +1130,65 @@ export async function runHistoricalSimulation(
         if (pnl > 0) { tradesByRegime[trRegime2].wins++; tradesBySession["power"].wins++; tradesByTier[trTier2].wins++; }
         else { tradesByRegime[trRegime2].losses++; tradesBySession["power"].losses++; tradesByTier[trTier2].losses++; }
 
-        const tradeRecord = await storage.createTrade({
-          userId,
-          signalId: trade.signalId,
-          ticker,
-          side: "long",
-          entryPrice: Number(trade.entryPrice.toFixed(2)),
-          exitPrice: Number(exitPrice.toFixed(2)),
-          stopPrice: Number(trade.originalStopPrice.toFixed(2)),
-          originalStopPrice: Number(trade.originalStopPrice.toFixed(2)),
-          target1: Number(trade.target1.toFixed(2)),
-          target2: Number(trade.target2.toFixed(2)),
-          shares: trade.shares,
-          pnl: Number(pnl.toFixed(2)),
-          pnlPercent: Number(((exitPrice - trade.entryPrice) / trade.entryPrice * 100).toFixed(2)),
-          rMultiple: Number(totalR.toFixed(2)),
-          status: "closed",
-          exitReason: "[SIM] End of day close",
-          isPartiallyExited: trade.isPartiallyExited,
-          partialExitPrice: trade.partialExitPrice ? Number(trade.partialExitPrice.toFixed(2)) : null,
-          partialExitShares: trade.partialExitShares,
-          stopMovedToBE: trade.stopMovedToBE,
-          runnerShares: trade.runnerShares,
-          trailingStopPrice: trade.trailingStopPrice ? Number(trade.trailingStopPrice.toFixed(2)) : null,
-          dollarRisk: Number(trade.dollarRisk.toFixed(2)),
-          score: trade.score,
-          scoreTier: trade.scoreTier,
-          entryMode: "conservative",
-          isPowerSetup: false,
-          realizedR: Number(totalR.toFixed(2)),
-          tier: trade.tier,
-          direction: "LONG",
-        });
+        if (!isDryRun) {
+          const tradeRecord = await storage.createTrade({
+            userId,
+            signalId: trade.signalId,
+            ticker,
+            side: "long",
+            entryPrice: Number(trade.entryPrice.toFixed(2)),
+            exitPrice: Number(exitPrice.toFixed(2)),
+            stopPrice: Number(trade.originalStopPrice.toFixed(2)),
+            originalStopPrice: Number(trade.originalStopPrice.toFixed(2)),
+            target1: Number(trade.target1.toFixed(2)),
+            target2: Number(trade.target2.toFixed(2)),
+            shares: trade.shares,
+            pnl: Number(pnl.toFixed(2)),
+            pnlPercent: Number(((exitPrice - trade.entryPrice) / trade.entryPrice * 100).toFixed(2)),
+            rMultiple: Number(totalR.toFixed(2)),
+            status: "closed",
+            exitReason: `[SIM] ${eodExitReason}`,
+            isPartiallyExited: trade.isPartiallyExited,
+            partialExitPrice: trade.partialExitPrice ? Number(trade.partialExitPrice.toFixed(2)) : null,
+            partialExitShares: trade.partialExitShares,
+            stopMovedToBE: trade.stopMovedToBE,
+            runnerShares: trade.runnerShares,
+            trailingStopPrice: trade.trailingStopPrice ? Number(trade.trailingStopPrice.toFixed(2)) : null,
+            dollarRisk: Number(trade.dollarRisk.toFixed(2)),
+            score: trade.score,
+            scoreTier: trade.scoreTier,
+            entryMode: "conservative",
+            isPowerSetup: false,
+            realizedR: Number(totalR.toFixed(2)),
+            tier: trade.tier,
+            direction: "LONG",
+          });
 
-        tradesGenerated++;
+          tradesGenerated++;
 
-        const lessonResult = analyzeClosedTrade({
-          trade: {
-            ...tradeRecord,
-            enteredAt: new Date(lastBar.timestamp - (tickerBars5m.length - trade.entryBarIndex) * 5 * 60000),
-            exitedAt: new Date(lastBar.timestamp),
-          },
-          signal: null,
-          spyAligned: lastRegimeResult.aligned,
-          isLunchChop: false,
-          session: "power",
-        });
+          const lessonResult = analyzeClosedTrade({
+            trade: {
+              ...tradeRecord,
+              enteredAt: new Date(lastBar.timestamp - (tickerBars5m.length - trade.entryBarIndex) * 5 * 60000),
+              exitedAt: new Date(lastBar.timestamp),
+            },
+            signal: null,
+            spyAligned: lastRegimeResult.aligned,
+            isLunchChop: false,
+            session: "power",
+          });
 
-        await storage.createLesson({
-          ...lessonResult,
-          exitReason: "[SIM] End of day close",
-          lessonDetail: `[Historical Sim ${simulationDate}] ${lessonResult.lessonDetail}`,
-          marketContext: { ...(lessonResult.marketContext as Record<string, any>), simulationDate },
-          durationMinutes: (tickerBars5m.length - trade.entryBarIndex) * 5,
-        });
-        lessonsGenerated++;
+          await storage.createLesson({
+            ...lessonResult,
+            exitReason: `[SIM] ${eodExitReason}`,
+            lessonDetail: `[Historical Sim ${simulationDate}] ${lessonResult.lessonDetail}`,
+            marketContext: { ...(lessonResult.marketContext as Record<string, any>), simulationDate },
+            durationMinutes: (tickerBars5m.length - trade.entryBarIndex) * 5,
+          });
+          lessonsGenerated++;
+        } else {
+          tradesGenerated++;
+        }
 
         state.activeTrade = null;
       }
@@ -956,6 +1245,20 @@ export async function runHistoricalSimulation(
       if (dd > maxDD) maxDD = dd;
     }
 
+    if (isDryRun) {
+      return {
+        trades: totalTrades,
+        wins: winCount,
+        losses: lossCount,
+        grossPnl: grossPnlTotal,
+        netPnl: totalPnl,
+        totalCommissions,
+        totalSlippageCosts,
+        tradeRs,
+        maxDrawdown: maxDD,
+      } as DryRunResult;
+    }
+
     const avgPnl = tradeNetPnls.length > 0 ? tradeNetPnls.reduce((a, b) => a + b, 0) / tradeNetPnls.length : 0;
     const stdPnl = tradeNetPnls.length > 1 ? Math.sqrt(tradeNetPnls.reduce((s, p) => s + (p - avgPnl) ** 2, 0) / (tradeNetPnls.length - 1)) : 0;
     const sharpe = stdPnl > 0 ? (avgPnl / stdPnl) * Math.sqrt(252) : 0;
@@ -997,12 +1300,86 @@ export async function runHistoricalSimulation(
     log(`[HistSim] Completed simulation for ${simulationDate}: ${tradesGenerated} trades, ${lessonsGenerated} lessons, P&L: $${totalPnl.toFixed(2)}`, "historical");
   } catch (error: any) {
     log(`[HistSim] Error: ${error.message}`, "historical");
-    await storage.updateSimulationRun(runId, {
-      status: "failed",
-      errorMessage: error.message,
-      completedAt: new Date(),
-    });
+    if (!isDryRun) {
+      await storage.updateSimulationRun(runId, {
+        status: "failed",
+        errorMessage: error.message,
+        completedAt: new Date(),
+      });
+    }
   } finally {
-    activeSimulations.delete(runId);
+    if (!isDryRun) {
+      activeSimulations.delete(runId);
+    }
   }
+}
+
+export async function runCostSensitivity(
+  runId: string,
+  userId: string,
+  storage: IStorage
+): Promise<{ grid: CostSensitivityResult[] } | { error: string }> {
+  const run = await storage.getSimulationRun(runId);
+  if (!run) return { error: "Simulation run not found" };
+  if (run.status !== "completed") return { error: "Simulation must be completed before running cost sensitivity" };
+
+  const simulationDate = run.simulationDate;
+  const tickers = (run.tickers as string[]) || BACKTEST_TICKERS;
+  const allSymbols = Array.from(new Set([...tickers, "SPY"]));
+
+  const bars5mMap = await fetchBarsForDate(allSymbols, simulationDate, "5Min");
+  const bars15mMap = await fetchBarsForDate(allSymbols, simulationDate, "15Min");
+  const prevDayBars = await fetchDailyBarsForDate(allSymbols, simulationDate);
+  const multiDayBars = await fetchMultiDayDailyBars(allSymbols, simulationDate, 20);
+  const preloadedBars: SimulationBarData = { bars5mMap, bars15mMap, prevDayBars, multiDayBars };
+
+  const slippageOptions = [0, 5, 10];
+  const spreadOptions = [1, 3, 5];
+  const grid: CostSensitivityResult[] = [];
+
+  for (const slip of slippageOptions) {
+    for (const spread of spreadOptions) {
+      const costOverrides: CostOverrides = {
+        baseSlippageBps: slip,
+        halfSpreadBps: spread,
+      };
+      const isBaseline = slip === SIM_CONFIG.baseSlippageBps && spread === SIM_CONFIG.halfSpreadBps;
+
+      const result = await runHistoricalSimulation(
+        `${runId}-cost-${slip}-${spread}`,
+        simulationDate,
+        userId,
+        storage,
+        tickers,
+        { costOverrides, dryRun: true, preloadedBars }
+      ) as DryRunResult;
+
+      if (result) {
+        const totalTrades = result.wins + result.losses;
+        const winRate = totalTrades > 0 ? result.wins / totalTrades : 0;
+        const avgR = result.tradeRs.length > 0 ? result.tradeRs.reduce((a, b) => a + b, 0) / result.tradeRs.length : 0;
+        const winPnls = result.tradeRs.filter(r => r > 0);
+        const lossPnls = result.tradeRs.filter(r => r <= 0);
+        const avgWin = winPnls.length > 0 ? winPnls.reduce((a, b) => a + b, 0) / winPnls.length : 0;
+        const avgLoss = lossPnls.length > 0 ? Math.abs(lossPnls.reduce((a, b) => a + b, 0) / lossPnls.length) : 0;
+        const profitFactor = avgLoss > 0 ? (avgWin * winPnls.length) / (avgLoss * lossPnls.length) : avgWin > 0 ? Infinity : 0;
+
+        grid.push({
+          baseSlippageBps: slip,
+          halfSpreadBps: spread,
+          trades: totalTrades,
+          winRate: Number((winRate * 100).toFixed(1)),
+          expectancyR: Number(avgR.toFixed(3)),
+          profitFactor: Number(profitFactor.toFixed(2)),
+          maxDrawdown: Number(result.maxDrawdown.toFixed(2)),
+          netPnl: Number(result.netPnl.toFixed(2)),
+          grossPnl: Number(result.grossPnl.toFixed(2)),
+          totalCosts: Number((result.totalCommissions + result.totalSlippageCosts).toFixed(2)),
+          isBaseline,
+        });
+      }
+    }
+  }
+
+  return { grid };
 }

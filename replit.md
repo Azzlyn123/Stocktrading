@@ -118,12 +118,39 @@ shared/
 - buildConfigFromUser in strategy/index.ts maps user settings to StrategyConfig
 - Storage has both per-user methods (getSignals, getTrades, etc.) and global methods (getAllSignals, getAllTrades, etc.) - routes use global methods
 
-## Recent Changes (Feb 12, 2026)
-- **Honest Backtester**: Added realistic cost modeling to historical simulator
-  - Slippage model: 5 bps slippage + 3 bps spread = 8 bps adverse on all entry/exit fills
+## Recent Changes (Feb 13, 2026)
+- **Production-Grade Friction Model**: Complete rewrite of fill/cost modeling
+  - `applyFrictionAndRound`: tick rounding (round against yourself), dynamic slippage, short-side support
+  - `roundToTick`: long entry rounds up, long exit rounds down; short inverted (always adverse)
+  - Dynamic slippage: `slippageBps = baseBps + k*(ATR/price)*10000`, clamped [baseBps, 50bps], slippageK=0.25
+  - SIM_CONFIG: baseSlippageBps=5, halfSpreadBps=3, slippageK=0.25, tickSize=0.01, commissionPerShare=0.005, minCommission=1.0
+- **Gap-Through Exit Fills**: `rawExitFillLong` function with gap-aware OHLC logic
+  - STOP gaps through (barOpen <= stopLevel): fill at bar.open (worse price)
+  - TARGET gaps past (barOpen >= targetLevel): fill at target (conservative, no gap gift)
+  - MARKET/EOD: fill at bar.open
+- **Ambiguous Bar Handling**: When both stop AND target crossed in same 5m bar
+  - Long: barLow <= stop AND barHigh >= target → assume stop hit first (conservative)
+  - Documented, deterministic, prevents unrealistic "both hit" wins
+- **Pending Exit Mechanism**: Close-based exits (time_stop, hard_exit) defer fill to next bar open
+  - `activeTrade.pendingExit` field stores decision, fills at next bar's open
+  - Intrabar exits (stop_loss, target, partial) still fill immediately with gap-aware logic
+  - EOD: if pendingExit exists when session ends, fills at session close (documented)
+- **Execution Timing Contract**:
+  - Intrabar exits (STOP/TARGET): fill same bar with gap-aware OHLC rules
+  - Close-based decisions (TIME_STOP/HARD_EXIT): fill next bar open via pendingExit
+  - Entry: fills at retest bar close (documented assumption - requires fast execution in live)
+  - EOD close: fills at session close (documented)
+- **Cost Sensitivity Analysis**: POST /api/simulations/:id/cost-sensitivity
+  - Re-runs completed sim with 9 cost combos (slippage 0/5/10 x spread 1/3/5 bps)
+  - Uses isDryRun mode (no DB writes) + preloadedBars (no re-fetching API data)
+  - CostOverrides passed as args, global SIM_CONFIG never mutated
+  - Returns grid: trades, winRate, expectancyR, profitFactor, maxDrawdown, netPnl, grossPnl, totalCosts, isBaseline
+- **Cost Sensitivity UI**: Button on completed RunCards in backtester page
+  - 3x3 grid with green/red coloring based on edge survival (expectancyR > 0)
+  - Baseline combo highlighted with ring, legend for edge survives/breaks down
+- **Previous Changes (Feb 12, 2026)**:
+  - Walk-forward lesson isolation: learning penalty only uses lessons from dates BEFORE current simulation date
   - Commission model: $0.005/share with $1 minimum, deducted from P&L (entry + exit)
-  - Walk-forward lesson isolation: learning penalty only uses lessons from dates BEFORE current simulation date (prevents training on test set)
-  - SIM_CONFIG constant in historicalSimulator.ts controls all cost parameters
 - **Benchmark Comparison**: Each simulation run calculates and stores:
   - Buy & hold: $10k per ticker, open→close for the day
   - EMA baseline: 5/20 EMA crossover strategy for comparison

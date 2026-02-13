@@ -124,6 +124,91 @@ function BreakdownTable({ title, data }: { title: string; data: Record<string, {
   );
 }
 
+function CostSensitivityGrid({ grid }: { grid: any[] }) {
+  const slippageValues = [0, 5, 10];
+  const spreadValues = [1, 3, 5];
+
+  const getCell = (slip: number, spread: number) => {
+    return grid.find((g: any) => g.baseSlippageBps === slip && g.halfSpreadBps === spread);
+  };
+
+  return (
+    <div className="mt-3 space-y-2" data-testid="cost-sensitivity-grid">
+      <div className="flex items-center gap-1 mb-1.5">
+        <BarChart3 className="w-3 h-3 text-muted-foreground" />
+        <p className="text-[10px] text-muted-foreground font-medium">Cost Sensitivity Analysis</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[10px]">
+          <thead>
+            <tr>
+              <th className="text-left text-muted-foreground font-medium p-1.5">Slip \ Spread</th>
+              {spreadValues.map((s) => (
+                <th key={s} className="text-center text-muted-foreground font-medium p-1.5">
+                  {s} bps
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {slippageValues.map((slip) => (
+              <tr key={slip}>
+                <td className="text-muted-foreground font-medium p-1.5">{slip} bps</td>
+                {spreadValues.map((spread) => {
+                  const cell = getCell(slip, spread);
+                  if (!cell) return <td key={spread} className="p-1.5 text-center">--</td>;
+                  const edgeSurvives = cell.expectancyR > 0;
+                  return (
+                    <td
+                      key={spread}
+                      className={`p-1.5 text-center rounded-md ${
+                        cell.isBaseline
+                          ? "ring-1 ring-primary/50"
+                          : ""
+                      } ${
+                        edgeSurvives
+                          ? "bg-emerald-500/10 dark:bg-emerald-500/10"
+                          : "bg-red-500/10 dark:bg-red-500/10"
+                      }`}
+                      data-testid={`cell-cost-${slip}-${spread}`}
+                    >
+                      <div className="space-y-0.5">
+                        <div className={`font-semibold ${edgeSurvives ? "text-emerald-500" : "text-red-500"}`}>
+                          {cell.expectancyR > 0 ? "+" : ""}{cell.expectancyR.toFixed(2)}R
+                        </div>
+                        <div className="text-muted-foreground">
+                          {cell.trades}t | {cell.winRate.toFixed(0)}%
+                        </div>
+                        <div className={cell.netPnl >= 0 ? "text-emerald-500" : "text-red-500"}>
+                          {cell.netPnl >= 0 ? "+" : ""}{formatCurrency(cell.netPnl)}
+                        </div>
+                        <div className="text-muted-foreground">
+                          PF {cell.profitFactor === Infinity ? "\u221E" : cell.profitFactor.toFixed(1)}
+                        </div>
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex items-center gap-3 text-[9px] text-muted-foreground mt-1 flex-wrap">
+        <span className="flex items-center gap-1">
+          <div className="w-2 h-2 rounded-sm bg-emerald-500/20" /> Edge survives
+        </span>
+        <span className="flex items-center gap-1">
+          <div className="w-2 h-2 rounded-sm bg-red-500/20" /> Edge breaks down
+        </span>
+        <span className="flex items-center gap-1">
+          <div className="w-2 h-2 rounded-sm ring-1 ring-primary/50" /> Baseline
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function AutoRunPanel({ status, onCancel }: { status: AutoRunStatus | null; onCancel: () => void }) {
   if (!status) return null;
 
@@ -242,6 +327,19 @@ function AutoRunPanel({ status, onCancel }: { status: AutoRunStatus | null; onCa
 function RunCard({ run, onCancel }: { run: SimulationRun; onCancel: (id: string) => void }) {
   const isRunning = run.status === "running";
   const [expanded, setExpanded] = useState(false);
+  const [costSensitivity, setCostSensitivity] = useState<any[] | null>(null);
+  const [showCostSensitivity, setShowCostSensitivity] = useState(false);
+
+  const costSensitivityMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/simulations/${run.id}/cost-sensitivity`);
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      setCostSensitivity(data.grid);
+      setShowCostSensitivity(true);
+    },
+  });
 
   const benchmarks = run.benchmarks as any;
   const metrics = run.metrics as any;
@@ -434,6 +532,37 @@ function RunCard({ run, onCancel }: { run: SimulationRun; onCancel: (id: string)
                 <ShieldCheck className="w-3.5 h-3.5 text-primary shrink-0" />
                 <span>AI skipped {skippedCount} setups</span>
               </div>
+            )}
+
+            <div className="flex items-center gap-2 mt-3 flex-wrap">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (costSensitivity) {
+                    setShowCostSensitivity(!showCostSensitivity);
+                  } else {
+                    costSensitivityMutation.mutate();
+                  }
+                }}
+                disabled={costSensitivityMutation.isPending}
+                data-testid={`button-cost-sensitivity-${run.id}`}
+              >
+                {costSensitivityMutation.isPending ? (
+                  <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <BarChart3 className="w-3.5 h-3.5 mr-1.5" />
+                )}
+                {costSensitivityMutation.isPending
+                  ? "Running..."
+                  : showCostSensitivity
+                  ? "Hide Cost Sensitivity"
+                  : "Run Cost Sensitivity"}
+              </Button>
+            </div>
+
+            {showCostSensitivity && costSensitivity && (
+              <CostSensitivityGrid grid={costSensitivity} />
             )}
           </>
         )}

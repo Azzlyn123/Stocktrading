@@ -9,7 +9,7 @@ import type { User } from "@shared/schema";
 import { startSimulatedDataFeed, registerUser, unregisterUser, getScannerData, getDataSource, isLiveConnected, getSharedUserId } from "./simulator";
 import { seedDemoData } from "./seed";
 import { generateAdaptiveInsights } from "./strategy/learning";
-import { runHistoricalSimulation, getActiveSimulations, cancelSimulation, startAutoRun, getAutoRunStatus, cancelAutoRun } from "./historicalSimulator";
+import { runHistoricalSimulation, getActiveSimulations, cancelSimulation, startAutoRun, getAutoRunStatus, cancelAutoRun, runCostSensitivity } from "./historicalSimulator";
 
 declare global {
   namespace Express {
@@ -324,6 +324,20 @@ export async function registerRoutes(
     const cancelled = cancelAutoRun();
     if (!cancelled) return res.status(404).json({ error: "No active auto-run to cancel" });
     res.json({ success: true });
+  });
+
+  app.post("/api/simulations/:id/cost-sensitivity", requireAuth, async (req, res) => {
+    try {
+      const user = req.user as User;
+      const result = await runCostSensitivity(req.params.id, user.id, storage);
+      if ("error" in result) {
+        return res.status(400).json(result);
+      }
+      res.json(result);
+    } catch (err: any) {
+      console.error("Cost sensitivity error:", err);
+      res.status(500).json({ error: err.message || "Cost sensitivity analysis failed" });
+    }
   });
 
   // Data source status
