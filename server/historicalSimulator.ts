@@ -26,6 +26,51 @@ import {
   fetchDailyBarsForDate,
   fetchMultiDayDailyBars,
 } from "./alpaca";
+import type { TradeRecord, ExitReasonType } from "./analytics/tradeAnalytics";
+import { addTrade } from "./analytics/tradeStore";
+
+function classifyExitReason(reason: string): ExitReasonType {
+  const r = reason.toLowerCase();
+  if (r.includes("stop hit") || r.includes("stop_loss") || r.includes("structure break") || r.includes("trailing stop")) return "STOP_LOSS";
+  if (r.includes("time stop") || r.includes("time_stop")) return "TIME_STOP";
+  if (r.includes("hard exit") || r.includes("hard_exit") || r.includes("red candle")) return "HARD_EXIT";
+  if (r.includes("target") || r.includes("final target")) return "TARGET_2";
+  if (r.includes("end of day") || r.includes("eod")) return "EOD";
+  if (r.includes("manual")) return "MANUAL";
+  return "UNKNOWN";
+}
+
+function buildAnalyticsRecord(
+  trade: NonNullable<TickerState["activeTrade"]>,
+  ticker: string,
+  exitPrice: number,
+  exitReason: string,
+  exitBarTimestamp: number,
+  entryBarTimestamp: number,
+  totalR: number,
+  pnl: number,
+  tradeId?: string,
+): TradeRecord {
+  const riskDist = Math.abs(trade.entryPrice - trade.stopPrice);
+  return {
+    id: tradeId || `${ticker}-${Date.now()}`,
+    symbol: ticker,
+    tier: trade.tier as "A" | "B" | "C",
+    direction: trade.direction as "LONG" | "SHORT",
+    entryTime: new Date(entryBarTimestamp).toISOString(),
+    exitTime: new Date(exitBarTimestamp).toISOString(),
+    entryPrice: Number(trade.entryPrice.toFixed(2)),
+    stopPrice: Number(trade.stopPrice.toFixed(2)),
+    exitPrice: Number(exitPrice.toFixed(2)),
+    qty: trade.shares,
+    riskDollars: riskDist === 0 ? 0 : riskDist * trade.shares,
+    rMultiple: totalR,
+    pnlDollars: pnl,
+    durationMinutes: (exitBarTimestamp - entryBarTimestamp) / 60000,
+    exitReason: classifyExitReason(exitReason),
+    notes: riskDist === 0 ? "invalid risk distance" : undefined,
+  };
+}
 
 function isTickAligned(price: number, tick = 0.01, eps = 1e-6){
   const q = price / tick;
@@ -952,6 +997,13 @@ export async function runHistoricalSimulation(
               tradesByTier[trTier].losses++;
             }
 
+            addTrade(buildAnalyticsRecord(
+              trade, ticker, exitPrice, exitReason,
+              bar.timestamp,
+              tickerBars5m[trade.entryBarIndex]?.timestamp ?? bar.timestamp,
+              totalR, pnl,
+            ));
+
             if (!isDryRun) {
               const tradeRecord = await storage.createTrade({
                 userId,
@@ -1351,6 +1403,13 @@ export async function runHistoricalSimulation(
               tradesBySession[trSession].losses++;
               tradesByTier[trTier].losses++;
             }
+
+            addTrade(buildAnalyticsRecord(
+              trade, ticker, exitPrice, exitReason,
+              bar.timestamp,
+              tickerBars5m[trade.entryBarIndex]?.timestamp ?? bar.timestamp,
+              totalR, pnl,
+            ));
 
             if (!isDryRun) {
               const tradeRecord = await storage.createTrade({
@@ -1897,6 +1956,13 @@ export async function runHistoricalSimulation(
           tradesBySession["power"].losses++;
           tradesByTier[trTier2].losses++;
         }
+
+        addTrade(buildAnalyticsRecord(
+          trade, ticker, exitPrice, eodExitReason,
+          lastBar.timestamp,
+          tickerBars5m[trade.entryBarIndex]?.timestamp ?? lastBar.timestamp,
+          totalR, pnl,
+        ));
 
         if (!isDryRun) {
           const tradeRecord = await storage.createTrade({
