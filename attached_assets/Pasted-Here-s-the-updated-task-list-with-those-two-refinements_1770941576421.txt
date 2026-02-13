@@ -1,0 +1,118 @@
+Here’s the updated task list with those two refinements woven in cleanly (and with the “decision bar vs fill bar” timing made explicit so you don’t accidentally re-introduce optimism later).
+
+Updated task list (production-grade + honest sim)
+
+Task 0: Define execution timing rules (one-time “contract”)
+
+Goal: eliminate accidental peeking forever.
+	•	Intrabar exits (STOP / TARGET):
+Triggered by OHLC crossing within the bar → fill uses gap-aware rules on the same bar (open/level).
+	•	Close-based decisions (TIME STOP / HARD EXIT / RULE-BASED “market” exits):
+Decision uses bar close → fill occurs next bar open (or next available open), never same bar close.
+	•	EOD close:
+If you force-flat at end of session: fill at session close only if you truly have that print available; otherwise treat as next open. (Most sims accept session close here—just document it.)
+
+⸻
+
+Task 1: Upgrade friction model + tick rounding
+
+Replace applySlippage with applyFrictionAndRound including:
+	•	roundToTick
+	•	roundingMode (round against you)
+	•	short-side support + correct sign logic
+	•	rename spreadBps → halfSpreadBps
+	•	update all fill call sites (entry/exit/EOD)
+
+⸻
+
+Task 2: Dynamic slippage with clamping
+
+Implement:
+	•	slippageBps = base + k * (ATR/price) * 10000
+	•	clamp to [baseBps, 50]
+	•	pass atr14 into friction at every fill moment
+	•	start slippageK = 0.25 (configurable)
+
+⸻
+
+Task 3: Gap-through stop/target fills (raw fill before friction)
+
+Implement gap-aware raw fill:
+	•	Stops: if open gaps through stop → fill at open (worse)
+	•	Targets: if open gaps past target → fill at target (conservative, no “gap gift”)
+
+Apply to both long + short.
+
+⸻
+
+Task 4: Handle ambiguous bars (stop AND target crossed)
+
+On bar-based data (5-min), when both are crossed in same bar:
+	•	Assume stop first (conservative)
+(Long: low <= stop and high >= target → stop fill logic wins; short mirrors)
+
+Document this explicitly.
+
+⸻
+
+Task 5: Market/time-stop/hard-exit fill timing fix
+
+For exit reasons that are decided using the current bar’s close (or any close-derived rule):
+	•	set pendingExit = true at decision time
+	•	execute fill on next bar open using raw barOpen
+	•	then apply friction + rounding
+
+This prevents “decide at close, fill at close” optimism.
+
+⸻
+
+Task 6: Cost sensitivity report endpoint (9 combos)
+
+Create:
+POST /api/simulations/:id/cost-sensitivity
+
+Re-run same sim inputs with:
+	•	slippage: 0 / 5 / 10
+	•	halfSpread: 1 / 3 / 5
+
+Return table fields:
+	•	slippageBps, halfSpreadBps
+	•	trades, win rate, expectancyR, PF
+	•	net P&L, total costs, max DD
+
+Important: cost params passed as args; don’t mutate global config.
+
+⸻
+
+Task 7: Cost sensitivity UI
+
+Button on completed run cards:
+	•	“Run Cost Sensitivity”
+	•	show 3x3 grid + highlight baseline combo
+	•	optionally show “edge survives?” indicator (expectancyR > 0 after costs)
+
+⸻
+
+Task 8: Verify + document assumptions
+
+Audit + document in replit.md:
+	•	friction only at fills
+	•	tick rounding rules
+	•	dynamic slippage formula + clamp
+	•	gap-through rules
+	•	ambiguous bar rule (stop first)
+	•	market/time-stop fill timing (next open)
+	•	any remaining “fill at retest bar close” assumption and why it’s acceptable (or switch to next-open if you want to be stricter)
+
+⸻
+
+Tiny implementation tip (prevents bugs)
+
+Add a single function that converts an ExitDecision → (fillBarIndex, rawFillPrice) so all exits go through the same timing+gap logic. That’s how you avoid “one exit path still fills at close.”
+
+⸻
+
+If you want, paste your current ExitDecision / exitResult structure (fields + how you compute it). I can map it directly into:
+	•	decideExit(bar) -> decision
+	•	executeExit(nextBar, decision) -> rawFill
+…so the timing + ambiguous bar logic is impossible to mess up.
