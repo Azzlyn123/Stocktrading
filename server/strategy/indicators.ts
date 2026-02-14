@@ -36,26 +36,30 @@ export function calculateATR(candles: Candle[], period: number): number {
 
 export function checkATRExpansion(
   candles: Candle[],
-  atrPeriod: number,
+  _atrPeriod: number,
   recentWindow: number,
   priorWindow: number,
   minRatio: number,
 ): { expanding: boolean; ratio: number } {
-  const minBars = recentWindow + priorWindow + atrPeriod + 1;
-  if (candles.length < minBars) return { expanding: false, ratio: 0 };
+  if (candles.length < recentWindow + priorWindow + 1) return { expanding: false, ratio: 0 };
 
-  const atrValues: number[] = [];
-  for (let end = atrPeriod + 1; end <= candles.length; end++) {
-    atrValues.push(calculateATR(candles.slice(0, end), atrPeriod));
+  const trValues: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const tr = Math.max(
+      candles[i].high - candles[i].low,
+      Math.abs(candles[i].high - candles[i - 1].close),
+      Math.abs(candles[i].low - candles[i - 1].close),
+    );
+    trValues.push(tr);
   }
 
-  if (atrValues.length < recentWindow + priorWindow) return { expanding: false, ratio: 0 };
+  if (trValues.length < recentWindow + priorWindow) return { expanding: false, ratio: 0 };
 
-  const recentATRs = atrValues.slice(-recentWindow);
-  const priorATRs = atrValues.slice(-(recentWindow + priorWindow), -recentWindow);
+  const recentTRs = trValues.slice(-recentWindow);
+  const priorTRs = trValues.slice(-(recentWindow + priorWindow), -recentWindow);
 
-  const recentAvg = recentATRs.reduce((a, b) => a + b, 0) / recentATRs.length;
-  const priorAvg = priorATRs.reduce((a, b) => a + b, 0) / priorATRs.length;
+  const recentAvg = recentTRs.reduce((a, b) => a + b, 0) / recentTRs.length;
+  const priorAvg = priorTRs.reduce((a, b) => a + b, 0) / priorTRs.length;
 
   const ratio = priorAvg > 0 ? recentAvg / priorAvg : 0;
   return { expanding: ratio >= minRatio, ratio };

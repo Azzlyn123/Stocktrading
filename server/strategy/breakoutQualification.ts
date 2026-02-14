@@ -96,10 +96,11 @@ export function checkTieredBreakout(
   }
 
   const allBarsForExpansion = [...recentBars, currentCandle];
-  const atrExpansion = checkATRExpansion(allBarsForExpansion, strategyConfig.atrLen, 3, 5, 1.08);
+  const atrExpansionMinRatio = 1.08;
+  const atrExpansion = checkATRExpansion(allBarsForExpansion, strategyConfig.atrLen, 3, 5, atrExpansionMinRatio);
   const atrExpandingOk = atrExpansion.expanding;
   if (!atrExpandingOk) {
-    reasons.push(`ATR not expanding: recent/prior ratio ${atrExpansion.ratio.toFixed(2)} < 1.08 required`);
+    reasons.push(`ATR not expanding: recent/prior ratio ${atrExpansion.ratio.toFixed(2)} < ${atrExpansionMinRatio} required`);
   }
 
   return {
