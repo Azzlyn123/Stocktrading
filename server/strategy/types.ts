@@ -181,12 +181,15 @@ export interface RetestResult {
 export interface MarketRegimeResult {
   aligned: boolean;
   chopping: boolean;
+  expanding: boolean;
   sizeMultiplier: number;
   reasons: string[];
   metrics: {
     spyAboveVwap: boolean;
     spyTrendAligned: boolean;
     vwapCrossCount: number;
+    vwapSlopePositive: boolean;
+    expandingDetails: string;
   };
 }
 

@@ -178,6 +178,14 @@ export function countVWAPCrosses(
   return crosses;
 }
 
+export function vwapSlope(candles: Candle[], lookbackBars: number): number {
+  if (candles.length < lookbackBars + 1) return 0;
+  const endVwap = calculateVWAP(candles);
+  const startVwap = calculateVWAP(candles.slice(0, candles.length - lookbackBars));
+  if (startVwap === 0) return 0;
+  return (endVwap - startVwap) / startVwap;
+}
+
 export function dailyATRpct(candles: Candle[], period: number): number {
   const atr = calculateATR(candles, period);
   if (candles.length === 0) return 0;

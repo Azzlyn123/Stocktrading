@@ -1764,6 +1764,29 @@ export async function runHistoricalSimulation(
               retestResult.stopPrice
             ) {
               diag.retestValid++;
+
+              if (!regimeResult.expanding) {
+                log(
+                  `[HistSim] ${ticker} BLOCKED by index expansion gate: ${regimeResult.reasons.join("; ")} | metrics: ${regimeResult.metrics.expandingDetails}`,
+                  "historical",
+                );
+                incrementAutoRunSkipped();
+                skippedSetups.push({
+                  ticker,
+                  score: 0,
+                  penalty: 0,
+                  reason: `Index expansion gate: ${regimeResult.reasons.filter(r => !r.includes("expanding:")).join(", ")}`,
+                  barIndex: i,
+                  price: bar.close,
+                });
+                state.signalState = "IDLE";
+                state.selectedTier = null;
+                state.breakoutCandle = null;
+                state.retestBars = [];
+                processedBars++;
+                continue;
+              }
+
               const entryTraceResult = applyFrictionAndRoundWithTrace({
                 rawPrice: retestResult.entryPrice,
                 side: "long",
