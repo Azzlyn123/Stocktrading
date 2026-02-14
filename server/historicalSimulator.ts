@@ -416,6 +416,7 @@ interface HistoricalTickerState {
     mfe30minR: number;
     mfe30minPrice: number;
     breakevenLocked: boolean;
+    validated: boolean;
   } | null;
 }
 
@@ -916,6 +917,14 @@ export async function runHistoricalSimulation(
               trade.mfe30minPrice = bar.high;
             }
 
+            if (!trade.validated && trade.mfeR >= 0.3) {
+              trade.validated = true;
+              log(
+                `[HistSim] ${ticker} VALIDATED: MFE hit +${trade.mfeR.toFixed(2)}R within ${(i - trade.entryBarIndex)} bars`,
+                "historical",
+              );
+            }
+
             if (!trade.breakevenLocked && trade.mfeR >= 0.5) {
               const newStop = Math.max(trade.stopPrice, trade.entryPrice);
               log(
@@ -924,6 +933,22 @@ export async function runHistoricalSimulation(
               );
               trade.stopPrice = newStop;
               trade.breakevenLocked = true;
+            }
+
+            const barsSinceEntry = i - trade.entryBarIndex;
+            if (!trade.validated && barsSinceEntry >= 3) {
+              const currentR = (bar.close - trade.entryPrice) / riskPerShare;
+              trade.pendingExit = {
+                reason: `Validation failed: not +0.3R within ${barsSinceEntry} bars (current ${currentR >= 0 ? "+" : ""}${currentR.toFixed(2)}R)`,
+                exitType: "time_stop",
+                decisionBarIndex: i,
+              };
+              log(
+                `[HistSim] ${ticker} VALIDATION FAIL: ${barsSinceEntry} bars, current ${currentR >= 0 ? "+" : ""}${currentR.toFixed(2)}R < +0.3R → scratch exit at next bar open`,
+                "historical",
+              );
+              processedBars++;
+              continue;
             }
           }
 
@@ -1165,6 +1190,9 @@ export async function runHistoricalSimulation(
             continue;
           }
 
+          const effectiveRisk = trade.validated
+            ? { ...tieredConfig.risk, timeStopMinutes: 0 }
+            : tieredConfig.risk;
           const exitResult = checkTieredExitRules(
             bar,
             state.bars5m.slice(-10),
@@ -1175,7 +1203,7 @@ export async function runHistoricalSimulation(
             riskPerShare,
             minutesSinceEntry,
             tieredConfig.exits,
-            tieredConfig.risk,
+            effectiveRisk,
             state.atr14,
           );
 
@@ -1909,6 +1937,7 @@ export async function runHistoricalSimulation(
                   mfe30minR: 0,
                   mfe30minPrice: entryPrice,
                   breakevenLocked: false,
+                  validated: false,
                 };
 
                 log(
