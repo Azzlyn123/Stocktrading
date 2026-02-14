@@ -1,5 +1,15 @@
 import { eq, and, desc } from "drizzle-orm";
 import { db } from "./db";
+import { addTrade } from "./analytics/tradeStore";
+import {
+  computeRMultiple,
+  computePnLDollars,
+  computeDurationMinutes,
+  classifyExitReason,
+  classifySession,
+  type TradeRecord,
+  type MarketRegime,
+} from "./analytics/tradeAnalytics";
 import {
   users,
   watchlistItems,
@@ -179,8 +189,75 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateTrade(id: string, updates: Partial<PaperTrade>): Promise<PaperTrade | undefined> {
+    let previousStatus: string | null = null;
+    if (updates.status === "closed") {
+      const [existing] = await db.select({ status: paperTrades.status }).from(paperTrades).where(eq(paperTrades.id, id));
+      previousStatus = existing?.status ?? null;
+    }
+
     const [result] = await db.update(paperTrades).set(updates).where(eq(paperTrades.id, id)).returning();
+    if (!result) return undefined;
+
+    if (updates.status === "closed" && previousStatus !== "closed" && result.exitPrice != null) {
+      this.recordAnalytics(result).catch(() => {});
+    }
+
     return result;
+  }
+
+  private async recordAnalytics(trade: PaperTrade): Promise<void> {
+    try {
+      const direction = (trade.direction === "SHORT" ? "SHORT" : "LONG") as "LONG" | "SHORT";
+      const entryTime = trade.enteredAt?.toISOString() ?? new Date().toISOString();
+      const exitTime = trade.exitedAt?.toISOString() ?? new Date().toISOString();
+      const exitPrice = trade.exitPrice!;
+
+      const rMultiple = computeRMultiple(direction, trade.entryPrice, trade.stopPrice, exitPrice);
+      const pnlDollars = computePnLDollars(direction, trade.entryPrice, exitPrice, trade.shares);
+      const durationMinutes = computeDurationMinutes(entryTime, exitTime);
+      const riskDollars = Math.abs(trade.entryPrice - trade.stopPrice) * trade.shares;
+
+      let regime: MarketRegime = "unknown";
+      let spyAligned = false;
+      let volatilityGatePassed = false;
+
+      if (trade.signalId) {
+        const signal = await this.getSignalById(trade.signalId);
+        if (signal) {
+          regime = (signal.marketRegime as MarketRegime) ?? "unknown";
+          spyAligned = signal.spyAligned ?? false;
+          volatilityGatePassed = signal.volatilityGatePassed ?? false;
+        }
+      }
+
+      const record: TradeRecord = {
+        id: trade.id,
+        symbol: trade.ticker,
+        tier: (trade.scoreTier ?? trade.tier ?? "C") as "A" | "B" | "C",
+        direction,
+        entryTime,
+        exitTime,
+        entryPrice: trade.entryPrice,
+        stopPrice: trade.stopPrice,
+        exitPrice,
+        qty: trade.shares,
+        riskDollars,
+        rMultiple,
+        pnlDollars,
+        durationMinutes,
+        exitReason: classifyExitReason(trade.exitReason),
+        score: trade.score ?? 0,
+        marketRegime: regime,
+        session: classifySession(exitTime),
+        spyAligned,
+        volatilityGatePassed,
+        entryMode: trade.entryMode ?? null,
+        isPowerSetup: trade.isPowerSetup ?? false,
+      };
+
+      addTrade(record);
+    } catch {
+    }
   }
 
   async getSummaries(userId: string): Promise<DailySummary[]> {
