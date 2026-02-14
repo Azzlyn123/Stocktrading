@@ -1,0 +1,147 @@
+Yes — Build It Exactly As You Proposed
+
+Your outline is correct. I’ll refine it slightly so we don’t accidentally recreate ORF mistakes.
+
+⸻
+
+Step 1 — Gap Detector (Don’t Overcomplicate)
+
+Universe
+
+Keep the same 15 mega-cap names.
+
+Gap Definition
+
+GapUp:
+(Open - PriorClose) / PriorClose ≥ 1.5\%
+
+GapDown:
+(Open - PriorClose) / PriorClose ≤ -1.5\%
+
+Start with 1.5%.
+Later you can test 1.0% and 2.0%.
+
+Confirmation Filters (Keep Minimal)
+	•	Relative Volume at 5-min ≥ 1.5x 20-day average
+	•	No earnings within 24h (optional)
+
+No RS filter.
+No regime filter.
+No VWAP logic yet.
+
+Keep it clean.
+
+⸻
+
+Step 2 — Opening Range Consolidation
+
+Important:
+
+Do NOT enter at open.
+That’s where slippage kills you.
+
+Wait for:
+
+First 30 minutes (9:30–10:00) to define OR.
+
+If gap up:
+	•	Enter long on break of OR high
+If gap down:
+	•	Enter short on break of OR low
+
+This aligns with:
+
+Institutional continuation, not fade.
+
+⸻
+
+Step 3 — Risk Model (Where Edge Lives)
+
+Stop:
+	•	Below OR low (for longs)
+	•	Above OR high (for shorts)
+
+Target:
+No fixed 1.5R.
+
+Instead test:
+
+Variant A:
+	•	Hold until close (3:45 PM)
+
+Variant B:
+	•	Hold 1–3 days
+	•	Exit on daily close below prior day low (for longs)
+
+Gap continuation often spills into next day.
+
+This is where real R happens.
+
+⸻
+
+Step 4 — Simulation Adjustments
+
+Because this is no longer pure intraday:
+	•	Ensure overnight gap slippage modeling exists
+	•	Use daily + 5-min hybrid data
+	•	Model overnight holds realistically (no fake intraday fills)
+
+⸻
+
+What We Expect To See
+
+If edge exists:
+	•	Win rate 35–55%
+	•	Avg R positive
+	•	MFE distribution with real fat tail
+	•	Occasional 3R–5R runners
+	•	Friction becomes small relative to move
+
+If median MFE is still <0.5R?
+
+Then mega-caps are currently too mean-reverting even post-gap.
+
+But statistically, gap continuation tends to produce actual imbalance.
+
+⸻
+
+Important — Do Not Add 10 Filters
+
+Don’t repeat ORF mistake.
+
+Start simple:
+
+Gap size
+RVOL
+OR breakout
+Hold
+
+Then diagnose.
+
+⸻
+
+Why I’m Confident This Is Worth Testing
+
+Because you are no longer trying to extract edge from:
+
+0.3R microstructure noise.
+
+You’re targeting:
+
+1.5%–5% repricing events.
+
+That’s real movement.
+
+⸻
+
+So Yes
+
+Build:
+
+Overnight Gap + First 30-min Breakout Continuation.
+
+Once built, Phase A it on February.
+
+Then walk-forward Dec–Feb.
+
+Your infra is now good enough to find truth quickly.
