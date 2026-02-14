@@ -446,12 +446,18 @@ export async function registerRoutes(
     });
   }
 
-  app.get("/api/analytics/daily-report", requireAuth, (_req, res) => {
-    const { getTodayTrades } = require("./analytics/tradeStore");
+  app.get("/api/analytics/daily-report", requireAuth, (req, res) => {
+    const { getTodayTrades, getTradesByDate, getAllTrades, getTradeCount } = require("./analytics/tradeStore");
     const { buildDailySummary, formatDailySummary } = require("./analytics/tradeAnalytics");
-    const trades = getTodayTrades();
+    const dateParam = req.query.date as string | undefined;
+    const trades = dateParam ? getTradesByDate(dateParam) : getTodayTrades();
     const summary = buildDailySummary(trades);
-    res.json({ summary, formatted: formatDailySummary(summary) });
+    res.json({
+      summary,
+      formatted: formatDailySummary(summary),
+      trades,
+      totalTracked: getTradeCount(),
+    });
   });
 
   // Start simulated market data feed

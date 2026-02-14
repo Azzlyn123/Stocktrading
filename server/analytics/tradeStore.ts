@@ -13,13 +13,9 @@ export function addTrade(trade: TradeRecord): boolean {
 
 export function getTodayTrades(): TradeRecord[] {
   const today = new Date().toISOString().split("T")[0];
-  const result: TradeRecord[] = [];
-  for (const t of tradeMap.values()) {
-    if (t.exitTime.startsWith(today)) {
-      result.push(t);
-    }
-  }
-  return result.sort((a, b) => new Date(a.exitTime).getTime() - new Date(b.exitTime).getTime());
+  return Array.from(tradeMap.values())
+    .filter((t) => t.exitTime.startsWith(today))
+    .sort((a, b) => new Date(a.exitTime).getTime() - new Date(b.exitTime).getTime());
 }
 
 export function getAllTrades(): TradeRecord[] {
@@ -29,13 +25,9 @@ export function getAllTrades(): TradeRecord[] {
 }
 
 export function getTradesByDate(dateISO: string): TradeRecord[] {
-  const result: TradeRecord[] = [];
-  for (const t of tradeMap.values()) {
-    if (t.exitTime.startsWith(dateISO)) {
-      result.push(t);
-    }
-  }
-  return result.sort((a, b) => new Date(a.exitTime).getTime() - new Date(b.exitTime).getTime());
+  return Array.from(tradeMap.values())
+    .filter((t) => t.exitTime.startsWith(dateISO))
+    .sort((a, b) => new Date(a.exitTime).getTime() - new Date(b.exitTime).getTime());
 }
 
 export function resetAllTrades(): void {

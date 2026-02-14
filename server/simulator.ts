@@ -43,18 +43,6 @@ import {
   type LiveQuoteUpdate,
 } from "./alpaca";
 
-import { addTrade } from "../client/src/analytics/tradeStore";
-import { printDailyReport } from "../client/src/analytics/report";
-
-import {
-  computeRMultiple,
-  computePnLDollars,
-  computeDurationMinutes,
-  TradeRecord,
-  ExitReason,
-} from "../client/src/analytics/tradeAnalytics";
-import crypto from "crypto";
-
 interface SimulatedTicker {
   ticker: string;
   name: string;
@@ -981,9 +969,9 @@ export async function startSimulatedDataFeed(
   let tickCount = 0;
 
   setInterval(async () => {
-    try {
-      tickCount++;
-      const priceUpdates: any[] = [];
+    tickCount++;
+    const priceUpdates: any[] = [];
+
     const spyState = priceStates.get("SPY");
     const spyBars5m = spyState?.bars5m ?? [];
 
@@ -991,7 +979,6 @@ export async function startSimulatedDataFeed(
       spyBars5m,
       DEFAULT_STRATEGY_CONFIG.marketRegime,
     );
-   
 
     const volGateResult = checkVolatilityGate(
       spyBars5m,
@@ -1865,116 +1852,60 @@ export async function startSimulatedDataFeed(
                           ((exitPrice - trade.entryPrice) / trade.entryPrice) *
                           100,
                       });
-                      try {
-                        // Map your internal trade object to analytics TradeRecord
-                        try {
-                          // ===== Analytics logging (final close only) =====
-                          const direction = (trade.direction ?? "LONG") as "LONG" | "SHORT";
-
-                          // Times: prefer trade.enteredAt if it exists, otherwise now
-                          const entryTimeISO =
-                            (trade.enteredAt instanceof Date
-                              ? trade.enteredAt.toISOString()
-                              : typeof trade.enteredAt === "string"
-                              ? trade.enteredAt
-                              : undefined) ?? new Date().toISOString();
-
-                          // Exit time: we literally set exitedAt: new Date() above
-                          const exitTimeISO = new Date().toISOString();
-
-                          // Stop price: prefer trade.stopPrice if present; otherwise reconstruct from riskPerShare
-                          const stopPrice =
-                            typeof trade.stopPrice === "number"
-                              ? trade.stopPrice
-                              : direction === "LONG"
-                              ? trade.entryPrice - riskPerShare
-                              : trade.entryPrice + riskPerShare;
-
-                          // Exit reason: your system stores exitDecision.exitType
-                          const exitReason = (exitDecision?.exitType as ExitReason) ?? "UNKNOWN";
-
-                          const { r, notes } = computeRMultiple(direction, trade.entryPrice, stopPrice, exitPrice);
-
-                          const qty = trade.shares ?? 0;
-                          const pnlDollars = computePnLDollars(direction, trade.entryPrice, exitPrice, qty);
-                          const durationMinutes = computeDurationMinutes(entryTimeISO, exitTimeISO);
-                          const riskDollars = Math.abs(trade.entryPrice - stopPrice) * qty;
-
-                          const rec: TradeRecord = {
-                            id: crypto.randomUUID?.() ?? crypto.randomBytes(16).toString("hex"),
-                            symbol: trade.ticker,
-                            tier: (trade.scoreTier ?? trade.tier ?? "B") as "A" | "B" | "C",
-                            direction,
-                            entryTime: entryTimeISO,
-                            exitTime: exitTimeISO,
-                            entryPrice: trade.entryPrice,
-                            stopPrice,
-                            exitPrice,
-                            qty,
-                            riskDollars,
-                            rMultiple: r,
-                            pnlDollars,
-                            durationMinutes,
-                            exitReason,
-                            notes: notes ?? `tradeId=${trade.id}`,
-                          };
-
-                        try {
-                          addTrade(rec);
-                          printDailyReport();
-                          console.log("[ANALYTICS] logged:", rec.symbol, rec.rMultiple.toFixed(2), rec.exitReason);
-                        } catch (e) {
-                          console.warn("[ANALYTICS] failed to log trade:", e);
-                        }
-
                       await storage.upsertDailySummary(
                         userId,
                         pnl,
                         pnl >= 0,
                         (user.accountSize ?? 100000) + pnl,
                       );
-                    
-                          try {
-                            const updatedTrade = (await storage.getAllTrades()).find((t) => t.id === trade.id);
-
-                            if (updatedTrade) {
-                              const matchingSignal = trade.signalId
-                                ? await storage.getSignalById(trade.signalId)
-                                : null;
-
-                              const lesson = analyzeClosedTrade({
-                                trade: updatedTrade,
-                                signal: matchingSignal ?? null,
-                                spyAligned: regimeResult.aligned,
-                                isLunchChop: isLunchChop(),
-                                session: getCurrentSession(TIERED_CONFIG),
-                              });
-
-                              await storage.createLesson(lesson);
-
-                              log(
-                                `[${state.ticker}] LESSON: ${lesson.outcomeCategory} | tags=${(lesson.lessonTags ?? []).join(",")} | ${lesson.lessonDetail?.substring(0, 80)}`,
-                                "scanner"
-                              );
-                            }
-                          } catch (lessonErr) {
-                            log(`[${state.ticker}] Lesson error: ${lessonErr}`, "scanner");
-                          }
-                          
-                          if (exitDecision.newStopPrice) {
+                    }
+                    try {
+                      const updatedTrade = (await storage.getAllTrades()).find(
+                        (t) => t.id === trade.id,
+                      );
+                      if (updatedTrade) {
+                        const matchingSignal = trade.signalId
+                          ? await storage.getSignalById(trade.signalId)
+                          : null;
+                        const lesson = analyzeClosedTrade({
+                          trade: updatedTrade,
+                          signal: matchingSignal ?? null,
+                          spyAligned: regimeResult.aligned,
+                          isLunchChop: isLunchChop(),
+                          session: getCurrentSession(TIERED_CONFIG),
+                        });
+                        await storage.createLesson(lesson);
+                        log(
+                          `[${state.ticker}] LESSON: ${lesson.outcomeCategory} | tags=${(lesson.lessonTags ?? []).join(",")} | ${lesson.lessonDetail?.substring(0, 80)}`,
+                          "scanner",
+                        );
+                      }
+                    } catch (lessonErr) {
+                      log(
+                        `[${state.ticker}] Lesson error: ${lessonErr}`,
+                        "scanner",
+                      );
+                    }
+                  }
+                } else if (exitDecision.newStopPrice) {
                   await storage.updateTrade(trade.id, {
                     stopPrice: exitDecision.newStopPrice,
                   });
                 }
-                          broadcast("price_update", priceUpdates);
+              }
+            }
+          } catch (e) {}
+        }
+      }
+    }
 
-                          broadcast("market_status", {
-                            isOpen: marketIsOpen,
-                            isLunchChop: isLunchChop(),
-                            spyAligned: regimeResult.aligned,
-                            spyChopping: regimeResult.chopping,
-                            currentSession: getCurrentSession(TIERED_CONFIG),
-                          });           
-                        } 2000);
-                      }
-
+    broadcast("price_update", priceUpdates);
+    broadcast("market_status", {
+      isOpen: marketIsOpen,
+      isLunchChop: isLunchChop(),
+      spyAligned: regimeResult.aligned,
+      spyChopping: regimeResult.chopping,
+      currentSession: getCurrentSession(TIERED_CONFIG),
+    });
+  }, 2000);
+}
