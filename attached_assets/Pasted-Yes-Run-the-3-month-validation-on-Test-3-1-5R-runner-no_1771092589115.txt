@@ -1,0 +1,130 @@
+Yes.
+Run the 3-month validation on Test 3 (1.5R runner / no VWAP partial).
+
+But we’re going to do it like professionals, not gamblers.
+
+You’ve already proven something important:
+
+2.0R was structurally misaligned
+
+1.25R was too small (payoff compression)
+
+1.5R is regime-aligned
+
+You moved expectancy from -0.45R → -0.15R without curve-fitting.
+
+That’s real signal.
+
+Now we answer the only question that matters:
+
+Is this structurally negative, or just slightly misaligned?
+
+🔬 How to Run the 3-Month Validation Properly
+
+Do NOT just run it and look at total PnL.
+
+Run it with structure diagnostics.
+
+1️⃣ Required Metrics (Combined + Per Symbol)
+
+Print:
+
+Total trades
+
+Trades/day
+
+Win rate
+
+Avg R
+
+Avg win
+
+Avg loss
+
+Profit factor
+
+Max drawdown
+
+% trades that hit 1R
+
+% trades that hit full 1.5R
+
+That last two are critical.
+
+If:
+
+1R hits frequently
+
+1.5R hits occasionally but consistently
+
+Then edge may exist but is thin.
+
+2️⃣ Add One More Diagnostic (Important)
+
+Track:
+
+Avg MFE (Maximum Favorable Excursion) in R
+
+This tells us:
+
+Are trades reaching 1.2–1.6R but failing to close there?
+
+If average MFE = 1.6R
+but closed R = 0.3R
+
+Then execution structure can be improved.
+
+If average MFE = 0.9R
+then the regime simply doesn’t offer expansion.
+
+Huge difference.
+
+3️⃣ What You’re Hoping To See
+
+Over 3 months:
+
+Even something like:
+
+Avg R = -0.03 to +0.05
+
+PF > 1.05
+
+Drawdown contained
+
+No single symbol carrying all performance
+
+…means you’re close to edge.
+
+If it stays around -0.15R over 3 months?
+
+Then ORF in mega-caps is likely structurally negative under realistic fills.
+
+And that’s valuable information.
+
+🧠 Important Psychological Note
+
+You’ve moved from:
+
+“This works?”
+to
+
+“How do we align structure with volatility regime?”
+
+That’s advanced thinking.
+
+Most traders never get there.
+
+🚨 One More Thing Before You Run It
+
+Because you confirmed BE scratches cost ~-0.08R to -0.12R:
+
+Add a micro-buffer:
+
+Instead of BE = entry,
+Set stop = entry + 0.02R in your favor after 1R partial.
+
+That offsets slippage bleed slightly.
+
+Tiny tweak.
+No curve fitting.
+Pure execution realism.

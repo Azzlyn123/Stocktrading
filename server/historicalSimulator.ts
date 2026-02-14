@@ -709,6 +709,9 @@ export async function runHistoricalSimulation(
     let totalCommissions = 0;
     let totalSlippageCosts = 0;
     const tradeRs: number[] = [];
+    const tradeMFEs: number[] = [];
+    const tradeHit1R: number[] = [];
+    const tradeHitTarget: number[] = [];
     const tradeGrossPnls: number[] = [];
     const tradeNetPnls: number[] = [];
     const tradesByRegime: Record<
@@ -3025,6 +3028,9 @@ export async function runReversionSimulation(
     let totalCommissions = 0;
     let totalSlippageCosts = 0;
     const tradeRs: number[] = [];
+    const tradeMFEs: number[] = [];
+    const tradeHit1R: number[] = [];
+    const tradeHitTarget: number[] = [];
     const tradeGrossPnls: number[] = [];
     const tradeNetPnls: number[] = [];
     const tradesByRegime: Record<string, { wins: number; losses: number; pnl: number }> = {};
@@ -3679,6 +3685,9 @@ export async function runReversionSimulation(
         totalCommissions: Number(totalCommissions.toFixed(2)),
         totalSlippageCosts: Number(totalSlippageCosts.toFixed(2)),
         tradeRs,
+        tradeMFEs: tradeMFEs.length > 0 ? tradeMFEs : undefined,
+        tradeHit1R: tradeHit1R.length > 0 ? tradeHit1R : undefined,
+        tradeHitTarget: tradeHitTarget.length > 0 ? tradeHitTarget : undefined,
         maxDrawdown: Number(maxDD.toFixed(2)),
         byRegime: tradesByRegime,
         bySession: tradesBySession,
@@ -3848,6 +3857,9 @@ export async function runORFSimulation(
     let totalCommissions = 0;
     let totalSlippageCosts = 0;
     const tradeRs: number[] = [];
+    const tradeMFEs: number[] = [];
+    const tradeHit1R: number[] = [];
+    const tradeHitTarget: number[] = [];
     const tradeGrossPnls: number[] = [];
     const tradeNetPnls: number[] = [];
     const tradesByRegime: Record<string, { wins: number; losses: number; pnl: number }> = {};
@@ -3901,6 +3913,10 @@ export async function runORFSimulation(
       tradeRs.push(compositeR);
       tradeGrossPnls.push(totalGrossPnl);
       tradeNetPnls.push(pnl);
+
+      tradeMFEs.push(trade.mfeR);
+      tradeHit1R.push(trade.mfeR >= 1.0 ? 1 : 0);
+      tradeHitTarget.push(trade.mfeR >= trade.targetR ? 1 : 0);
 
       const trSession = minutesSinceOpen <= 90 ? "open" : minutesSinceOpen <= 240 ? "mid" : "power";
       const trRegime = regimeResult?.aligned ? "trending" : regimeResult?.chopping ? "choppy" : "neutral";
@@ -4029,10 +4045,10 @@ export async function runORFSimulation(
                 trade.partialPnl = partialPnl;
                 trade.shares -= partialShares;
 
-                trade.stopPrice = trade.entryPrice;
+                trade.stopPrice = trade.entryPrice + (trade.direction === "SHORT" ? -0.02 : 0.02) * riskPerShare;
                 trade.stopMovedToBE = true;
 
-                log(`[ORFSim] ${ticker} PARTIAL ${partialShares}sh @$${partialPrice.toFixed(2)} (${orfConfig.partialExitR}R), stop->BE, ${trade.shares}sh remain`, "historical");
+                log(`[ORFSim] ${ticker} PARTIAL ${partialShares}sh @$${partialPrice.toFixed(2)} (${orfConfig.partialExitR}R), stop->BE+buffer, ${trade.shares}sh remain`, "historical");
               }
             }
 
@@ -4136,9 +4152,9 @@ export async function runORFSimulation(
                     trade.partialExitShares = partialShares;
                     trade.partialPnl = partialPnl;
                     trade.shares -= partialShares;
-                    trade.stopPrice = trade.entryPrice;
+                    trade.stopPrice = trade.entryPrice + (trade.direction === "SHORT" ? -0.02 : 0.02) * riskPerShare;
                     trade.stopMovedToBE = true;
-                    log(`[ORFSim] ${ticker} VWAP PARTIAL ${partialShares}sh @$${vwap.toFixed(2)}, stop->BE, ${trade.shares}sh remain`, "historical");
+                    log(`[ORFSim] ${ticker} VWAP PARTIAL ${partialShares}sh @$${vwap.toFixed(2)}, stop->BE+buffer, ${trade.shares}sh remain`, "historical");
                   }
                 }
               }
@@ -4378,6 +4394,9 @@ export async function runORFSimulation(
         totalCommissions: Number(totalCommissions.toFixed(2)),
         totalSlippageCosts: Number(totalSlippageCosts.toFixed(2)),
         tradeRs,
+        tradeMFEs: tradeMFEs.length > 0 ? tradeMFEs : undefined,
+        tradeHit1R: tradeHit1R.length > 0 ? tradeHit1R : undefined,
+        tradeHitTarget: tradeHitTarget.length > 0 ? tradeHitTarget : undefined,
         maxDrawdown: Number(maxDD.toFixed(2)),
         byRegime: tradesByRegime,
         bySession: tradesBySession,
