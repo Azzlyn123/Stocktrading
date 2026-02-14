@@ -9,7 +9,8 @@ import type { User } from "@shared/schema";
 import { startSimulatedDataFeed, registerUser, unregisterUser, getScannerData, getDataSource, isLiveConnected, getSharedUserId } from "./simulator";
 import { seedDemoData } from "./seed";
 import { generateAdaptiveInsights } from "./strategy/learning";
-import { runHistoricalSimulation, runReversionSimulation, runORFSimulation, getActiveSimulations, cancelSimulation, startAutoRun, getAutoRunStatus, cancelAutoRun, runCostSensitivity, runWalkForwardEvaluation, getWalkForwardStatus, cancelWalkForward } from "./historicalSimulator";
+import { runHistoricalSimulation, runReversionSimulation, runORFSimulation, runRSContinuationSimulation, getActiveSimulations, cancelSimulation, startAutoRun, getAutoRunStatus, cancelAutoRun, runCostSensitivity, runWalkForwardEvaluation, getWalkForwardStatus, cancelWalkForward } from "./historicalSimulator";
+import { DEFAULT_RS_CONFIG, type RSConfig } from "./strategy/rsDetector";
 
 declare global {
   namespace Express {
@@ -599,6 +600,104 @@ export async function registerRoutes(
     }
 
     res.json({ results });
+  });
+
+  app.post("/api/internal/rs-validate", async (req, res) => {
+    const { dates, tickers, rsConfig } = req.body;
+    if (!dates || !Array.isArray(dates)) {
+      return res.status(400).json({ error: "dates array required" });
+    }
+    const tickerList = tickers ?? [
+      "AAPL","MSFT","NVDA","TSLA","META","AMZN","GOOGL","AMD","NFLX","AVGO",
+      "JPM","COST","QQQ","CRM","ORCL",
+    ];
+    const userId = "1a70fbad-ee1b-46ea-96a3-36749e24f3ba";
+
+    const results: any[] = [];
+
+    for (const date of dates) {
+      try {
+        const dummyRunId = `rs-validation-${date}-${Date.now()}`;
+        const result = await runRSContinuationSimulation(
+          dummyRunId,
+          date,
+          userId,
+          storage,
+          tickerList,
+          { dryRun: true, rsConfig: rsConfig ?? undefined },
+        );
+        results.push({ date, ...(result as any) });
+      } catch (err: any) {
+        results.push({ date, error: err.message, trades: 0, wins: 0, losses: 0, netPnl: 0 });
+      }
+    }
+
+    const allRs: number[] = [];
+    const allMFEs: number[] = [];
+    const allMAEs: number[] = [];
+    let totalTrades = 0, totalWins = 0;
+    const bySymbol: Record<string, { trades: number; rs: number[]; wins: number }> = {};
+    const byRegime: Record<string, { trades: number; totalR: number; wins: number }> = {};
+
+    for (const day of results) {
+      if (day.error || !day.tradeRs) continue;
+      totalTrades += day.trades ?? 0;
+      totalWins += day.wins ?? 0;
+      const tradeCount = day.tradeRs?.length ?? 0;
+      for (let i = 0; i < tradeCount; i++) {
+        const r = day.tradeRs[i];
+        allRs.push(r);
+        if (day.tradeMFEs && i < day.tradeMFEs.length) allMFEs.push(day.tradeMFEs[i]);
+        if (day.tradeMAEs && i < day.tradeMAEs.length) allMAEs.push(day.tradeMAEs[i]);
+        const ticker = day.tradeTickers && i < day.tradeTickers.length ? day.tradeTickers[i] : undefined;
+        const regime = day.tradeRegimes && i < day.tradeRegimes.length ? day.tradeRegimes[i] : undefined;
+        if (ticker) {
+          if (!bySymbol[ticker]) bySymbol[ticker] = { trades: 0, rs: [], wins: 0 };
+          bySymbol[ticker].trades++;
+          bySymbol[ticker].rs.push(r);
+          if (r > 0) bySymbol[ticker].wins++;
+        }
+        if (regime) {
+          if (!byRegime[regime]) byRegime[regime] = { trades: 0, totalR: 0, wins: 0 };
+          byRegime[regime].trades++;
+          byRegime[regime].totalR += r;
+          if (r > 0) byRegime[regime].wins++;
+        }
+      }
+    }
+
+    const avgR = allRs.length > 0 ? allRs.reduce((a, b) => a + b, 0) / allRs.length : 0;
+    const winRate = totalTrades > 0 ? totalWins / totalTrades : 0;
+    const avgMFE = allMFEs.length > 0 ? allMFEs.reduce((a, b) => a + b, 0) / allMFEs.length : 0;
+    const avgMAE = allMAEs.length > 0 ? allMAEs.reduce((a, b) => a + b, 0) / allMAEs.length : 0;
+    const medianMFE = allMFEs.length > 0 ? [...allMFEs].sort((a, b) => a - b)[Math.floor(allMFEs.length / 2)] : 0;
+
+    const symbolSummary: Record<string, any> = {};
+    for (const [sym, data] of Object.entries(bySymbol)) {
+      const symAvgR = data.rs.length > 0 ? data.rs.reduce((a, b) => a + b, 0) / data.rs.length : 0;
+      symbolSummary[sym] = { trades: data.trades, avgR: Number(symAvgR.toFixed(3)), winRate: Number((data.wins / data.trades).toFixed(3)) };
+    }
+
+    const regimeSummary: Record<string, any> = {};
+    for (const [reg, data] of Object.entries(byRegime)) {
+      regimeSummary[reg] = { trades: data.trades, avgR: Number((data.totalR / data.trades).toFixed(3)), winRate: Number((data.wins / data.trades).toFixed(3)) };
+    }
+
+    res.json({
+      strategy: "RS_CONTINUATION",
+      config: { ...DEFAULT_RS_CONFIG, ...(rsConfig ?? {}) },
+      aggregate: {
+        totalTrades,
+        winRate: Number(winRate.toFixed(3)),
+        avgR: Number(avgR.toFixed(3)),
+        avgMFE: Number(avgMFE.toFixed(3)),
+        medianMFE: Number(medianMFE.toFixed(3)),
+        avgMAE: Number(avgMAE.toFixed(3)),
+      },
+      bySymbol: symbolSummary,
+      byRegime: regimeSummary,
+      results,
+    });
   });
 
   app.post("/api/internal/orf-walkforward", async (req, res) => {

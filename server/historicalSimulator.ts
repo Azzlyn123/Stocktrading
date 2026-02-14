@@ -2909,7 +2909,14 @@ import {
   type BreakDetection,
 } from "./strategy/orfDetector";
 
-import { calculateVWAP } from "./strategy/indicators";
+import {
+  computeRS,
+  detectRSContinuation,
+  DEFAULT_RS_CONFIG,
+  type RSConfig,
+} from "./strategy/rsDetector";
+
+// RS detector already uses calculateVWAP from indicators internally
 
 type ReversionDirection = "LONG_FADE" | "SHORT_FADE";
 
@@ -4447,6 +4454,518 @@ export async function runORFSimulation(
     );
   } catch (error: any) {
     log(`[ORFSim] Error: ${error.message}`, "historical");
+    if (!isDryRun) {
+      await storage.updateSimulationRun(runId, {
+        status: "failed",
+        errorMessage: error.message,
+        completedAt: new Date(),
+      });
+    }
+  } finally {
+    if (!isDryRun) {
+      activeSimulations.delete(runId);
+    }
+  }
+}
+
+// ============================================================
+// RS Continuation (Institutional Flow) Simulation
+// ============================================================
+
+interface RSTradeState {
+  direction: "LONG";
+  entryPrice: number;
+  stopPrice: number;
+  originalStopPrice: number;
+  targetPrice: number;
+  shares: number;
+  originalShares: number;
+  entryBarIndex: number;
+  dollarRisk: number;
+  riskPerShare: number;
+  targetR: number;
+  pendingExit: { reason: string; exitType: string; decisionBarIndex: number } | null;
+  mfeR: number;
+  mfePrice: number;
+  mfeBarIndex: number;
+  maeR: number;
+  maePrice: number;
+  maeBarIndex: number;
+  trailingStopPrice: number | null;
+  trailingActivated: boolean;
+  partialExitDone: boolean;
+  partialExitPrice: number | null;
+  partialExitShares: number;
+  partialPnl: number;
+  stopMovedToBE: boolean;
+  rsAtEntry: number;
+}
+
+const RS_TICKERS = [
+  "AAPL", "MSFT", "NVDA", "TSLA", "META",
+  "AMZN", "GOOGL", "AMD", "NFLX", "AVGO",
+  "JPM", "COST", "QQQ", "CRM", "ORCL",
+];
+
+export async function runRSContinuationSimulation(
+  runId: string,
+  simulationDate: string,
+  userId: string,
+  storage: IStorage,
+  tickerList?: string[],
+  options?: {
+    costOverrides?: CostOverrides;
+    dryRun?: boolean;
+    rsConfig?: Partial<RSConfig>;
+  },
+): Promise<DryRunResult | void> {
+  const tickers = tickerList ?? RS_TICKERS;
+  const allSymbols = Array.from(new Set([...tickers, "SPY"]));
+  const isDryRun = options?.dryRun ?? false;
+  const costOverrides = options?.costOverrides;
+  const rsConfig: RSConfig = { ...DEFAULT_RS_CONFIG, ...(options?.rsConfig ?? {}) };
+
+  const control = { cancel: false };
+  if (!isDryRun) {
+    activeSimulations.set(runId, control);
+  }
+
+  try {
+    if (!isDryRun) {
+      await storage.updateSimulationRun(runId, { status: "running", tickers });
+    }
+
+    if (!isAlpacaConfigured()) {
+      if (!isDryRun) {
+        await storage.updateSimulationRun(runId, {
+          status: "failed",
+          errorMessage: "Alpaca API keys not configured.",
+          completedAt: new Date(),
+        });
+      }
+      return;
+    }
+
+    const bars5mMap = await fetchBarsForDate(allSymbols, simulationDate, "5Min");
+    const multiDayBars = await fetchMultiDayDailyBars(allSymbols, simulationDate, 20);
+
+    const spyBars5m = bars5mMap.get("SPY") ?? [];
+    if (spyBars5m.length === 0) {
+      if (!isDryRun) {
+        await storage.updateSimulationRun(runId, {
+          status: "failed",
+          errorMessage: `No SPY data for ${simulationDate}.`,
+          completedAt: new Date(),
+        });
+      }
+      return;
+    }
+
+    const user = await storage.getUser(userId);
+    if (!user) return;
+    const accountSize = user.accountSize ?? 100000;
+
+    let processedBars = 0;
+    let tradesGenerated = 0;
+    let totalPnl = 0;
+    let winCount = 0;
+    let lossCount = 0;
+    let grossPnlTotal = 0;
+    let totalCommissions = 0;
+    let totalSlippageCosts = 0;
+    const tradeRs: number[] = [];
+    const tradeMFEs: number[] = [];
+    const tradeHit1R: number[] = [];
+    const tradeHitTarget: number[] = [];
+    const tradeMAEs: number[] = [];
+    const tradeSlippageCostsR: number[] = [];
+    const tradeScratchAfterPartial: number[] = [];
+    const tradeTickers: string[] = [];
+    const tradeRegimes: string[] = [];
+    const tradeGrossPnls: number[] = [];
+    const tradeNetPnls: number[] = [];
+    const tradesByRegime: Record<string, { wins: number; losses: number; pnl: number }> = {};
+    const tradesBySession: Record<string, { wins: number; losses: number; pnl: number }> = {};
+    const tradesByTier: Record<string, { wins: number; losses: number; pnl: number }> = {};
+
+    const closeRSTrade = (
+      trade: RSTradeState,
+      exitPrice: number,
+      exitReason: string,
+      ticker: string,
+      barTimestamp: number,
+      entryTimestamp: number,
+      minutesSinceOpen: number,
+      regimeResult: any,
+      atr14: number,
+    ) => {
+      const shares = trade.shares;
+      const riskPerShare = trade.riskPerShare;
+      const grossPnl = (exitPrice - trade.entryPrice) * shares;
+      const totalGrossPnl = grossPnl + trade.partialPnl;
+      const commission = calculateCommission(trade.originalShares, costOverrides) * 2;
+      const pnl = totalGrossPnl - commission;
+
+      const runnerR = riskPerShare > 0 ? (exitPrice - trade.entryPrice) / riskPerShare : 0;
+
+      let compositeR: number;
+      if (trade.partialExitDone && trade.originalShares > 0) {
+        const runnerFraction = shares / trade.originalShares;
+        const partialFraction = trade.partialExitShares / trade.originalShares;
+        const partialR = trade.partialExitPrice !== null && riskPerShare > 0
+          ? (trade.partialExitPrice - trade.entryPrice) / riskPerShare
+          : 0;
+        compositeR = partialR * partialFraction + runnerR * runnerFraction;
+      } else {
+        compositeR = runnerR;
+      }
+
+      totalPnl += pnl;
+      if (pnl > 0) winCount++; else lossCount++;
+      grossPnlTotal += totalGrossPnl;
+      totalCommissions += commission;
+      tradeRs.push(compositeR);
+      tradeGrossPnls.push(totalGrossPnl);
+      tradeNetPnls.push(pnl);
+
+      tradeMFEs.push(trade.mfeR);
+      tradeMAEs.push(trade.maeR);
+      tradeHit1R.push(trade.mfeR >= 1.0 ? 1 : 0);
+      tradeHitTarget.push(trade.mfeR >= trade.targetR ? 1 : 0);
+
+      const frictionCostR = riskPerShare > 0 && trade.originalShares > 0 ? (commission / (riskPerShare * trade.originalShares)) : 0;
+      tradeSlippageCostsR.push(frictionCostR);
+
+      const isScratchAfterPartial = trade.partialExitDone && trade.stopMovedToBE && Math.abs(runnerR) < 0.15;
+      tradeScratchAfterPartial.push(isScratchAfterPartial ? 1 : 0);
+
+      tradeTickers.push(ticker);
+
+      const trSession = minutesSinceOpen <= 90 ? "open" : minutesSinceOpen <= 240 ? "mid" : "power";
+      const trRegime = regimeResult?.aligned ? "trending" : regimeResult?.chopping ? "choppy" : "neutral";
+      tradeRegimes.push(trRegime);
+      if (!tradesByRegime[trRegime]) tradesByRegime[trRegime] = { wins: 0, losses: 0, pnl: 0 };
+      if (!tradesBySession[trSession]) tradesBySession[trSession] = { wins: 0, losses: 0, pnl: 0 };
+      if (!tradesByTier["rs_long"]) tradesByTier["rs_long"] = { wins: 0, losses: 0, pnl: 0 };
+      tradesByRegime[trRegime].pnl += pnl;
+      tradesBySession[trSession].pnl += pnl;
+      tradesByTier["rs_long"].pnl += pnl;
+      if (pnl > 0) { tradesByRegime[trRegime].wins++; tradesBySession[trSession].wins++; tradesByTier["rs_long"].wins++; }
+      else { tradesByRegime[trRegime].losses++; tradesBySession[trSession].losses++; tradesByTier["rs_long"].losses++; }
+
+      addTrade(buildAnalyticsRecord(
+        { entryPrice: trade.entryPrice, stopPrice: trade.originalStopPrice, shares: trade.originalShares, tier: "rs_long", direction: "LONG", entryBarIndex: trade.entryBarIndex },
+        ticker, exitPrice, exitReason,
+        barTimestamp,
+        entryTimestamp,
+        compositeR, pnl,
+        { marketRegime: trRegime, session: trSession, spyAligned: regimeResult?.aligned, entryMode: "rs_continuation" },
+      ));
+
+      tradesGenerated++;
+      log(`[RSSim] ${ticker} CLOSED: ${exitReason} | R=${compositeR.toFixed(2)} PnL=$${pnl.toFixed(2)} RS@entry=${trade.rsAtEntry.toFixed(4)}${trade.partialExitDone ? " (partial@" + (trade.partialExitPrice?.toFixed(2)) + ")" : ""}`, "historical");
+    };
+
+    for (const ticker of tickers) {
+      if (control.cancel) break;
+
+      const tickerBars5m = bars5mMap.get(ticker) ?? [];
+      if (tickerBars5m.length < 10) {
+        processedBars += tickerBars5m.length;
+        continue;
+      }
+
+      const bars5mAccum: Candle[] = [];
+      let activeTrade: RSTradeState | null = null;
+      let cooldownUntilBar = 0;
+      let tickerTradeCount = 0;
+      let hod = tickerBars5m[0].high;
+
+      for (let i = 0; i < tickerBars5m.length; i++) {
+        if (control.cancel) break;
+
+        const bar = tickerBars5m[i];
+        bars5mAccum.push(bar);
+        if (bars5mAccum.length > 200) bars5mAccum.shift();
+
+        const minutesSinceOpen = (i + 1) * 5;
+        const atr14 = calculateATR(bars5mAccum, 14);
+
+        if (bar.high > hod) hod = bar.high;
+
+        const spyBarsToNow = spyBars5m.filter((b: Candle) => b.timestamp <= bar.timestamp);
+        const regimeResult = checkMarketRegime(spyBarsToNow.slice(-40), DEFAULT_STRATEGY_CONFIG.marketRegime);
+
+        if (i < rsConfig.rsLookbackBars) {
+          processedBars++;
+          continue;
+        }
+
+        if (activeTrade) {
+          const trade = activeTrade;
+          const riskPerShare = trade.riskPerShare;
+
+          if (riskPerShare > 0) {
+            const barMfeR = (bar.high - trade.entryPrice) / riskPerShare;
+            const barMaeR = (bar.low - trade.entryPrice) / riskPerShare;
+
+            if (barMfeR > trade.mfeR) {
+              trade.mfeR = barMfeR;
+              trade.mfePrice = bar.high;
+              trade.mfeBarIndex = i;
+            }
+            if (barMaeR < trade.maeR) {
+              trade.maeR = barMaeR;
+              trade.maePrice = bar.low;
+              trade.maeBarIndex = i;
+            }
+
+            if (!trade.partialExitDone && trade.mfeR >= 1.0) {
+              const partialShares = Math.max(1, Math.floor(trade.originalShares * 0.5));
+              if (partialShares < trade.shares) {
+                const partialPrice = trade.entryPrice + 1.0 * riskPerShare;
+                const partialPnl = (partialPrice - trade.entryPrice) * partialShares;
+                trade.partialExitDone = true;
+                trade.partialExitPrice = partialPrice;
+                trade.partialExitShares = partialShares;
+                trade.partialPnl = partialPnl;
+                trade.shares -= partialShares;
+                trade.stopPrice = trade.entryPrice + 0.02 * riskPerShare;
+                trade.stopMovedToBE = true;
+                log(`[RSSim] ${ticker} PARTIAL ${partialShares}sh @$${partialPrice.toFixed(2)} (1R), stop->BE+buffer, ${trade.shares}sh remain`, "historical");
+              }
+            }
+
+            if (!trade.trailingActivated && trade.mfeR >= 1.5) {
+              trade.trailingActivated = true;
+              trade.trailingStopPrice = trade.entryPrice + (trade.mfeR * 0.5) * riskPerShare;
+            }
+
+            if (trade.trailingActivated && trade.trailingStopPrice !== null) {
+              const newTrail = bar.high - riskPerShare * 0.5;
+              if (newTrail > trade.trailingStopPrice) {
+                trade.trailingStopPrice = newTrail;
+              }
+              trade.stopPrice = Math.max(trade.stopPrice, trade.trailingStopPrice);
+            }
+          }
+
+          if (trade.pendingExit) {
+            const exitTrace = applyFrictionAndRoundWithTrace({
+              rawPrice: bar.open,
+              side: "long",
+              direction: "exit",
+              atr14,
+              costOverrides,
+            });
+            closeRSTrade(trade, exitTrace.finalPrice, trade.pendingExit.reason, ticker, bar.timestamp,
+              tickerBars5m[trade.entryBarIndex]?.timestamp ?? bar.timestamp, minutesSinceOpen, regimeResult, atr14);
+            totalSlippageCosts += exitTrace.slippageBps;
+            activeTrade = null;
+            cooldownUntilBar = i + 3;
+            processedBars++;
+            continue;
+          }
+
+          let shouldExit = false;
+          let exitReason = "";
+
+          if (bar.low <= trade.stopPrice) {
+            shouldExit = true;
+            exitReason = bar.open <= trade.stopPrice
+              ? `Gap-through stop at $${bar.open.toFixed(2)}`
+              : `Stop hit at $${trade.stopPrice.toFixed(2)}${trade.stopMovedToBE ? " (BE)" : ""}`;
+          } else if (bar.high >= trade.targetPrice) {
+            shouldExit = true;
+            exitReason = bar.open >= trade.targetPrice
+              ? `Target ${trade.targetR}R hit (gap-through) at $${bar.open.toFixed(2)}`
+              : `Target ${trade.targetR}R hit at $${trade.targetPrice.toFixed(2)}`;
+          }
+
+          if (!shouldExit && minutesSinceOpen >= rsConfig.timeExitMinutes) {
+            trade.pendingExit = {
+              reason: `Time exit at ${minutesSinceOpen}min`,
+              exitType: "time_stop",
+              decisionBarIndex: i,
+            };
+            processedBars++;
+            continue;
+          }
+
+          if (shouldExit) {
+            const isIntrabar = exitReason.includes("Stop hit") || exitReason.includes("Target");
+            if (!isIntrabar) {
+              trade.pendingExit = { reason: exitReason, exitType: "exit", decisionBarIndex: i };
+              processedBars++;
+              continue;
+            }
+
+            const isStop = exitReason.includes("Stop") || exitReason.includes("Gap-through stop");
+            let rawFill: number;
+            if (isStop) {
+              rawFill = bar.open <= trade.stopPrice ? bar.open : trade.stopPrice;
+            } else {
+              rawFill = bar.open >= trade.targetPrice ? bar.open : trade.targetPrice;
+            }
+
+            const exitTrace = applyFrictionAndRoundWithTrace({
+              rawPrice: rawFill,
+              side: "long",
+              direction: "exit",
+              atr14,
+              costOverrides,
+            });
+            closeRSTrade(trade, exitTrace.finalPrice, exitReason, ticker, bar.timestamp,
+              tickerBars5m[trade.entryBarIndex]?.timestamp ?? bar.timestamp, minutesSinceOpen, regimeResult, atr14);
+            totalSlippageCosts += exitTrace.slippageBps;
+            activeTrade = null;
+            cooldownUntilBar = i + 3;
+          }
+
+          processedBars++;
+          continue;
+        }
+
+        if (i < cooldownUntilBar || tickerTradeCount >= rsConfig.maxTradesPerTicker) {
+          processedBars++;
+          continue;
+        }
+
+        if (minutesSinceOpen < 35) {
+          processedBars++;
+          continue;
+        }
+
+        const hodBeforeThisBar = Math.max(...tickerBars5m.slice(0, i).map(b => b.high));
+
+        const signal = detectRSContinuation(
+          tickerBars5m,
+          spyBars5m,
+          i,
+          rsConfig,
+          hodBeforeThisBar,
+        );
+
+        if (signal.triggered && signal.direction === "LONG") {
+          tickerTradeCount++;
+
+          const recentLows = tickerBars5m.slice(Math.max(0, i - 6), i + 1).map(b => b.low);
+          const swingLow = Math.min(...recentLows);
+          const vwap = calculateVWAP(tickerBars5m.slice(0, i + 1));
+          const stopLevel = Math.max(swingLow, vwap) - atr14 * 0.1;
+
+          const entryTrace = applyFrictionAndRoundWithTrace({
+            rawPrice: bar.close,
+            side: "long",
+            direction: "entry",
+            atr14,
+            costOverrides,
+          });
+          const entryPrice = entryTrace.finalPrice;
+          const riskPerShare = entryPrice - stopLevel;
+
+          if (riskPerShare > 0 && riskPerShare < entryPrice * 0.03) {
+            const dollarRisk = accountSize * rsConfig.riskPct;
+            const shares = Math.max(1, Math.floor(dollarRisk / riskPerShare));
+            const targetPrice = entryPrice + riskPerShare * rsConfig.targetMultiple;
+
+            activeTrade = {
+              direction: "LONG",
+              entryPrice,
+              stopPrice: stopLevel,
+              originalStopPrice: stopLevel,
+              targetPrice,
+              shares,
+              originalShares: shares,
+              entryBarIndex: i,
+              dollarRisk,
+              riskPerShare,
+              targetR: rsConfig.targetMultiple,
+              pendingExit: null,
+              mfeR: 0,
+              mfePrice: entryPrice,
+              mfeBarIndex: i,
+              maeR: 0,
+              maePrice: entryPrice,
+              maeBarIndex: i,
+              trailingStopPrice: null,
+              trailingActivated: false,
+              partialExitDone: false,
+              partialExitPrice: null,
+              partialExitShares: 0,
+              partialPnl: 0,
+              stopMovedToBE: false,
+              rsAtEntry: signal.rsValue,
+            };
+
+            totalSlippageCosts += entryTrace.slippageBps;
+            log(
+              `[RSSim] ${ticker} ENTRY LONG at $${entryPrice.toFixed(2)} | stop=$${stopLevel.toFixed(2)} | target=$${targetPrice.toFixed(2)} (${rsConfig.targetMultiple}R) | ${shares}sh | RS=${signal.rsValue.toFixed(4)} slope=${signal.rsSlope.toFixed(4)} | ${signal.reasons.join("; ")}`,
+              "historical",
+            );
+          }
+        }
+
+        processedBars++;
+      }
+
+      if (activeTrade) {
+        const lastBar = tickerBars5m[tickerBars5m.length - 1];
+        const eodTrace = applyFrictionAndRoundWithTrace({
+          rawPrice: lastBar.close,
+          side: "long",
+          direction: "exit",
+          atr14: calculateATR(bars5mAccum, 14),
+          costOverrides,
+        });
+        closeRSTrade(activeTrade, eodTrace.finalPrice, "End of day close", ticker, lastBar.timestamp,
+          tickerBars5m[activeTrade.entryBarIndex]?.timestamp ?? lastBar.timestamp,
+          tickerBars5m.length * 5, null, calculateATR(bars5mAccum, 14));
+        activeTrade = null;
+      }
+    }
+
+    let maxDD = 0;
+    let peak = 0;
+    let equity = 0;
+    for (const r of tradeNetPnls) {
+      equity += r;
+      if (equity > peak) peak = equity;
+      const dd = peak - equity;
+      if (dd > maxDD) maxDD = dd;
+    }
+
+    if (isDryRun) {
+      return {
+        trades: tradesGenerated,
+        wins: winCount,
+        losses: lossCount,
+        grossPnl: Number(grossPnlTotal.toFixed(2)),
+        netPnl: Number(totalPnl.toFixed(2)),
+        totalCommissions: Number(totalCommissions.toFixed(2)),
+        totalSlippageCosts: Number(totalSlippageCosts.toFixed(2)),
+        tradeRs,
+        tradeMFEs: tradeMFEs.length > 0 ? tradeMFEs : undefined,
+        tradeMAEs: tradeMAEs.length > 0 ? tradeMAEs : undefined,
+        tradeHit1R: tradeHit1R.length > 0 ? tradeHit1R : undefined,
+        tradeHitTarget: tradeHitTarget.length > 0 ? tradeHitTarget : undefined,
+        tradeSlippageCostsR: tradeSlippageCostsR.length > 0 ? tradeSlippageCostsR : undefined,
+        tradeScratchAfterPartial: tradeScratchAfterPartial.length > 0 ? tradeScratchAfterPartial : undefined,
+        tradeTickers: tradeTickers.length > 0 ? tradeTickers : undefined,
+        tradeRegimes: tradeRegimes.length > 0 ? tradeRegimes : undefined,
+        maxDrawdown: Number(maxDD.toFixed(2)),
+        byRegime: tradesByRegime,
+        bySession: tradesBySession,
+        byTier: tradesByTier,
+      };
+    }
+
+    log(
+      `[RSSim] ${simulationDate} COMPLETE: ${tradesGenerated} trades, ${winCount}W/${lossCount}L, PnL=$${totalPnl.toFixed(2)}, MaxDD=$${maxDD.toFixed(2)}`,
+      "historical",
+    );
+  } catch (error: any) {
+    log(`[RSSim] Error: ${error.message}`, "historical");
     if (!isDryRun) {
       await storage.updateSimulationRun(runId, {
         status: "failed",

@@ -72,6 +72,17 @@ The backend features a modular strategy engine composed of pure TypeScript modul
 - Fill modeling with realistic slippage, spread, and commissions is critical - many "paper edges" disappear
 - The platform infrastructure (simulation engine, fill modeling, regime detection, walk-forward framework) is production-grade and reusable for testing other strategies
 
+### RS Continuation (Institutional Flow) Strategy - PENDING VALIDATION
+- **Concept**: Trade relative strength continuation — buy stocks holding above VWAP while SPY weakens, breaking HOD with sustained RS for >30 minutes
+- **Logic**: Institutional accumulation detection — ride flow instead of fighting it
+- **Entry Criteria**: RS > 0.1% over 30min lookback, positive RS slope, ticker > VWAP, SPY < SPY VWAP (optional filter), Break of HOD
+- **Stop**: Below max(recent swing low, VWAP) minus 0.1*ATR buffer
+- **Exits**: Partial at 1R (50% size, stop to BE+buffer), trail after 1.5R, time exit at EOD, 2R target
+- **Files**: `server/strategy/rsDetector.ts`, simulation: `runRSContinuationSimulation` in `server/historicalSimulator.ts`
+- **Endpoint**: `/api/internal/rs-validate` — runs dry-run backtest across dates with full diagnostics (per-trade MFE/MAE, regime/symbol splits)
+- **Default universe**: 15 mega-cap tickers (AAPL, MSFT, NVDA, TSLA, META, AMZN, GOOGL, AMD, NFLX, AVGO, JPM, COST, QQQ, CRM, ORCL)
+- **Status**: Awaiting validation run
+
 ## External Dependencies
 - **Alpaca API**: Used for live bars, snapshots, WebSocket data streams, market clock, and historical bar data.
 - **PostgreSQL**: Relational database for storing all application data.

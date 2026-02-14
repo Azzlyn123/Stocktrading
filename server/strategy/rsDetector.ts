@@ -30,10 +30,15 @@ export const DEFAULT_RS_CONFIG: RSConfig = {
 export function computeRS(tickerBars: Candle[], spyBars: Candle[], index: number, lookback: number): number {
   if (index < lookback || tickerBars.length <= index || spyBars.length <= index) return 0;
   
-  const tickerStart = tickerBars[index - lookback].close;
+  const startIdx = index - lookback;
+  if (startIdx < 0 || !tickerBars[startIdx] || !spyBars[startIdx] || !tickerBars[index] || !spyBars[index]) return 0;
+  
+  const tickerStart = tickerBars[startIdx].close;
   const tickerEnd = tickerBars[index].close;
-  const spyStart = spyBars[index - lookback].close;
+  const spyStart = spyBars[startIdx].close;
   const spyEnd = spyBars[index].close;
+  
+  if (tickerStart === 0 || spyStart === 0) return 0;
   
   const tickerRet = (tickerEnd - tickerStart) / tickerStart;
   const spyRet = (spyEnd - spyStart) / spyStart;
@@ -60,6 +65,7 @@ export function detectRSContinuation(
   const bar = tickerBars[index];
   const spyBar = spyBars[index];
 
+  if (!bar || !spyBar) return { triggered: false, direction: null, rsValue: 0, rsSlope: 0, reasons };
   if (index < config.rsLookbackBars) return { triggered: false, direction: null, rsValue: 0, rsSlope: 0, reasons };
 
   // 1. VWAP Filters
@@ -75,21 +81,15 @@ export function detectRSContinuation(
   if (rs < config.minRSThreshold) return { triggered: false, direction: null, rsValue: rs, rsSlope, reasons };
   if (rsSlope <= 0) return { triggered: false, direction: null, rsValue: rs, rsSlope, reasons };
 
-  if (config.spyVwapFilter && spyBar.close > spyVwap) {
-    // We want RS where SPY is NOT leading
-    // But if SPY is above VWAP, it's just a general market pump
-    // The core of the strategy is "Holding above VWAP while SPY weakens"
-    // However, if SPY is also strong, we might still take it if Ticker is STRONGER
+  if (config.spyVwapFilter && spyBar && spyBar.close > spyVwap) {
+    return { triggered: false, direction: null, rsValue: rs, rsSlope, reasons: ["SPY above VWAP — no institutional divergence"] };
   }
 
-  // 2. BHOD Filter
   const bhodLevel = hod * (1 + config.bhodBufferPct);
   if (bar.high >= bhodLevel) {
     reasons.push(`RS confirmed: ${rs.toFixed(4)}, Slope: ${rsSlope.toFixed(4)}`);
     reasons.push(`Break of HOD (${hod.toFixed(2)}) confirmed`);
-    if (config.spyVwapFilter && spyBar.close < spyVwap) {
-      reasons.push(`Institutional Flow: Ticker > VWAP while SPY < VWAP`);
-    }
+    reasons.push(`Institutional Flow: Ticker > VWAP while SPY < VWAP`);
     
     return {
       triggered: true,
