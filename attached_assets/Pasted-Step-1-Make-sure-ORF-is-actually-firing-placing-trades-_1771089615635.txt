@@ -1,0 +1,105 @@
+Step 1 — Make sure ORF is actually firing + placing trades in sim
+
+Turn ORF on for 1 symbol + SPY (like TSLA + SPY).
+
+Run a single day replay you know has movement.
+
+Confirm in logs you see, in order:
+
+OR formed (ORH/ORL set)
+
+Break detected
+
+Failure detected
+
+ENTRY_GATE emitted
+
+Executor creates trade with entry/stop/target
+
+✅ If any one of those is missing, fix wiring before adding anything else.
+
+Step 2 — Add the #1 quality gate (fastest improvement)
+
+Add this filter right after OR is formed, before break detection:
+
+Minimum OR size vs ATR
+
+Compute ATR14 (or whatever ATR you already have)
+
+OR_range = ORH - ORL
+
+Skip day if: OR_range < 0.25 * ATR14 (start with 0.25)
+
+This avoids dead mornings that chop you up.
+
+Step 3 — Add the #1 exit upgrade (protects you + keeps upside)
+
+In executor (not scanner), add:
+
+Partial at +1R, move stop to breakeven
+
+When price hits entry + 1R (long) or entry - 1R (short):
+
+Sell 50%
+
+Move stop to entry (or entry +/- tiny buffer)
+
+Keep final target at 2R (for the other 50%)
+
+This is the simplest way to make results flip faster because it:
+
+reduces drawdowns
+
+turns “almost winners” into scratches
+
+Step 4 — Run a real backtest batch (so you know if it’s working)
+
+Run 3 months minimum on:
+
+TSLA, NVDA, META, AAPL, MSFT (+ SPY)
+
+Print these metrics per symbol and combined:
+
+Trades
+
+Win rate
+
+Avg R
+
+Avg win, Avg loss
+
+Max drawdown
+
+Trades/day
+
+Pass criteria (v1):
+
+Avg R > 0
+
+Trades/day ≥ 0.3 per symbol (otherwise you’ll never get sample size)
+
+If trades are too low, expand universe (don’t loosen rules first).
+
+Step 5 — Only after it passes: paper trade it live for sanity
+
+Paper trade for a week:
+
+confirm fills/slippage behave like backtest
+
+confirm signals happen when expected
+
+confirm no weird time-zone/session bugs
+
+Then you can think about real money.
+
+If you want the simplest “what do I click/build next?”
+
+Do these in order:
+
+Verify ORF emits ENTRY_GATE + executor trades (1 day replay)
+
+Add min OR size filter (0.25 ATR)
+
+Add partial at 1R + BE stop
+
+Backtest 3 months across 5–10 symbols
