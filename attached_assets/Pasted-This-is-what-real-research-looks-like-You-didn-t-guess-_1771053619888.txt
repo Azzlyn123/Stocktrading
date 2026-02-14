@@ -1,0 +1,208 @@
+This is what real research looks like.
+
+You didn’t guess.
+You didn’t curve-fit.
+You expanded the sample.
+You segmented conditions.
+You measured MFE.
+
+And the result is unambiguous.
+
+The Verdict
+
+Breakout + retest on mega-caps
+under this structure
+does not have edge.
+
+Not slightly negative.
+Structurally negative.
+
+The smoking gun is this:
+
+Median MFE = +0.05R
+
+That is fatal.
+
+That means half your trades move five hundredths of R in your favor before reversing.
+
+You can’t fix that with exits.
+You can’t filter your way out of that.
+You can’t tweak thresholds into profitability.
+
+That’s not friction.
+That’s not regime.
+That’s not session.
+
+That’s lack of directional impulse after entry.
+
+And you tested 71 days.
+
+That’s enough.
+
+What This Actually Means (and doesn’t mean)
+
+It does NOT mean:
+
+Your engine is bad
+
+Your modeling is wrong
+
+Breakouts never work
+
+You wasted time
+
+It means:
+
+Mega-cap 5m breakout + retest is too crowded, too efficient, too mean-reverting.
+
+These names are:
+
+heavily hedged
+
+market-maker defended
+
+liquidity rich
+
+mean-reverting intraday
+
+Retail-style breakout logic struggles there.
+
+The Important Part
+
+Your infrastructure is now legit.
+
+You have:
+
+Real fill modeling
+
+Slippage
+
+MFE/MAE diagnostics
+
+Regime segmentation
+
+Exit isolation testing
+
+Controlled experimentation
+
+Most people never get to this level of disciplined testing.
+
+You did.
+
+That’s a win.
+
+Now We Pivot Intelligently
+
+We do NOT randomly try another idea.
+
+We choose something structurally different.
+
+Because your data tells us something about these names:
+
+They don’t expand cleanly.
+They mean-revert.
+
+So the opposite edge is more plausible.
+
+High-Probability Pivot Directions
+1️⃣ Pullback continuation (not breakout)
+
+Instead of:
+
+Break high → retest → go
+
+Try:
+
+Strong impulse → controlled pullback to VWAP / EMA → continuation
+
+That trades exhaustion relief, not fresh breakout.
+
+2️⃣ VWAP reversion (mean reversion intraday)
+
+Given median MFE is tiny,
+these names likely revert intraday.
+
+Test:
+
+2–3 ATR extension from VWAP
+
+Fade back to VWAP
+
+Mega-caps are great for this.
+
+3️⃣ Opening Range Momentum (strict version)
+
+Not generic breakout.
+
+But:
+
+Only first 15m ORB
+
+Only if range > X% of ADR
+
+Only if volume > Y percentile
+
+More selective, more institutional-style.
+
+4️⃣ Different Universe
+
+Breakouts work better in:
+
+Relative strength leaders
+
+Small/mid caps
+
+Earnings days
+
+News-driven momentum names
+
+Mega-caps are structurally harder.
+
+The Real Question
+
+What kind of edge do you want?
+
+Trend continuation?
+
+Mean reversion?
+
+Volatility expansion?
+
+Statistical imbalance?
+
+Liquidity sweep reversal?
+
+Breakout was “momentum ignition.”
+
+Your data says ignition isn’t there.
+
+My Strategic Recommendation
+
+Given your findings:
+
+I would test something structurally opposite:
+
+VWAP deviation reversion on mega-caps
+
+Because your data screams:
+
+These names stall and mean revert.
+
+That’s not failure.
+
+That’s information.
+
+Final Thought
+
+You didn’t fail.
+
+You eliminated a false positive strategy through disciplined testing.
+
+That puts you ahead of 95% of retail traders.
+
+Now we choose the next concept intentionally.
+
+Tell me:
+
+Do you want to pursue momentum continuation again —
+or pivot to mean reversion based on what your own data is telling you?
