@@ -1,0 +1,118 @@
+Lock the v2 “baseline” (one run, no sweeping yet)
+
+Before you grid-search anything, run one fixed config for the entire 3 months:
+
+Baseline (what you described):
+
+minOR_ATR = 0.25
+
+breakPct = 0.25% (or whatever you used)
+
+failWindowBars = 3
+
+Partial: 50% @ 1R, move stop → breakeven for runner
+
+VWAP touch: pick one mode for baseline (I’d do partial at VWAP, not full close, to keep asymmetry)
+
+RS filter: ON
+
+EOD close: 3:45 PM
+
+Deliverables from this run:
+
+Combined expectancy (Avg R/trade)
+
+Trades/day & trades/symbol
+
+Avg win, avg loss, win rate
+
+Max DD and longest losing streak
+
+% of trades that hit 1R partial but then scratch (great to know)
+
+Contribution breakdown: partial vs runner
+
+If baseline isn’t positive (or close), sweeping is usually just curve-fitting.
+
+2) Then do a small sweep (3 knobs max)
+
+If baseline is promising, sweep only what truly changes the math:
+
+Sweep grid (tight and sane)
+
+breakPct: 0.20%, 0.25%, 0.30%
+
+failWindowBars: 2, 3, 4
+
+targetR for runner: 1.5, 2.0, 2.5 (keep partial at 1R fixed)
+
+That’s 3×3×3 = 27 configs. Plenty.
+
+Do NOT sweep RS filter + VWAP mode + minOR_ATR all at once on the same 3 months. That’s how you “optimize” yourself into a future loss.
+
+3) Add two “truth tests” so you can trust the result
+
+These are easy and massively increase confidence:
+
+A) Out-of-sample split
+
+Month 1–2 = “dev”
+
+Month 3 = “test”
+Pick the best config on dev, then evaluate on test.
+
+B) Per-symbol robustness
+
+Require the strategy to be:
+
+Not catastrophically negative on more than ~2 symbols
+
+And positive/near-flat on most
+
+One symbol carrying the whole expectancy is a red flag.
+
+4) What you’re hoping to see (realistic targets)
+
+Given realistic fills + mega-cap efficiency, a real edge often looks like:
+
+Avg R/trade: +0.05 to +0.25
+
+Win rate: 35–55% (because partials raise it)
+
+Profit factor: > 1.1 is meaningful intraday
+
+Trades/day: ideally 0.3–1.5 per symbol
+
+If you’re at +0.05R with clean drawdowns and decent trade count, that’s actually a good start.
+
+5) One bug to double-check from your note
+
+You said: “partial exit triggered at 0.1R (forced for testing).”
+
+Before running the 3-month sweep, make sure:
+
+The forced threshold is off
+
+The production threshold is exactly 1.0R
+
+The composite R calc is using filled prices (not targets) for each partial
+
+That’s the kind of tiny leftover test flag that silently ruins expectancy.
+
+Exactly what to do next
+
+Run baseline 3-month backtest on all 15 symbols
+
+Paste the summary table here (combined + per symbol) with:
+
+Trades, Win%, AvgR, PF, MaxDD, AvgWin/AvgLoss, Trades/day
+
+If baseline is decent, run the 27-config sweep + 2-month/1-month split
+
+If you drop your baseline summary output, I’ll tell you immediately whether it’s:
+
+real edge shaping up,
+
+needs one more structural filter,
+
+or still negative and why.
