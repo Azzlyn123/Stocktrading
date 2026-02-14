@@ -1,0 +1,124 @@
+1) Build the ORF signal first (smallest surface area, biggest payoff)
+Define the Opening Range
+
+OR window: 9:30–9:35 (5-min)
+
+OR High = high of that window
+
+OR Low = low of that window
+
+Detect a “break”
+
+A break is only real if it clears by a cushion to avoid micro-wicks:
+
+BreakAbove: high >= ORH * (1 + breakPct) (default breakPct = 0.0025 = 0.25%)
+
+BreakBelow: low <= ORL * (1 - breakPct)
+
+Add a volume confirmation (optional but recommended):
+
+bar volume > volMult * avgVol(20) (default volMult = 1.2)
+
+Detect a “failure” (the trap)
+
+Within failWindowBars (default 3 bars after the break):
+
+For failed breakout (short setup):
+
+price closes back inside range: close <= ORH
+
+plus divergence: stock broke, but SPY did NOT break its ORH by the same rule
+
+For failed breakdown (long setup):
+
+close >= ORL
+
+plus SPY did NOT break its ORL
+
+✅ This is the “trap confirmation” gate.
+
+2) Wire in entry + stop + target (fixing payoff ratio immediately)
+
+For short ORF (failed breakout):
+
+Entry: next bar open (or same-bar close if you support “market on close” sim)
+
+Stop: trapHigh + stopBuffer (default buffer = 0.05% of price or 0.1 ATR)
+
+Target: entry - 2R (default targetMultiple=2.0)
+
+For long ORF (failed breakdown):
+
+mirror it.
+
+Why this helps quickly: your whole system dies when winners are ~1R. This forces 2R+.
+
+3) Add exit logic (keep it configurable like you said)
+
+Defaults I’d ship:
+
+Hard stop always
+
+Take-profit at 2R
+
+Time exit at 3:45 PM ET (configurable)
+
+Optional: structure hold toggle
+If enabled: allow holding past 3:45 only if price is still “in your favor” and hasn’t reclaimed OR level against you.
+
+Keep the hold rule strict and simple for v1 so we can test cleanly.
+
+4) Add the SPY divergence filter (do this early — it’s a huge edge gate)
+
+Implementation detail:
+
+Fetch SPY bars in the same timeframe.
+
+Compute SPY ORH/ORL in the same 9:30–9:35 window.
+
+Use the same breakPct + failWindowBars logic.
+
+Divergence rule example (short):
+
+Stock: broke ORH then failed back inside
+
+SPY: did not break ORH (or broke but did not fail—configurable)
+
+Start with simplest:
+✅ “SPY did not break.”
+
+5) Run a fast backtest loop aimed at “flip soon”
+
+To see if we’re turning losses into wins quickly, we’ll do:
+
+Universe: TSLA, NVDA, META, AAPL, MSFT + SPY
+
+Timeframe: 5-min bars (same as your sim)
+
+Window: last 3 months minimum (so we don’t fool ourselves)
+
+Metrics to print immediately:
+
+Expectancy (Avg R)
+
+Win rate
+
+Avg win / avg loss
+
+Max drawdown
+
+Trades/day
+
+If trades/day < ~1.0 per ticker, loosen breakPct slightly (0.20%) or increase universe.
+
+The fastest way to see “wins soon”
+
+You want the quickest realistic turnaround?
+
+Do these 3 things from day one:
+
+2R target minimum (no more 1R caps)
+
+Remove time stop early on (time stop kills asymmetry)
+
+Trade more symbols (10–20 liquid names) so sample size grows faster
