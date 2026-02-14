@@ -1,0 +1,109 @@
+This is a really clean experiment. And the conclusion you drew is the right one:
+
+The exits were a leak, but the core issue is entries / regime.
+
+When only ~21% of trades even validate to +0.3R, you don’t have a breakout engine — you have a “poke and stall” engine.
+
+Also important: VALID+BE didn’t improve expectancy vs BE-only. That’s the tell that “fixing exits” is no longer the bottleneck.
+
+So here’s where I’d go next.
+
+What to focus on next
+1) Fix the definition of a breakout level
+
+Most “breakout+retest” systems fail because they break out of levels that aren’t real.
+
+Common failure: using too many micro-levels from the same timeframe you trade (5m). Those levels get “tagged” constantly and create fake breakouts.
+
+Upgrade:
+
+Define levels on 15m or 30m, execute on 5m.
+
+Only trade breakouts of major swing highs/lows, not minor pivot noise.
+
+This alone often cuts dead trades massively.
+
+2) Add a “range compression → expansion” setup requirement
+
+Breakouts work best when they’re escaping compression.
+
+Right now you’re catching random extensions.
+
+Setup filter:
+
+Require the 10-bar range to be tight before breakout:
+
+e.g. range_last10 <= 0.8 * range_last30
+
+and then breakout candle TR >= 1.5× avg TR10 (your expansion filter)
+
+This makes it “coil then pop” instead of “random pop.”
+
+3) Add a market regime gate that is momentum-based, not static
+
+Static ATR floors won’t do it.
+
+What you want is “is the overall tape moving right now?”
+
+For longs:
+
+SPY above VWAP and VWAP slope up
+
+SPY making higher highs on 15m
+
+OR SPY 5m EMA9 > EMA21 and slope positive
+
+If SPY is flat/choppy, your breakout success rate collapses.
+
+This is the #1 cause of low validation rates.
+
+4) Fix friction realism separately (don’t let it confuse signal quality)
+
+Your “stop at entry but still loses due to slippage” is realistic, but for diagnosing edge it’s muddy.
+
+For the next test:
+
+Keep slippage, but also report gross R before slippage vs net R after slippage.
+If gross is still bad, entries are bad. If gross is decent and net is bad, execution model is too harsh.
+
+The single highest-leverage next diagnostic
+
+Before changing anything, run this:
+
+Validation rate by session
+
+What % validate within 3 bars during:
+
+Open (first 60–90 min)
+
+Midday
+
+Power hour
+
+If validation is concentrated in one session, your “edge” may exist only there.
+
+Given your “spike then mean revert” behavior, I’d bet open/power hour are better than midday.
+
+My recommendation for your next experiment
+
+Do one change:
+
+✅ Change breakout level timeframe to 15m/30m swings
+
+Keep everything else identical (validation + BE stays).
+
+Rerun the same date window.
+
+If validation rate jumps from ~21% → ~35–45%, you’re on the right track.
+
+If it stays ~20%, then the market regime filter is the bigger lever.
+
+What I need from you to choose the best next lever
+
+Just answer these two:
+
+Are your breakout levels currently based on 5m highs/lows, or higher timeframe pivots?
+
+What tickers are in the test set (the 5 names)?
+
+Then I’ll tell you the next single change that gives the best chance of pushing validation rate up.
