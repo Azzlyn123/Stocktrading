@@ -337,7 +337,7 @@ export function tieredToLegacy(config: TieredStrategyConfig, tier: TradeTier): S
 }
 
 export function selectTier(volRatio: number, atrRatio: number, config: TieredStrategyConfig): TradeTier | null {
-  const tiers: TradeTier[] = ["A", "B", "C"];
+  const tiers: TradeTier[] = ["A", "B"];
   for (const tier of tiers) {
     const tc = config.tiers[tier];
     if (volRatio >= tc.volumeRatioMin && atrRatio >= tc.atrRatioMin) {

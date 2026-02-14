@@ -1,5 +1,5 @@
 import type { Candle, StrategyConfig, BreakoutQualification, TierConfig, TieredStrategyConfig } from "./types";
-import { bodyPct, candleRange, avgVolume, avgRange, calculateATR, calculateEMA } from "./indicators";
+import { bodyPct, candleRange, avgVolume, avgRange, calculateATR, calculateEMA, checkATRExpansion } from "./indicators";
 
 export function checkBreakoutQualification(
   candle: Candle,
@@ -95,8 +95,15 @@ export function checkTieredBreakout(
     }
   }
 
+  const allBarsForExpansion = [...recentBars, currentCandle];
+  const atrExpansion = checkATRExpansion(allBarsForExpansion, strategyConfig.atrLen, 3, 5, 1.08);
+  const atrExpandingOk = atrExpansion.expanding;
+  if (!atrExpandingOk) {
+    reasons.push(`ATR not expanding: recent/prior ratio ${atrExpansion.ratio.toFixed(2)} < 1.08 required`);
+  }
+
   return {
-    qualified: closedBeyond && bodyOk && volOk && atrOk,
+    qualified: closedBeyond && bodyOk && volOk && atrOk && atrExpandingOk,
     reasons,
     metrics: {
       bodyPct: bp,
