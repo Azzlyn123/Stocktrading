@@ -3952,23 +3952,22 @@ export async function runORFSimulation(
       const trSession = minutesSinceOpen <= 90 ? "open" : minutesSinceOpen <= 240 ? "mid" : "power";
       const trRegime = regimeResult?.aligned ? "trending" : regimeResult?.chopping ? "choppy" : "neutral";
       tradeRegimes.push(trRegime);
-      const trDir = trade.direction === "SHORT" ? "orf_short" : "orf_long";
       if (!tradesByRegime[trRegime]) tradesByRegime[trRegime] = { wins: 0, losses: 0, pnl: 0 };
       if (!tradesBySession[trSession]) tradesBySession[trSession] = { wins: 0, losses: 0, pnl: 0 };
-      if (!tradesByTier[trDir]) tradesByTier[trDir] = { wins: 0, losses: 0, pnl: 0 };
+      if (!tradesByTier["rs_long"]) tradesByTier["rs_long"] = { wins: 0, losses: 0, pnl: 0 };
       tradesByRegime[trRegime].pnl += pnl;
       tradesBySession[trSession].pnl += pnl;
-      tradesByTier[trDir].pnl += pnl;
-      if (pnl > 0) { tradesByRegime[trRegime].wins++; tradesBySession[trSession].wins++; tradesByTier[trDir].wins++; }
-      else { tradesByRegime[trRegime].losses++; tradesBySession[trSession].losses++; tradesByTier[trDir].losses++; }
+      tradesByTier["rs_long"].pnl += pnl;
+      if (pnl > 0) { tradesByRegime[trRegime].wins++; tradesBySession[trSession].wins++; tradesByTier["rs_long"].wins++; }
+      else { tradesByRegime[trRegime].losses++; tradesBySession[trSession].losses++; tradesByTier["rs_long"].losses++; }
 
       addTrade(buildAnalyticsRecord(
-        { entryPrice: trade.entryPrice, stopPrice: trade.originalStopPrice, shares: trade.originalShares, tier: trDir, direction: trade.direction, entryBarIndex: trade.entryBarIndex },
+        { entryPrice: trade.entryPrice, stopPrice: trade.originalStopPrice, shares: trade.originalShares, tier: "rs_long", direction: "LONG", entryBarIndex: trade.entryBarIndex },
         ticker, exitPrice, exitReason,
         barTimestamp,
         entryTimestamp,
         compositeR, pnl,
-        { marketRegime: trRegime, session: trSession, spyAligned: regimeResult?.aligned, entryMode: "orf" },
+        { marketRegime: trRegime, session: trSession, spyAligned: regimeResult?.aligned, entryMode: "rs_continuation" },
       ));
 
       tradesGenerated++;
@@ -4429,12 +4428,13 @@ export async function runORFSimulation(
         tradeMFEs: tradeMFEs.length > 0 ? tradeMFEs : undefined,
         tradeMAEs: tradeMAEs.length > 0 ? tradeMAEs : undefined,
         tradeHit1R: tradeHit1R.length > 0 ? tradeHit1R : undefined,
-        tradeHitTarget: tradeHitTarget.length > 0 ? tradeHitTarget : undefined,
-        tradeSlippageCostsR: tradeSlippageCostsR.length > 0 ? tradeSlippageCostsR : undefined,
-        tradeScratchAfterPartial: tradeScratchAfterPartial.length > 0 ? tradeScratchAfterPartial : undefined,
-        tradeLossBuckets: tradeLossBuckets.length > 0 ? tradeLossBuckets : undefined,
-        tradeTickers: tradeTickers.length > 0 ? tradeTickers : undefined,
-        tradeRegimes: tradeRegimes.length > 0 ? tradeRegimes : undefined,
+      tradeHitTarget: tradeHitTarget.length > 0 ? tradeHitTarget : undefined,
+      tradeMAEs: tradeMAEs.length > 0 ? tradeMAEs : undefined,
+      tradeSlippageCostsR: tradeSlippageCostsR.length > 0 ? tradeSlippageCostsR : undefined,
+      tradeScratchAfterPartial: tradeScratchAfterPartial.length > 0 ? tradeScratchAfterPartial : undefined,
+      tradeLossBuckets: tradeLossBuckets.length > 0 ? tradeLossBuckets : undefined,
+      tradeTickers: tradeTickers.length > 0 ? tradeTickers : undefined,
+      tradeRegimes: tradeRegimes.length > 0 ? tradeRegimes : undefined,
         maxDrawdown: Number(maxDD.toFixed(2)),
         byRegime: tradesByRegime,
         bySession: tradesBySession,
@@ -4965,12 +4965,13 @@ export async function runRSContinuationSimulation(
         tradeMFEs: tradeMFEs.length > 0 ? tradeMFEs : undefined,
         tradeMAEs: tradeMAEs.length > 0 ? tradeMAEs : undefined,
         tradeHit1R: tradeHit1R.length > 0 ? tradeHit1R : undefined,
-        tradeHitTarget: tradeHitTarget.length > 0 ? tradeHitTarget : undefined,
-        tradeSlippageCostsR: tradeSlippageCostsR.length > 0 ? tradeSlippageCostsR : undefined,
-        tradeScratchAfterPartial: tradeScratchAfterPartial.length > 0 ? tradeScratchAfterPartial : undefined,
-        tradeLossBuckets: tradeLossBuckets.length > 0 ? tradeLossBuckets : undefined,
-        tradeTickers: tradeTickers.length > 0 ? tradeTickers : undefined,
-        tradeRegimes: tradeRegimes.length > 0 ? tradeRegimes : undefined,
+      tradeHitTarget: tradeHitTarget.length > 0 ? tradeHitTarget : undefined,
+      tradeMAEs: tradeMAEs.length > 0 ? tradeMAEs : undefined,
+      tradeSlippageCostsR: tradeSlippageCostsR.length > 0 ? tradeSlippageCostsR : undefined,
+      tradeScratchAfterPartial: tradeScratchAfterPartial.length > 0 ? tradeScratchAfterPartial : undefined,
+      tradeLossBuckets: tradeLossBuckets.length > 0 ? tradeLossBuckets : undefined,
+      tradeTickers: tradeTickers.length > 0 ? tradeTickers : undefined,
+      tradeRegimes: tradeRegimes.length > 0 ? tradeRegimes : undefined,
         maxDrawdown: Number(maxDD.toFixed(2)),
         byRegime: tradesByRegime,
         bySession: tradesBySession,

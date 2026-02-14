@@ -635,8 +635,9 @@ export async function registerRoutes(
       return results;
     };
 
-    const variant1Results = await runVariant({ noTarget: false });
-    const variant2Results = await runVariant({ noTarget: true });
+    const v1Results = await runVariant({ noTarget: false, noPartial: false });
+    const v2Results = await runVariant({ noTarget: true, noPartial: false });
+    const v3Results = await runVariant({ noTarget: true, noPartial: true });
 
     const aggregate = (results: any[]) => {
       let trades = 0, wins = 0, totalR = 0;
@@ -644,10 +645,10 @@ export async function registerRoutes(
       const allMFEs: number[] = [];
       const allMAEs: number[] = [];
       const lossBuckets: Record<string, number> = {
-        stopped_before_0.3R: 0,
-        reversed_after_0.3R: 0,
-        partial_then_scratch: 0,
-        other: 0
+        "stopped_before_0.3R": 0,
+        "reversed_after_0.3R": 0,
+        "partial_then_scratch": 0,
+        "other": 0
       };
       
       let mfe1R = 0, mfe15R = 0, mfe2R = 0;
@@ -695,14 +696,10 @@ export async function registerRoutes(
       };
     };
 
-    const variant1Results = await runVariant({ noTarget: false, noPartial: false });
-    const variant2Results = await runVariant({ noTarget: true, noPartial: false });
-    const variant3Results = await runVariant({ noTarget: true, noPartial: true });
-
     res.json({
-      variant1: aggregate(variant1Results),
-      variant2: aggregate(variant2Results),
-      variant3: aggregate(variant3Results),
+      variant1: aggregate(v1Results),
+      variant2: aggregate(v2Results),
+      variant3: aggregate(v3Results),
       dates
     });
   });
@@ -764,10 +761,11 @@ export async function registerRoutes(
     const v2 = await runFullValidation({ noTarget: true, noPartial: false });
     const v3 = await runFullValidation({ noTarget: true, noPartial: true });
 
-    res.json({
+    res.header('Content-Type', 'application/json');
+    res.send(JSON.stringify({
       v1, v2, v3,
       windows: { dev: devDates.length, test: testDates.length }
-    });
+    }));
   });
 
   app.post("/api/internal/rs-validate", async (req, res) => {

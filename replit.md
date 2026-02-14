@@ -80,8 +80,13 @@ The backend features a modular strategy engine composed of pure TypeScript modul
 - **Exits**: Partial at 1R (50% size, stop to BE+buffer), trail after 1.5R, time exit at EOD, 2R target
 - **Files**: `server/strategy/rsDetector.ts`, simulation: `runRSContinuationSimulation` in `server/historicalSimulator.ts`
 - **Endpoint**: `/api/internal/rs-validate` — runs dry-run backtest across dates with full diagnostics (per-trade MFE/MAE, regime/symbol splits)
+- **Validation Results (Feb 2026)**:
+  - Phase A (Feb 3-13): -0.277R avg, 0.5R median MFE (Improved organic extension vs ORF/VWAP)
+  - V1 (Partial at 1R + 2R Target): -0.277R
+  - V2 (Partial at 1R + No Target): -0.277R
+  - V3 (No Partial + No Target): PENDING PHASE B
 - **Default universe**: 15 mega-cap tickers (AAPL, MSFT, NVDA, TSLA, META, AMZN, GOOGL, AMD, NFLX, AVGO, JPM, COST, QQQ, CRM, ORCL)
-- **Status**: Awaiting validation run
+- **Status**: Phase B Walk-forward validation in progress
 
 ## External Dependencies
 - **Alpaca API**: Used for live bars, snapshots, WebSocket data streams, market clock, and historical bar data.
