@@ -1,0 +1,126 @@
+What I recommend now is not another round of building. It’s a clean, staged validation that answers one question:
+
+Does RS Continuation produce positive expectancy after friction across enough trades?
+
+Here’s the validation plan I’d run next.
+
+1) First: a 2-phase validation (so we don’t fool ourselves)
+Phase A — Mechanics sanity (2–5 trading days)
+
+Run a short range just to confirm:
+
+trades are triggering for the right reasons
+
+RS slope/threshold logic is doing what you think
+
+exits behave as designed (partial, trail, target)
+
+diagnostics look sensible (MFE/MAE not broken)
+
+Output to check:
+
+10–30 trades ideally across the 15 symbols
+
+a few full trade traces (entry reason, RS values, SPY VWAP status, exit path)
+
+If Phase A looks clean, move immediately to Phase B.
+
+Phase B — Walk-forward (3 months minimum)
+
+Do a real walk-forward:
+
+Dev: first ~8 weeks
+
+Test: last ~4 weeks (or at least 10–15 trading days)
+
+Freeze params. No tweaks mid-run.
+
+2) What to measure (these are the “truth metrics”)
+Core
+
+Trades
+
+Trades/day (combined + per symbol)
+
+Win rate
+
+Avg R
+
+Profit factor
+
+Max drawdown
+
+Structure (RS strategies live/die here)
+
+Median MFE (R) and median MAE (R)
+
+% trades reaching:
+
+1R
+
+1.5R
+
+2R
+
+“giveback” after 1R partial (how often runner stops near BE)
+
+Robustness
+
+Per-symbol expectancy distribution (no single symbol carrying)
+
+Regime split (trend/chop) using your detector
+
+Time-of-day split (10–11, 11–1, 1–3:45)
+
+If it’s only profitable in one tiny time window, that’s a warning sign.
+
+3) One important adjustment before the big run
+
+You currently have:
+
+partial at 1R
+
+trail at 1.5R
+
+2R target
+
+That’s okay, but RS continuation often benefits from no hard 2R target (let the trail take you out), because the edge comes from occasional 3R+ drifts.
+
+So I recommend you run two variants in validation:
+
+Variant 1 (current): partial 1R, trail 1.5R, target 2R
+Variant 2 (trend-friendly): partial 1R, trail 1.5R, no target (EOD exit)
+
+That’s not curve-fitting; it’s testing the thesis:
+
+“winners can run.”
+
+4) Pass/fail criteria (so we don’t rationalize later)
+
+Over the test window (not dev):
+
+✅ Pass if:
+
+Avg R ≥ 0.00
+
+Profit factor ≥ 1.05
+
+Median MFE is meaningfully > 0 (not like ORF’s 0.04R)
+
+Results aren’t dominated by 1–2 symbols
+
+❌ Fail if:
+
+Avg R stays ≤ -0.05
+
+Median MFE ~ 0 again
+
+Walk-forward collapses like ORF did
+
+5) Exactly what to do next (action list)
+
+Run Phase A on Feb 3–13 (same period you used for ORF comparisons) for both variants
+
+If mechanics are clean, run the 3-month walk-forward for both variants
+
+Paste the summary tables (dev/test + per-symbol + MFE/MAE medians)

@@ -12,6 +12,7 @@ export interface RSConfig {
   riskPct: number;
   maxTradesPerTicker: number;
   timeExitMinutes: number;
+  noTarget?: boolean;          // Variant 2: Let winners run (no hard target)
 }
 
 export const DEFAULT_RS_CONFIG: RSConfig = {

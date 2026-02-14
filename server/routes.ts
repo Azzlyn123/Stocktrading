@@ -602,6 +602,78 @@ export async function registerRoutes(
     res.json({ results });
   });
 
+  app.post("/api/internal/rs-phase-a", async (req, res) => {
+    const { tickers } = req.body;
+    const dates = [
+      "2026-02-03", "2026-02-04", "2026-02-05", "2026-02-06", "2026-02-09",
+      "2026-02-10", "2026-02-11", "2026-02-12", "2026-02-13"
+    ];
+    const tickerList = tickers ?? [
+      "AAPL","MSFT","NVDA","TSLA","META","AMZN","GOOGL","AMD","NFLX","AVGO",
+      "JPM","COST","QQQ","CRM","ORCL",
+    ];
+    const userId = "1a70fbad-ee1b-46ea-96a3-36749e24f3ba";
+
+    const runVariant = async (config: Partial<RSConfig>) => {
+      const results: any[] = [];
+      for (const date of dates) {
+        try {
+          const result = await runRSContinuationSimulation(
+            `phase-a-${date}-${Date.now()}`,
+            date,
+            userId,
+            storage,
+            tickerList,
+            { dryRun: true, rsConfig: { ...DEFAULT_RS_CONFIG, ...config } },
+          );
+          results.push({ date, ...(result as any) });
+        } catch (err: any) {
+          results.push({ date, error: err.message });
+        }
+      }
+      return results;
+    };
+
+    const variant1Results = await runVariant({ noTarget: false });
+    const variant2Results = await runVariant({ noTarget: true });
+
+    const aggregate = (results: any[]) => {
+      let trades = 0, wins = 0, totalR = 0;
+      const allRs: number[] = [];
+      const allMFEs: number[] = [];
+      const allMAEs: number[] = [];
+      
+      for (const day of results) {
+        if (day.error || !day.tradeRs) continue;
+        trades += day.trades ?? 0;
+        wins += day.wins ?? 0;
+        totalR += (day.tradeRs as number[]).reduce((a, b) => a + b, 0);
+        allRs.push(...day.tradeRs);
+        if (day.tradeMFEs) allMFEs.push(...day.tradeMFEs);
+        if (day.tradeMAEs) allMAEs.push(...day.tradeMAEs);
+      }
+      
+      const sortedMFE = [...allMFEs].sort((a, b) => a - b);
+      const medianMFE = sortedMFE.length > 0 ? sortedMFE[Math.floor(sortedMFE.length / 2)] : 0;
+      const sortedMAE = [...allMAEs].sort((a, b) => a - b);
+      const medianMAE = sortedMAE.length > 0 ? sortedMAE[Math.floor(sortedMAE.length / 2)] : 0;
+
+      return {
+        trades,
+        winRate: trades > 0 ? (wins / trades * 100).toFixed(1) + "%" : "0%",
+        avgR: trades > 0 ? (totalR / trades).toFixed(3) : "0",
+        medianMFE: medianMFE.toFixed(3),
+        medianMAE: medianMAE.toFixed(3),
+      };
+    };
+
+    res.json({
+      variant1: aggregate(variant1Results),
+      variant2: aggregate(variant2Results),
+      dates
+    });
+  });
+
   app.post("/api/internal/rs-validate", async (req, res) => {
     const { dates, tickers, rsConfig } = req.body;
     if (!dates || !Array.isArray(dates)) {
