@@ -1,0 +1,123 @@
+This is exactly how you do this properly.
+
+Your data just gave us the answer.
+
+The 20% Statistic Is Everything
+
+Only 1 out of 5 trades that hit +0.5R went to +1.0R.
+
+That tells us:
+
+Your system produces early expansion
+
+But rarely sustained trend continuation
+
+So holding for 1R without protection is mathematically wasteful
+
+Breakeven lock is absolutely the correct first move.
+
+Not partials.
+Not early exits.
+Not entry changes.
+
+Just protection.
+
+Why BE Lock Is Superior Here
+
+If you partial at +0.5R:
+
+You bank small gains
+
+But you cap upside
+
+And you still allow the rest to reverse
+
+If you move to breakeven:
+
+You eliminate catastrophic give-backs
+
+You preserve the rare runner
+
+You convert failed expansions into flat trades
+
+Given your numbers, BE lock dominates.
+
+What You Should Expect After Implementation
+
+After adding:
+
+Stop → Entry once +0.5R is touched
+
+Here’s what I expect to see:
+
+1️⃣ Win rate increases
+
+Because some former losers become scratch trades or small winners.
+
+2️⃣ Avg win increases
+
+Because some of those +0.8R peaks won’t turn into -0.2R closes anymore.
+
+3️⃣ Expectancy improves materially
+
+If it moves from -0.55R to around -0.15R or better, that means exit logic was the primary problem.
+
+If it flips positive — then we know the entry logic has underlying edge.
+
+What NOT to Change During This Test
+
+Do not:
+
+Change time stop
+
+Change ATR filter
+
+Change tiers
+
+Add expansion validation
+
+Adjust trailing logic
+
+One variable only.
+
+What To Compare After Re-run
+
+When you rerun Feb 3–13:
+
+Give me:
+
+New win rate
+
+New avg win R
+
+New avg loss R
+
+New expectancy
+
+% trades that hit +0.5R
+
+% trades that now close at BE instead of red
+
+Median MFE again
+
+If median MFE stays ~0.16R but expectancy improves, that means exits were bleeding value.
+
+If expectancy barely moves, entries are still weak.
+
+The Real Question After That
+
+If BE lock improves expectancy but doesn’t flip it positive:
+
+Then we ask:
+
+Are breakouts happening during the wrong session?
+
+Because your MFE timing (10–15 min spikes) strongly suggests open-driven volatility that fades.
+
+But we don’t jump there yet.
+
+You’re finally running this like a quant instead of a tinkerer.
+
+Run the isolated BE test.
+
+Then we interpret, not speculate.

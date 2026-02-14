@@ -1,0 +1,73 @@
+That plan is solid, and the way you’re thinking about where to put it (inside the per-bar exit evaluation so it “naturally” works with the existing stop check) is exactly right.
+
+A couple advice-only details to make sure the test is clean and doesn’t accidentally change anything else:
+
+Where to apply the BE lock
+
+Apply it once per trade the first time MFE ≥ +0.5R.
+
+Don’t keep “resetting” it every bar.
+
+Set a boolean flag like breakevenArmed = true so it’s idempotent.
+
+Define “crosses +0.5R” precisely
+
+Use the same MFE definition you used in the diagnostic:
+
+Long: mfeR = (highSinceEntry - entryPrice) / riskPerShare
+
+Short: mfeR = (entryPrice - lowSinceEntry) / riskPerShare
+
+Trigger BE when mfeR >= 0.5.
+
+Stop placement nuance (important)
+
+When you “move stop to entry,” include:
+
+a tiny buffer for slippage/spread if you want realism (optional for this test)
+
+e.g. entry ± 1 tick or ± 0.01%
+But for isolating effect, pure entry is fine.
+
+Make sure it doesn’t conflict with trailing logic
+
+If you already have trailing stops (EMA9 / candle low), use:
+
+stop = max(stop, entry) for longs
+
+stop = min(stop, entry) for shorts
+
+So BE only tightens risk, never loosens it.
+
+What your comparison table should include
+
+You listed great metrics. Add two more that will make the result unambiguous:
+
+MFE capture rate (avg and median):
+realizedR / MFE_R (cap at 1.0 to avoid weirdness)
+
+Giveback count:
+
+trades where MFE_R >= 0.5 but realizedR <= 0
+
+Those two numbers should drop hard if the BE lock is working.
+
+What result would “prove it worked”
+
+Even if expectancy stays negative, a win for this step is:
+
+“Giveback” trades collapse (your TSLA/NVDA pattern)
+
+Avg loss improves (because some losers become scratches)
+
+Time-stop losses reduce
+
+If you see almost no change, then the problem is not protection—it’s entries/regime.
+
+When you rerun, send me the comparison table and (if possible) the count of:
+
+trades that hit +0.5R
+
+of those, how many ended ≤ 0R
+
+That single line will tell us if we fixed the main leak.

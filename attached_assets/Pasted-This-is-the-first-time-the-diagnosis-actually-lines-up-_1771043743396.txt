@@ -1,0 +1,144 @@
+This is the first time the diagnosis actually lines up cleanly.
+
+And I’m going to push back slightly — not to contradict you, but to sharpen the thinking.
+
+The Critical Number
+
+Median MFE = +0.16R
+
+That is very important.
+
+That means half your trades never even moved 0.16R in your favor.
+
+So let’s be precise:
+
+Yes, some trades hit +0.9R and got butchered.
+
+But most trades barely moved.
+
+That means:
+
+You have two populations of trades:
+
+True expansion attempts (minority)
+
+Dead noise breakouts (majority)
+
+Your job is not just to fix exits —
+It’s to separate those populations faster.
+
+🔍 What Your 27.8% Stat Really Means
+
+27.8% hit +0.5R.
+
+That’s actually promising.
+
+But:
+
+Only 16.7% ended green.
+
+So ~11% were profitable excursions that you gave back.
+
+That’s salvageable.
+
+🧠 The Two Surgical Changes You Proposed
+
+They are correct — but they solve different problems.
+
+Change 1: Early validation (0.3R in 3 bars)
+
+This attacks Population #2 (dead trades).
+
+This is good.
+
+But your median MFE is 0.16R.
+
+So if you require +0.3R within 3 bars, expect:
+
+Trade count to drop further.
+
+Win rate might improve.
+
+But sample size shrinks again.
+
+That’s fine — just understand it.
+
+Change 2: +0.5R Breakeven Lock
+
+This attacks Population #1 (valid expansions that reverse).
+
+This is absolutely necessary.
+
+This is not optional.
+
+🎯 The Order Matters
+
+You don’t implement both at once.
+
+Do this first:
+
+✅ Add +0.5R breakeven lock only.
+
+Leave the 30-min time stop alone temporarily.
+
+Why?
+
+Because we need to isolate the effect.
+
+If expectancy improves materially, you’ve proven exits are the bottleneck.
+
+If expectancy stays deeply negative, then entries are still weak.
+
+⚠️ Important
+
+Your median MFE of 0.16R means:
+
+The strategy is not producing consistent expansion.
+
+So don’t assume exits are the entire problem.
+
+But the +0.5R lock is mathematically undeniable improvement.
+
+📊 What I Expect After Lock Rule
+
+After adding:
+
+Stop moves to breakeven at +0.5R
+
+You should see:
+
+Win rate rise
+
+Avg win increase
+
+Expectancy improve significantly
+
+Fewer catastrophic give-backs
+
+If expectancy remains < -0.2R after that, then entry logic is still structurally flawed.
+
+🔬 Then, After That Test
+
+If still negative:
+
+Then add:
+
+“Must reach +0.3R within 3 bars”
+
+That becomes the next filter.
+
+🚀 Big Picture
+
+You’re not trying to optimize yet.
+
+You’re trying to answer one question:
+
+Is there underlying edge in the expansion moves?
+
+The +0.5R lock tells us that immediately.
+
+One more question before you implement:
+
+When trades hit +0.5R, how often did they later hit +1.0R?
+
+That ratio tells us whether partial profit might be better than BE lock.

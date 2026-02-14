@@ -1,0 +1,177 @@
+Good. This is the first time we’re looking at something that actually has edge potential.
+
+This changes everything.
+
+Your entries are not the core problem.
+
+Your exits are destroying expectancy.
+
+🔎 What The MFE Data Really Says
+
+This line is the most important:
+
+27.8% hit +0.5R but win rate is only 16.7%
+
+That means:
+
+You have positive excursion. You are failing to monetize it.
+
+Even more telling:
+
++0.94R → closed -0.10R
+
++1.24R → closed +0.01R
+
+That is not a bad setup.
+That is catastrophic exit logic.
+
+🧠 What’s Actually Happening
+
+Your system currently says:
+
+“If not +0.5R after 30 minutes → exit at current price.”
+
+But your MFE data shows:
+
+Most trades spike early (10–15 minutes)
+
+Then mean revert
+
+Then time stop evaluates the current price at minute 30
+
+So you’re measuring the wrong thing
+
+You're punishing trades for mean reversion after expansion.
+
+That’s not a breakout failure.
+
+That’s an exit design flaw.
+
+🎯 The Core Structural Fix
+
+You need to separate:
+
+Momentum validation
+from
+Profit protection
+
+Right now your time stop is acting as both — and failing at both.
+
+🔥 The Correct Order of Exit Improvements
+
+We don’t change everything at once.
+
+We fix in this order:
+
+1️⃣ Add an “Expansion Validation” Rule (Critical)
+
+If trade reaches:
+
++0.3R within first 2–3 bars
+
+Then it’s a valid expansion attempt.
+
+If it does NOT → scratch it early (small loss or flat).
+
+This replaces the need for a 30-minute time stop.
+
+You’re currently waiting too long to determine if it’s dead.
+
+2️⃣ Add a +0.5R Lock Rule
+
+When trade hits:
+
++0.5R
+
+Immediately:
+
+Move stop to breakeven
+OR
+
+Lock in +0.1R
+
+This alone would have saved multiple trades in your dataset.
+
+3️⃣ Remove the 30-Minute “Current Price” Time Stop
+
+It is structurally flawed.
+
+If you want a time-based rule, make it:
+
+If trade has NOT reached +0.3R within 15 minutes → exit.
+
+Not “check at 30 minutes regardless of what happened earlier.”
+
+4️⃣ Optional: Partial at +0.5R
+
+This depends on your personality.
+
+Given your MFE distribution:
+
+Many trades peak around 0.5–1.0R
+
+Few sustain beyond
+
+Partial at +0.5R might increase expectancy dramatically.
+
+🚨 Important
+
+Before implementing ANYTHING:
+
+Look at one metric:
+
+Median MFE in R
+
+If median MFE > 0.5R
+→ strategy has edge
+→ exits are broken
+
+If median MFE < 0.3R
+→ entries still weak
+
+From what you showed, median MFE looks meaningful.
+
+💡 My Recommendation (Single First Change)
+
+Don’t add 4 rules.
+
+Do this:
+
+Replace 30-min time stop with:
+If trade has not reached +0.3R within 3 bars → exit.
+
+
+And:
+
+If trade reaches +0.5R → move stop to breakeven.
+
+
+That’s it.
+
+Re-run 10 days.
+
+Why This Is Smart
+
+It cuts dead trades early.
+
+It protects early expansion.
+
+It doesn’t overcomplicate trailing logic.
+
+It aligns with your actual MFE timing data (10–15 minutes).
+
+Do NOT change:
+
+ATR filters
+
+Breakout logic
+
+Tiers
+
+Targets
+
+Until exit behavior is fixed.
+
+Now I need one more thing:
+
+What is the median MFE across those 18 trades?
