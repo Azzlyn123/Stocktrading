@@ -1,0 +1,129 @@
+You’ve answered the key questions and now we’re not guessing anymore.
+
+Let me be very direct:
+
+The problem is almost certainly the 5-minute level definition.
+
+You are breaking out of intra-noise structure during the most volatile time of day.
+
+On the open:
+
+5m highs/lows get tagged constantly.
+
+Liquidity hunts sweep them.
+
+They are not “real” resistance.
+
+They are just micro-balance inside a larger 15m structure.
+
+So your system is doing exactly what it’s told:
+
+“Break above local resistance.”
+
+But the market sees:
+
+“That’s just the first 5-minute range.”
+
+That mismatch explains:
+
+20% validation
+
+Median MFE ~0.16R
+
+Lots of +0.3R pokes that stall
+
+You Don’t Need 10 More Tweaks
+
+You need one structural upgrade:
+
+🔥 Move breakout level detection to 15m structure.
+
+Keep execution on 5m.
+But define resistance from 15m swing highs.
+
+That alone changes the entire quality of what qualifies as a breakout.
+
+Why This Is High Leverage
+
+5m structure = noise.
+
+15m structure =:
+
+Larger participants
+
+More meaningful liquidity pools
+
+Fewer but higher quality levels
+
+Breakouts that actually matter
+
+You will:
+
+Take fewer trades
+
+But validation rate should jump materially
+
+If validation goes from ~20% → 35–45%, expectancy math changes instantly.
+
+What I Expect If You Do This
+
+After switching to 15m level detection:
+
+Trade count drops further
+
+Validation rate increases
+
+Median MFE increases
+
+Fewer time-stop style failures
+
+More real expansion attempts
+
+If that does NOT happen, then the breakout concept itself may not have edge in this universe.
+
+But right now you’re not even testing real breakouts.
+
+You’re testing microstructure.
+
+Important: Do Not Change Anything Else
+
+Keep:
+
+ATR expansion filter
+
+3-bar validation
+
++0.5R BE lock
+
+Same tickers
+
+Same date range
+
+One change only: level timeframe.
+
+Realistic Expectation
+
+You are probably one meaningful structural change away from seeing whether this strategy has a core edge.
+
+If validation improves meaningfully → continue refining.
+
+If it doesn’t → stop investing time in this breakout model and pivot.
+
+This is no longer random tinkering.
+
+This is now a controlled structural experiment.
+
+Implement 15m breakout levels.
+Rerun the same 10 days.
+
+Then bring me:
+
+Trade count
+
+Validation %
+
+Median MFE
+
+Expectancy
+
+And we’ll know whether this thing is real or not.
