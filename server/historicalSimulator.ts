@@ -1631,7 +1631,10 @@ export async function runHistoricalSimulation(
           state.signalState === "IDLE" &&
           i - state.lastBreakoutBarIndex > 10
         ) {
-          const resistance = findResistance(state.bars5m, 30);
+          const resistance15mLookback = Math.min(state.bars15m.length, 20);
+          const resistance = resistance15mLookback >= 4
+            ? findResistance(state.bars15m, resistance15mLookback)
+            : null;
           if (resistance) {
             diag.resistFound++;
             const resistDistPct =
