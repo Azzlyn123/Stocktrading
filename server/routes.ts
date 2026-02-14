@@ -728,6 +728,63 @@ export async function registerRoutes(
     ];
     const userId = "1a70fbad-ee1b-46ea-96a3-36749e24f3ba";
 
+    const aggregate = (results: any[]) => {
+      let trades = 0, wins = 0, totalR = 0;
+      const allRs: number[] = [];
+      const allMFEs: number[] = [];
+      const allMAEs: number[] = [];
+      const lossBuckets: Record<string, number> = {
+        "stopped_before_0.3R": 0,
+        "reversed_after_0.3R": 0,
+        "partial_then_scratch": 0,
+        "other": 0
+      };
+      
+      let mfe1R = 0, mfe15R = 0, mfe2R = 0;
+
+      for (const day of results) {
+        if (day.error || !day.tradeRs) continue;
+        trades += day.trades ?? 0;
+        wins += day.wins ?? 0;
+        totalR += (day.tradeRs as number[]).reduce((a, b) => a + b, 0);
+        allRs.push(...day.tradeRs);
+        if (day.tradeMFEs) {
+          allMFEs.push(...day.tradeMFEs);
+          for (const mfe of day.tradeMFEs) {
+            if (mfe >= 1.0) mfe1R++;
+            if (mfe >= 1.5) mfe15R++;
+            if (mfe >= 2.0) mfe2R++;
+          }
+        }
+        if (day.tradeMAEs) allMAEs.push(...day.tradeMAEs);
+        if (day.tradeLossBuckets) {
+          for (const bucket of day.tradeLossBuckets) {
+            if (lossBuckets[bucket] !== undefined) lossBuckets[bucket]++;
+            else lossBuckets.other++;
+          }
+        }
+      }
+      
+      const sortedMFE = [...allMFEs].sort((a, b) => a - b);
+      const medianMFE = sortedMFE.length > 0 ? sortedMFE[Math.floor(sortedMFE.length / 2)] : 0;
+      const sortedMAE = [...allMAEs].sort((a, b) => a - b);
+      const medianMAE = sortedMAE.length > 0 ? sortedMAE[Math.floor(sortedMAE.length / 2)] : 0;
+
+      return {
+        trades,
+        winRate: trades > 0 ? (wins / trades * 100).toFixed(1) + "%" : "0%",
+        avgR: trades > 0 ? (totalR / trades).toFixed(3) : "0",
+        medianMFE: medianMFE.toFixed(3),
+        medianMAE: medianMAE.toFixed(3),
+        mfeDist: {
+          ge1R: trades > 0 ? (mfe1R / trades * 100).toFixed(1) + "%" : "0%",
+          ge15R: trades > 0 ? (mfe15R / trades * 100).toFixed(1) + "%" : "0%",
+          ge2R: trades > 0 ? (mfe2R / trades * 100).toFixed(1) + "%" : "0%"
+        },
+        lossDecomp: lossBuckets
+      };
+    };
+
     const runVariantOnDates = async (config: Partial<RSConfig>, dates: string[]) => {
       const results: any[] = [];
       for (const date of dates) {
