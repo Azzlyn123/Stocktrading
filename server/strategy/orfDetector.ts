@@ -1,5 +1,5 @@
 import type { Candle } from "./types";
-import { calculateATR, avgVolume } from "./indicators";
+import { calculateATR, calculateVWAP } from "./indicators";
 
 export interface ORFConfig {
   breakPct: number;
@@ -14,6 +14,14 @@ export interface ORFConfig {
   maxTradesPerTicker: number;
   trailAfterR: number;
   requireVolConfirmation: boolean;
+  minOR_ATR: number;
+  minBreak_ATR: number;
+  partialExitEnabled: boolean;
+  partialExitR: number;
+  partialExitPct: number;
+  vwapExitEnabled: boolean;
+  vwapExitMode: "full" | "partial" | "off";
+  requireRSConfirmation: boolean;
 }
 
 export const DEFAULT_ORF_CONFIG: ORFConfig = {
@@ -29,6 +37,14 @@ export const DEFAULT_ORF_CONFIG: ORFConfig = {
   maxTradesPerTicker: 3,
   trailAfterR: 1.5,
   requireVolConfirmation: true,
+  minOR_ATR: 0.25,
+  minBreak_ATR: 0.10,
+  partialExitEnabled: true,
+  partialExitR: 1.0,
+  partialExitPct: 0.5,
+  vwapExitEnabled: false,
+  vwapExitMode: "off",
+  requireRSConfirmation: true,
 };
 
 export interface OpeningRange {
@@ -49,6 +65,24 @@ export function calculateOpeningRange(bars5m: Candle[]): OpeningRange | null {
   };
 }
 
+export function checkORQualityGate(
+  or: OpeningRange,
+  atr14: number,
+  config: ORFConfig,
+): { passed: boolean; orRange: number; minRequired: number; reason: string } {
+  const orRange = or.high - or.low;
+  const minRequired = config.minOR_ATR * atr14;
+  if (orRange < minRequired) {
+    return {
+      passed: false,
+      orRange,
+      minRequired,
+      reason: `OR range $${orRange.toFixed(3)} < ${config.minOR_ATR}*ATR ($${minRequired.toFixed(3)})`,
+    };
+  }
+  return { passed: true, orRange, minRequired, reason: "OR quality gate passed" };
+}
+
 export type BreakDirection = "ABOVE" | "BELOW";
 
 export interface BreakDetection {
@@ -56,9 +90,11 @@ export interface BreakDetection {
   direction: BreakDirection | null;
   breakBarIndex: number;
   breakPrice: number;
+  breakDistance: number;
   trapHigh: number;
   trapLow: number;
   volumeConfirmed: boolean;
+  qualityPassed: boolean;
 }
 
 export function detectBreak(
@@ -67,18 +103,21 @@ export function detectBreak(
   barIndex: number,
   config: ORFConfig,
   avgVol20: number,
+  atr14: number,
 ): BreakDetection {
-  const bar = bars5m[barIndex];
   const noBreak: BreakDetection = {
     broken: false,
     direction: null,
     breakBarIndex: -1,
     breakPrice: 0,
+    breakDistance: 0,
     trapHigh: 0,
     trapLow: 0,
     volumeConfirmed: false,
+    qualityPassed: false,
   };
 
+  const bar = bars5m[barIndex];
   if (!bar) return noBreak;
 
   const breakAboveLevel = or.high * (1 + config.breakPct);
@@ -87,8 +126,12 @@ export function detectBreak(
   const volumeConfirmed = !config.requireVolConfirmation || (avgVol20 > 0 && bar.volume > config.volMult * avgVol20);
 
   if (bar.high >= breakAboveLevel) {
+    const breakDistance = bar.high - or.high;
+    const minBreakDist = config.minBreak_ATR * atr14;
+    const qualityPassed = breakDistance >= minBreakDist;
+
     let trapHigh = bar.high;
-    for (let j = 1; j <= barIndex && j <= barIndex; j++) {
+    for (let j = 1; j <= barIndex; j++) {
       if (bars5m[barIndex - j]) {
         trapHigh = Math.max(trapHigh, bars5m[barIndex - j].high);
       }
@@ -98,15 +141,21 @@ export function detectBreak(
       direction: "ABOVE",
       breakBarIndex: barIndex,
       breakPrice: bar.high,
+      breakDistance,
       trapHigh,
       trapLow: or.low,
       volumeConfirmed,
+      qualityPassed,
     };
   }
 
   if (bar.low <= breakBelowLevel) {
+    const breakDistance = or.low - bar.low;
+    const minBreakDist = config.minBreak_ATR * atr14;
+    const qualityPassed = breakDistance >= minBreakDist;
+
     let trapLow = bar.low;
-    for (let j = 1; j <= barIndex && j <= barIndex; j++) {
+    for (let j = 1; j <= barIndex; j++) {
       if (bars5m[barIndex - j]) {
         trapLow = Math.min(trapLow, bars5m[barIndex - j].low);
       }
@@ -116,9 +165,11 @@ export function detectBreak(
       direction: "BELOW",
       breakBarIndex: barIndex,
       breakPrice: bar.low,
+      breakDistance,
       trapHigh: or.high,
       trapLow,
       volumeConfirmed,
+      qualityPassed,
     };
   }
 
@@ -132,7 +183,40 @@ export interface FailureDetection {
   trapHigh: number;
   trapLow: number;
   spyDiverging: boolean;
+  rsConfirmed: boolean;
+  rsValue: number;
   reasons: string[];
+}
+
+export function computeRelativeStrength(
+  tickerBars: Candle[],
+  spyBars: Candle[],
+  currentBarIndex: number,
+): number {
+  if (currentBarIndex < 1 || tickerBars.length < 2 || spyBars.length < 2) return 0;
+  const tickerOpen = tickerBars[0].open;
+  const spyOpen = spyBars[0].open;
+  if (tickerOpen === 0 || spyOpen === 0) return 0;
+
+  const tickerCurrent = tickerBars[Math.min(currentBarIndex, tickerBars.length - 1)].close;
+  const spyCurrent = spyBars[Math.min(currentBarIndex, spyBars.length - 1)].close;
+
+  const tickerReturn = (tickerCurrent - tickerOpen) / tickerOpen;
+  const spyReturn = (spyCurrent - spyOpen) / spyOpen;
+
+  return tickerReturn - spyReturn;
+}
+
+export function computeRSSlope(
+  tickerBars: Candle[],
+  spyBars: Candle[],
+  currentBarIndex: number,
+  lookback: number = 3,
+): number {
+  if (currentBarIndex < lookback + 1) return 0;
+  const rsCurrent = computeRelativeStrength(tickerBars, spyBars, currentBarIndex);
+  const rsPrior = computeRelativeStrength(tickerBars, spyBars, currentBarIndex - lookback);
+  return rsCurrent - rsPrior;
 }
 
 export function detectFailure(
@@ -151,6 +235,8 @@ export function detectFailure(
     trapHigh: 0,
     trapLow: 0,
     spyDiverging: false,
+    rsConfirmed: false,
+    rsValue: 0,
     reasons: [],
   };
 
@@ -173,6 +259,9 @@ export function detectFailure(
     }
   }
 
+  const rsSlope = computeRSSlope(bars5m, spyBars5m, currentBarIndex, 3);
+  const rsValue = computeRelativeStrength(bars5m, spyBars5m, currentBarIndex);
+
   if (breakInfo.direction === "ABOVE") {
     if (bar.close > or.high) {
       reasons.push(`Close ${bar.close.toFixed(2)} still above OR high ${or.high.toFixed(2)}`);
@@ -191,11 +280,14 @@ export function detectFailure(
         }
       }
       spyDiverging = !spyBroke;
-      if (spyDiverging) {
-        reasons.push("SPY diverging: did NOT break its OR high");
-      } else {
-        reasons.push("SPY confirmed breakout (no divergence)");
-      }
+      reasons.push(spyDiverging ? "SPY diverging: did NOT break its OR high" : "SPY confirmed breakout (no divergence)");
+    }
+
+    const rsConfirmed = !config.requireRSConfirmation || rsSlope < 0;
+    if (config.requireRSConfirmation) {
+      reasons.push(rsConfirmed
+        ? `RS confirmed: slope=${rsSlope.toFixed(5)} (stock weakening vs SPY)`
+        : `RS NOT confirmed: slope=${rsSlope.toFixed(5)} (stock still strong vs SPY)`);
     }
 
     return {
@@ -204,7 +296,9 @@ export function detectFailure(
       failBarIndex: currentBarIndex,
       trapHigh,
       trapLow,
-      spyDiverging: spyDiverging,
+      spyDiverging,
+      rsConfirmed,
+      rsValue,
       reasons,
     };
   }
@@ -227,11 +321,14 @@ export function detectFailure(
         }
       }
       spyDiverging = !spyBroke;
-      if (spyDiverging) {
-        reasons.push("SPY diverging: did NOT break its OR low");
-      } else {
-        reasons.push("SPY confirmed breakdown (no divergence)");
-      }
+      reasons.push(spyDiverging ? "SPY diverging: did NOT break its OR low" : "SPY confirmed breakdown (no divergence)");
+    }
+
+    const rsConfirmed = !config.requireRSConfirmation || rsSlope > 0;
+    if (config.requireRSConfirmation) {
+      reasons.push(rsConfirmed
+        ? `RS confirmed: slope=${rsSlope.toFixed(5)} (stock strengthening vs SPY)`
+        : `RS NOT confirmed: slope=${rsSlope.toFixed(5)} (stock still weak vs SPY)`);
     }
 
     return {
@@ -240,7 +337,9 @@ export function detectFailure(
       failBarIndex: currentBarIndex,
       trapHigh,
       trapLow,
-      spyDiverging: spyDiverging,
+      spyDiverging,
+      rsConfirmed,
+      rsValue,
       reasons,
     };
   }

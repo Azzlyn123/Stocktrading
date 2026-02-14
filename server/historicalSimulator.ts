@@ -2891,11 +2891,14 @@ import {
   detectBreak,
   detectFailure,
   calculateORFEntry,
+  checkORQualityGate,
   DEFAULT_ORF_CONFIG,
   type ORFConfig,
   type OpeningRange,
   type BreakDetection,
 } from "./strategy/orfDetector";
+
+import { calculateVWAP } from "./strategy/indicators";
 
 type ReversionDirection = "LONG_FADE" | "SHORT_FADE";
 
@@ -3721,6 +3724,7 @@ interface ORFTradeState {
   trapHigh: number;
   trapLow: number;
   shares: number;
+  originalShares: number;
   entryBarIndex: number;
   dollarRisk: number;
   riskPerShare: number;
@@ -3735,7 +3739,18 @@ interface ORFTradeState {
   maeBarIndex: number;
   trailingStopPrice: number | null;
   trailingActivated: boolean;
+  partialExitDone: boolean;
+  partialExitPrice: number | null;
+  partialExitShares: number;
+  partialPnl: number;
+  stopMovedToBE: boolean;
 }
+
+const ORF_EXPANDED_TICKERS = [
+  "AAPL", "MSFT", "NVDA", "TSLA", "META",
+  "AMZN", "GOOGL", "AMD", "NFLX", "AVGO",
+  "JPM", "COST", "QQQ", "CRM", "ORCL",
+];
 
 export async function runORFSimulation(
   runId: string,
@@ -3750,7 +3765,7 @@ export async function runORFSimulation(
     orfConfig?: Partial<ORFConfig>;
   },
 ): Promise<DryRunResult | void> {
-  const tickers = tickerList ?? BACKTEST_TICKERS;
+  const tickers = tickerList ?? ORF_EXPANDED_TICKERS;
   const allSymbols = Array.from(new Set([...tickers, "SPY"]));
   const isDryRun = options?.dryRun ?? false;
   const costOverrides = options?.costOverrides;
@@ -3839,6 +3854,80 @@ export async function runORFSimulation(
     const tradesBySession: Record<string, { wins: number; losses: number; pnl: number }> = {};
     const tradesByTier: Record<string, { wins: number; losses: number; pnl: number }> = {};
 
+    function closeTrade(
+      trade: ORFTradeState,
+      exitPrice: number,
+      exitReason: string,
+      ticker: string,
+      barTimestamp: number,
+      entryTimestamp: number,
+      minutesSinceOpen: number,
+      regimeResult: any,
+      atr14: number,
+    ) {
+      const shares = trade.shares;
+      const riskPerShare = trade.riskPerShare;
+      const grossPnl = trade.direction === "SHORT"
+        ? (trade.entryPrice - exitPrice) * shares
+        : (exitPrice - trade.entryPrice) * shares;
+      const totalGrossPnl = grossPnl + trade.partialPnl;
+      const commission = calculateCommission(trade.originalShares, costOverrides) * 2;
+      const pnl = totalGrossPnl - commission;
+
+      const totalWeightedR = riskPerShare > 0
+        ? (trade.direction === "SHORT"
+          ? (trade.entryPrice - exitPrice) / riskPerShare
+          : (exitPrice - trade.entryPrice) / riskPerShare)
+        : 0;
+
+      let compositeR: number;
+      if (trade.partialExitDone && trade.originalShares > 0) {
+        const runnerFraction = shares / trade.originalShares;
+        const partialFraction = trade.partialExitShares / trade.originalShares;
+        const partialR = trade.partialExitPrice !== null && riskPerShare > 0
+          ? (trade.direction === "SHORT"
+            ? (trade.entryPrice - trade.partialExitPrice) / riskPerShare
+            : (trade.partialExitPrice - trade.entryPrice) / riskPerShare)
+          : 0;
+        compositeR = partialR * partialFraction + totalWeightedR * runnerFraction;
+      } else {
+        compositeR = totalWeightedR;
+      }
+
+      totalPnl += pnl;
+      if (pnl > 0) winCount++; else lossCount++;
+      grossPnlTotal += totalGrossPnl;
+      totalCommissions += commission;
+      tradeRs.push(compositeR);
+      tradeGrossPnls.push(totalGrossPnl);
+      tradeNetPnls.push(pnl);
+
+      const trSession = minutesSinceOpen <= 90 ? "open" : minutesSinceOpen <= 240 ? "mid" : "power";
+      const trRegime = regimeResult?.aligned ? "trending" : regimeResult?.chopping ? "choppy" : "neutral";
+      const trDir = trade.direction === "SHORT" ? "orf_short" : "orf_long";
+      if (!tradesByRegime[trRegime]) tradesByRegime[trRegime] = { wins: 0, losses: 0, pnl: 0 };
+      if (!tradesBySession[trSession]) tradesBySession[trSession] = { wins: 0, losses: 0, pnl: 0 };
+      if (!tradesByTier[trDir]) tradesByTier[trDir] = { wins: 0, losses: 0, pnl: 0 };
+      tradesByRegime[trRegime].pnl += pnl;
+      tradesBySession[trSession].pnl += pnl;
+      tradesByTier[trDir].pnl += pnl;
+      if (pnl > 0) { tradesByRegime[trRegime].wins++; tradesBySession[trSession].wins++; tradesByTier[trDir].wins++; }
+      else { tradesByRegime[trRegime].losses++; tradesBySession[trSession].losses++; tradesByTier[trDir].losses++; }
+
+      addTrade(buildAnalyticsRecord(
+        { entryPrice: trade.entryPrice, stopPrice: trade.originalStopPrice, shares: trade.originalShares, tier: trDir, direction: trade.direction, entryBarIndex: trade.entryBarIndex },
+        ticker, exitPrice, exitReason,
+        barTimestamp,
+        entryTimestamp,
+        compositeR, pnl,
+        { marketRegime: trRegime, session: trSession, spyAligned: regimeResult?.aligned, entryMode: "orf" },
+      ));
+
+      tradesGenerated++;
+
+      log(`[ORFSim] ${ticker} CLOSED: ${exitReason} | R=${compositeR.toFixed(2)} PnL=$${pnl.toFixed(2)}${trade.partialExitDone ? " (partial@" + (trade.partialExitPrice?.toFixed(2)) + ")" : ""}`, "historical");
+    }
+
     for (const ticker of tickers) {
       if (control.cancel) break;
 
@@ -3856,13 +3945,6 @@ export async function runORFSimulation(
         continue;
       }
 
-      let dailyATRbaseline = 0;
-      if (dailyHistory.length >= 5) {
-        const ranges = dailyHistory.slice(-5).map((b: any) => b.high - b.low);
-        dailyATRbaseline = ranges.reduce((s: number, r: number) => s + r, 0) / ranges.length;
-        dailyATRbaseline = (dailyATRbaseline / 78) * 1.2;
-      }
-
       const avgVol20 = dailyHistory.length > 1
         ? dailyHistory.slice(0, -1).reduce((s: number, b: any) => s + b.volume, 0) / (dailyHistory.length - 1)
         : 0;
@@ -3876,7 +3958,7 @@ export async function runORFSimulation(
       let activeBreak: BreakDetection | null = null;
       let breakHandled = false;
 
-      let diag = { breaks: 0, failures: 0, entries: 0, spyDivergent: 0 };
+      let diag = { breaks: 0, failures: 0, entries: 0, spyDivergent: 0, orQualitySkips: 0, breakQualitySkips: 0, rsSkips: 0 };
 
       for (let i = 0; i < tickerBars5m.length; i++) {
         if (control.cancel) break;
@@ -3892,6 +3974,13 @@ export async function runORFSimulation(
         const regimeResult = checkMarketRegime(spyBarsToNow.slice(-40), DEFAULT_STRATEGY_CONFIG.marketRegime);
 
         if (i === 0) {
+          const qualityGate = checkORQualityGate(tickerOR, atr14 > 0 ? atr14 : bar.high - bar.low, orfConfig);
+          if (!qualityGate.passed) {
+            diag.orQualitySkips++;
+            log(`[ORFSim] ${ticker} SKIP: ${qualityGate.reason}`, "historical");
+            processedBars += tickerBars5m.length;
+            break;
+          }
           processedBars++;
           continue;
         }
@@ -3919,6 +4008,32 @@ export async function runORFSimulation(
               trade.maeR = barMaeR;
               trade.maePrice = trade.direction === "SHORT" ? bar.high : bar.low;
               trade.maeBarIndex = i;
+            }
+
+            if (orfConfig.partialExitEnabled && !trade.partialExitDone && trade.mfeR >= orfConfig.partialExitR) {
+              const partialShares = Math.max(1, Math.floor(trade.originalShares * orfConfig.partialExitPct));
+              if (partialShares < trade.shares) {
+                let partialPrice: number;
+                if (trade.direction === "SHORT") {
+                  partialPrice = trade.entryPrice - orfConfig.partialExitR * riskPerShare;
+                } else {
+                  partialPrice = trade.entryPrice + orfConfig.partialExitR * riskPerShare;
+                }
+                const partialPnl = trade.direction === "SHORT"
+                  ? (trade.entryPrice - partialPrice) * partialShares
+                  : (partialPrice - trade.entryPrice) * partialShares;
+
+                trade.partialExitDone = true;
+                trade.partialExitPrice = partialPrice;
+                trade.partialExitShares = partialShares;
+                trade.partialPnl = partialPnl;
+                trade.shares -= partialShares;
+
+                trade.stopPrice = trade.entryPrice;
+                trade.stopMovedToBE = true;
+
+                log(`[ORFSim] ${ticker} PARTIAL ${partialShares}sh @$${partialPrice.toFixed(2)} (${orfConfig.partialExitR}R), stop->BE, ${trade.shares}sh remain`, "historical");
+              }
             }
 
             if (!trade.trailingActivated && trade.mfeR >= orfConfig.trailAfterR) {
@@ -3956,96 +4071,9 @@ export async function runORFSimulation(
               atr14,
               costOverrides,
             });
-            const exitPrice = exitTrace.finalPrice;
-            const shares = trade.shares;
-            const grossPnl = trade.direction === "SHORT"
-              ? (trade.entryPrice - exitPrice) * shares
-              : (exitPrice - trade.entryPrice) * shares;
-            const commission = calculateCommission(shares, costOverrides) * 2;
-            const pnl = grossPnl - commission;
-            const rMultiple = riskPerShare > 0
-              ? (trade.direction === "SHORT"
-                ? (trade.entryPrice - exitPrice) / riskPerShare
-                : (exitPrice - trade.entryPrice) / riskPerShare)
-              : 0;
-
-            totalPnl += pnl;
-            if (pnl > 0) winCount++; else lossCount++;
-            grossPnlTotal += grossPnl;
-            totalCommissions += commission;
+            closeTrade(trade, exitTrace.finalPrice, trade.pendingExit.reason, ticker, bar.timestamp,
+              tickerBars5m[trade.entryBarIndex]?.timestamp ?? bar.timestamp, minutesSinceOpen, regimeResult, atr14);
             totalSlippageCosts += exitTrace.slippageBps;
-            tradeRs.push(rMultiple);
-            tradeGrossPnls.push(grossPnl);
-            tradeNetPnls.push(pnl);
-
-            const trSession = minutesSinceOpen <= 90 ? "open" : minutesSinceOpen <= 240 ? "mid" : "power";
-            const trRegime = regimeResult.aligned ? "trending" : regimeResult.chopping ? "choppy" : "neutral";
-            const trDir = trade.direction === "SHORT" ? "orf_short" : "orf_long";
-            if (!tradesByRegime[trRegime]) tradesByRegime[trRegime] = { wins: 0, losses: 0, pnl: 0 };
-            if (!tradesBySession[trSession]) tradesBySession[trSession] = { wins: 0, losses: 0, pnl: 0 };
-            if (!tradesByTier[trDir]) tradesByTier[trDir] = { wins: 0, losses: 0, pnl: 0 };
-            tradesByRegime[trRegime].pnl += pnl;
-            tradesBySession[trSession].pnl += pnl;
-            tradesByTier[trDir].pnl += pnl;
-            if (pnl > 0) { tradesByRegime[trRegime].wins++; tradesBySession[trSession].wins++; tradesByTier[trDir].wins++; }
-            else { tradesByRegime[trRegime].losses++; tradesBySession[trSession].losses++; tradesByTier[trDir].losses++; }
-
-            addTrade(buildAnalyticsRecord(
-              { entryPrice: trade.entryPrice, stopPrice: trade.originalStopPrice, shares, tier: trDir, direction: trade.direction, entryBarIndex: trade.entryBarIndex },
-              ticker, exitPrice, trade.pendingExit.reason,
-              bar.timestamp,
-              tickerBars5m[trade.entryBarIndex]?.timestamp ?? bar.timestamp,
-              rMultiple, pnl,
-              { marketRegime: trRegime, session: trSession, spyAligned: regimeResult.aligned, entryMode: "orf" },
-            ));
-
-            if (!isDryRun) {
-              await storage.createTrade({
-                userId,
-                simulationRunId: runId,
-                signalId: null,
-                ticker,
-                side: trade.direction === "SHORT" ? "short" : "long",
-                entryPrice: Number(trade.entryPrice.toFixed(2)),
-                exitPrice: Number(exitPrice.toFixed(2)),
-                stopPrice: Number(trade.originalStopPrice.toFixed(2)),
-                originalStopPrice: Number(trade.originalStopPrice.toFixed(2)),
-                target1: Number(trade.targetPrice.toFixed(2)),
-                target2: Number(trade.targetPrice.toFixed(2)),
-                shares,
-                pnl: Number(pnl.toFixed(2)),
-                pnlPercent: Number(((trade.direction === "SHORT" ? (trade.entryPrice - exitPrice) : (exitPrice - trade.entryPrice)) / trade.entryPrice * 100).toFixed(2)),
-                rMultiple: Number(rMultiple.toFixed(2)),
-                status: "closed",
-                exitReason: `[SIM-ORF] ${trade.pendingExit.reason}`,
-                isPartiallyExited: false,
-                partialExitPrice: null,
-                partialExitShares: null,
-                stopMovedToBE: false,
-                runnerShares: null,
-                trailingStopPrice: trade.trailingStopPrice ? Number(trade.trailingStopPrice.toFixed(2)) : null,
-                dollarRisk: Number(trade.dollarRisk.toFixed(2)),
-                score: 0,
-                scoreTier: trDir,
-                entryMode: "orf",
-                isPowerSetup: false,
-                realizedR: Number(rMultiple.toFixed(2)),
-                tier: "B" as TradeTier,
-                direction: trade.direction,
-                scoreBreakdown: {
-                  mfeR: Number(trade.mfeR.toFixed(3)),
-                  maeR: Number(trade.maeR.toFixed(3)),
-                  strategy: "orf",
-                  trapHigh: Number(trade.trapHigh.toFixed(2)),
-                  trapLow: Number(trade.trapLow.toFixed(2)),
-                },
-              });
-              tradesGenerated++;
-            } else {
-              tradesGenerated++;
-            }
-
-            log(`[ORFSim] ${ticker} CLOSED: ${trade.pendingExit.reason} | R=${rMultiple.toFixed(2)} PnL=$${pnl.toFixed(2)}`, "historical");
             activeTrade = null;
             cooldownUntilBar = i + orfConfig.cooldownBars;
             processedBars++;
@@ -4060,7 +4088,7 @@ export async function runORFSimulation(
               shouldExit = true;
               exitReason = bar.open >= trade.stopPrice
                 ? `Gap-through stop at $${bar.open.toFixed(2)}`
-                : `Stop hit at $${trade.stopPrice.toFixed(2)}`;
+                : `Stop hit at $${trade.stopPrice.toFixed(2)}${trade.stopMovedToBE ? " (BE)" : ""}`;
             }
             else if (bar.low <= trade.targetPrice) {
               shouldExit = true;
@@ -4073,7 +4101,7 @@ export async function runORFSimulation(
               shouldExit = true;
               exitReason = bar.open <= trade.stopPrice
                 ? `Gap-through stop at $${bar.open.toFixed(2)}`
-                : `Stop hit at $${trade.stopPrice.toFixed(2)}`;
+                : `Stop hit at $${trade.stopPrice.toFixed(2)}${trade.stopMovedToBE ? " (BE)" : ""}`;
             }
             else if (bar.high >= trade.targetPrice) {
               shouldExit = true;
@@ -4083,33 +4111,52 @@ export async function runORFSimulation(
             }
           }
 
-          if (!shouldExit && minutesSinceOpen >= orfConfig.timeExitMinutes) {
-            if (orfConfig.structureHoldEnabled) {
-              const currentR = trade.direction === "SHORT"
-                ? (trade.entryPrice - bar.close) / riskPerShare
-                : (bar.close - trade.entryPrice) / riskPerShare;
-              if (currentR <= 0) {
-                trade.pendingExit = {
-                  reason: `Time exit ${minutesSinceOpen}min (structure invalid, R=${currentR.toFixed(2)})`,
-                  exitType: "time_stop",
-                  decisionBarIndex: i,
-                };
-                processedBars++;
-                continue;
+          if (!shouldExit && orfConfig.vwapExitEnabled && orfConfig.vwapExitMode !== "off") {
+            const vwap = calculateVWAP(tickerBars5m.slice(0, i + 1));
+            if (vwap > 0) {
+              let vwapTouched = false;
+              if (trade.direction === "SHORT" && bar.low <= vwap && trade.entryPrice > vwap) {
+                vwapTouched = true;
+              } else if (trade.direction === "LONG" && bar.high >= vwap && trade.entryPrice < vwap) {
+                vwapTouched = true;
               }
-            } else {
-              trade.pendingExit = {
-                reason: `Time exit at ${minutesSinceOpen}min`,
-                exitType: "time_stop",
-                decisionBarIndex: i,
-              };
-              processedBars++;
-              continue;
+
+              if (vwapTouched) {
+                if (orfConfig.vwapExitMode === "full") {
+                  shouldExit = true;
+                  exitReason = `VWAP touch exit at $${vwap.toFixed(2)}`;
+                } else if (orfConfig.vwapExitMode === "partial" && !trade.partialExitDone) {
+                  const partialShares = Math.max(1, Math.floor(trade.originalShares * 0.5));
+                  if (partialShares < trade.shares) {
+                    const partialPnl = trade.direction === "SHORT"
+                      ? (trade.entryPrice - vwap) * partialShares
+                      : (vwap - trade.entryPrice) * partialShares;
+                    trade.partialExitDone = true;
+                    trade.partialExitPrice = vwap;
+                    trade.partialExitShares = partialShares;
+                    trade.partialPnl = partialPnl;
+                    trade.shares -= partialShares;
+                    trade.stopPrice = trade.entryPrice;
+                    trade.stopMovedToBE = true;
+                    log(`[ORFSim] ${ticker} VWAP PARTIAL ${partialShares}sh @$${vwap.toFixed(2)}, stop->BE, ${trade.shares}sh remain`, "historical");
+                  }
+                }
+              }
             }
           }
 
+          if (!shouldExit && minutesSinceOpen >= orfConfig.timeExitMinutes) {
+            trade.pendingExit = {
+              reason: `Time exit at ${minutesSinceOpen}min`,
+              exitType: "time_stop",
+              decisionBarIndex: i,
+            };
+            processedBars++;
+            continue;
+          }
+
           if (shouldExit) {
-            const isIntrabar = exitReason.includes("Stop hit") || exitReason.includes("Target");
+            const isIntrabar = exitReason.includes("Stop hit") || exitReason.includes("Target") || exitReason.includes("VWAP");
             if (!isIntrabar) {
               trade.pendingExit = { reason: exitReason, exitType: "exit", decisionBarIndex: i };
               processedBars++;
@@ -4125,6 +4172,9 @@ export async function runORFSimulation(
               } else {
                 rawFill = bar.open <= trade.stopPrice ? bar.open : trade.stopPrice;
               }
+            } else if (exitReason.includes("VWAP")) {
+              const vwap = calculateVWAP(tickerBars5m.slice(0, i + 1));
+              rawFill = vwap;
             } else {
               if (trade.direction === "SHORT") {
                 rawFill = bar.open <= trade.targetPrice ? bar.open : trade.targetPrice;
@@ -4140,96 +4190,9 @@ export async function runORFSimulation(
               atr14,
               costOverrides,
             });
-            const exitPrice = exitTrace.finalPrice;
-            const shares = trade.shares;
-            const grossPnl = trade.direction === "SHORT"
-              ? (trade.entryPrice - exitPrice) * shares
-              : (exitPrice - trade.entryPrice) * shares;
-            const commission = calculateCommission(shares, costOverrides) * 2;
-            const pnl = grossPnl - commission;
-            const rMultiple = riskPerShare > 0
-              ? (trade.direction === "SHORT"
-                ? (trade.entryPrice - exitPrice) / riskPerShare
-                : (exitPrice - trade.entryPrice) / riskPerShare)
-              : 0;
-
-            totalPnl += pnl;
-            if (pnl > 0) winCount++; else lossCount++;
-            grossPnlTotal += grossPnl;
-            totalCommissions += commission;
+            closeTrade(trade, exitTrace.finalPrice, exitReason, ticker, bar.timestamp,
+              tickerBars5m[trade.entryBarIndex]?.timestamp ?? bar.timestamp, minutesSinceOpen, regimeResult, atr14);
             totalSlippageCosts += exitTrace.slippageBps;
-            tradeRs.push(rMultiple);
-            tradeGrossPnls.push(grossPnl);
-            tradeNetPnls.push(pnl);
-
-            const trSession = minutesSinceOpen <= 90 ? "open" : minutesSinceOpen <= 240 ? "mid" : "power";
-            const trRegime = regimeResult.aligned ? "trending" : regimeResult.chopping ? "choppy" : "neutral";
-            const trDir = trade.direction === "SHORT" ? "orf_short" : "orf_long";
-            if (!tradesByRegime[trRegime]) tradesByRegime[trRegime] = { wins: 0, losses: 0, pnl: 0 };
-            if (!tradesBySession[trSession]) tradesBySession[trSession] = { wins: 0, losses: 0, pnl: 0 };
-            if (!tradesByTier[trDir]) tradesByTier[trDir] = { wins: 0, losses: 0, pnl: 0 };
-            tradesByRegime[trRegime].pnl += pnl;
-            tradesBySession[trSession].pnl += pnl;
-            tradesByTier[trDir].pnl += pnl;
-            if (pnl > 0) { tradesByRegime[trRegime].wins++; tradesBySession[trSession].wins++; tradesByTier[trDir].wins++; }
-            else { tradesByRegime[trRegime].losses++; tradesBySession[trSession].losses++; tradesByTier[trDir].losses++; }
-
-            addTrade(buildAnalyticsRecord(
-              { entryPrice: trade.entryPrice, stopPrice: trade.originalStopPrice, shares, tier: trDir, direction: trade.direction, entryBarIndex: trade.entryBarIndex },
-              ticker, exitPrice, exitReason,
-              bar.timestamp,
-              tickerBars5m[trade.entryBarIndex]?.timestamp ?? bar.timestamp,
-              rMultiple, pnl,
-              { marketRegime: trRegime, session: trSession, spyAligned: regimeResult.aligned, entryMode: "orf" },
-            ));
-
-            if (!isDryRun) {
-              await storage.createTrade({
-                userId,
-                simulationRunId: runId,
-                signalId: null,
-                ticker,
-                side: trade.direction === "SHORT" ? "short" : "long",
-                entryPrice: Number(trade.entryPrice.toFixed(2)),
-                exitPrice: Number(exitPrice.toFixed(2)),
-                stopPrice: Number(trade.originalStopPrice.toFixed(2)),
-                originalStopPrice: Number(trade.originalStopPrice.toFixed(2)),
-                target1: Number(trade.targetPrice.toFixed(2)),
-                target2: Number(trade.targetPrice.toFixed(2)),
-                shares,
-                pnl: Number(pnl.toFixed(2)),
-                pnlPercent: Number(((trade.direction === "SHORT" ? (trade.entryPrice - exitPrice) : (exitPrice - trade.entryPrice)) / trade.entryPrice * 100).toFixed(2)),
-                rMultiple: Number(rMultiple.toFixed(2)),
-                status: "closed",
-                exitReason: `[SIM-ORF] ${exitReason}`,
-                isPartiallyExited: false,
-                partialExitPrice: null,
-                partialExitShares: null,
-                stopMovedToBE: false,
-                runnerShares: null,
-                trailingStopPrice: trade.trailingStopPrice ? Number(trade.trailingStopPrice.toFixed(2)) : null,
-                dollarRisk: Number(trade.dollarRisk.toFixed(2)),
-                score: 0,
-                scoreTier: trDir,
-                entryMode: "orf",
-                isPowerSetup: false,
-                realizedR: Number(rMultiple.toFixed(2)),
-                tier: "B" as TradeTier,
-                direction: trade.direction,
-                scoreBreakdown: {
-                  mfeR: Number(trade.mfeR.toFixed(3)),
-                  maeR: Number(trade.maeR.toFixed(3)),
-                  strategy: "orf",
-                  trapHigh: Number(trade.trapHigh.toFixed(2)),
-                  trapLow: Number(trade.trapLow.toFixed(2)),
-                },
-              });
-              tradesGenerated++;
-            } else {
-              tradesGenerated++;
-            }
-
-            log(`[ORFSim] ${ticker} CLOSED: ${exitReason} | R=${rMultiple.toFixed(2)} PnL=$${pnl.toFixed(2)}`, "historical");
             activeTrade = null;
             cooldownUntilBar = i + orfConfig.cooldownBars;
           }
@@ -4249,13 +4212,17 @@ export async function runORFSimulation(
         }
 
         if (!activeBreak || breakHandled) {
-          const breakResult = detectBreak(tickerBars5m, tickerOR, i, orfConfig, avgVol20per5m);
+          const breakResult = detectBreak(tickerBars5m, tickerOR, i, orfConfig, avgVol20per5m, atr14);
           if (breakResult.broken) {
             if (!orfConfig.requireVolConfirmation || breakResult.volumeConfirmed) {
-              activeBreak = breakResult;
-              breakHandled = false;
-              diag.breaks++;
-              log(`[ORFSim] ${ticker} BREAK ${breakResult.direction} at bar ${i}, price=$${bar.close.toFixed(2)}, OR=[${tickerOR.low.toFixed(2)}, ${tickerOR.high.toFixed(2)}]`, "historical");
+              if (!breakResult.qualityPassed) {
+                diag.breakQualitySkips++;
+              } else {
+                activeBreak = breakResult;
+                breakHandled = false;
+                diag.breaks++;
+                log(`[ORFSim] ${ticker} BREAK ${breakResult.direction} at bar ${i}, dist=$${breakResult.breakDistance.toFixed(3)}, OR=[${tickerOR.low.toFixed(2)}, ${tickerOR.high.toFixed(2)}]`, "historical");
+              }
             }
           }
         }
@@ -4274,6 +4241,14 @@ export async function runORFSimulation(
           if (failureResult.failed && failureResult.direction) {
             diag.failures++;
             if (failureResult.spyDiverging) diag.spyDivergent++;
+
+            if (orfConfig.requireRSConfirmation && !failureResult.rsConfirmed) {
+              diag.rsSkips++;
+              breakHandled = true;
+              log(`[ORFSim] ${ticker} RS SKIP: ${failureResult.reasons.join("; ")}`, "historical");
+              processedBars++;
+              continue;
+            }
 
             breakHandled = true;
 
@@ -4313,6 +4288,7 @@ export async function runORFSimulation(
                   trapHigh: entryCalc.trapHigh,
                   trapLow: entryCalc.trapLow,
                   shares,
+                  originalShares: shares,
                   entryBarIndex: i,
                   dollarRisk,
                   riskPerShare,
@@ -4327,50 +4303,17 @@ export async function runORFSimulation(
                   maeBarIndex: i,
                   trailingStopPrice: null,
                   trailingActivated: false,
+                  partialExitDone: false,
+                  partialExitPrice: null,
+                  partialExitShares: 0,
+                  partialPnl: 0,
+                  stopMovedToBE: false,
                 };
 
                 log(
-                  `[ORFSim] ${ticker} ENTRY ${entryCalc.direction} at $${entryPrice.toFixed(2)} | stop=$${entryCalc.stopPrice.toFixed(2)} | target=$${targetPrice.toFixed(2)} (${orfConfig.targetMultiple}R) | ${shares} shares | spyDiv=${failureResult.spyDiverging} | ${failureResult.reasons.join("; ")}`,
+                  `[ORFSim] ${ticker} ENTRY ${entryCalc.direction} at $${entryPrice.toFixed(2)} | stop=$${entryCalc.stopPrice.toFixed(2)} | target=$${targetPrice.toFixed(2)} (${orfConfig.targetMultiple}R) | ${shares}sh | RS=${failureResult.rsValue.toFixed(5)} | ${failureResult.reasons.join("; ")}`,
                   "historical",
                 );
-
-                if (!isDryRun) {
-                  await storage.createSignal({
-                    userId,
-                    ticker,
-                    state: "TRIGGERED",
-                    resistanceLevel: Number(tickerOR.high.toFixed(2)),
-                    currentPrice: Number(entryPrice.toFixed(2)),
-                    breakoutPrice: Number(entryPrice.toFixed(2)),
-                    breakoutVolume: bar.volume,
-                    trendConfirmed: false,
-                    volumeConfirmed: activeBreak.volumeConfirmed,
-                    atrExpansion: false,
-                    timeframe: "5m",
-                    rvol: 1.0,
-                    atrValue: Number(atr14.toFixed(4)),
-                    rejectionCount: 0,
-                    score: 0,
-                    scoreTier: entryCalc.direction === "SHORT" ? "orf_short" : "orf_long",
-                    marketRegime: regimeResult.chopping ? "choppy" : regimeResult.aligned ? "aligned" : "misaligned",
-                    spyAligned: regimeResult.aligned,
-                    volatilityGatePassed: true,
-                    scoreBreakdown: {
-                      orHigh: tickerOR.high,
-                      orLow: tickerOR.low,
-                      trapHigh: entryCalc.trapHigh,
-                      trapLow: entryCalc.trapLow,
-                      spyDiverging: failureResult.spyDiverging,
-                      strategy: "orf",
-                      simDate: simulationDate,
-                    },
-                    relStrengthVsSpy: 0,
-                    isPowerSetup: false,
-                    tier: "B",
-                    direction: entryCalc.direction,
-                    notes: `[SIM-ORF ${simulationDate}] ${entryCalc.direction} OR failure trap, OR=[${tickerOR.low.toFixed(2)}-${tickerOR.high.toFixed(2)}]`,
-                  });
-                }
               }
             }
           }
@@ -4403,90 +4346,14 @@ export async function runORFSimulation(
           atr14: calculateATR(bars5mAccum, 14),
           costOverrides,
         });
-        const exitPrice = eodTrace.finalPrice;
-        const grossPnl = trade.direction === "SHORT"
-          ? (trade.entryPrice - exitPrice) * trade.shares
-          : (exitPrice - trade.entryPrice) * trade.shares;
-        const commission = calculateCommission(trade.shares, costOverrides) * 2;
-        const pnl = grossPnl - commission;
-        const rMultiple = trade.riskPerShare > 0
-          ? (trade.direction === "SHORT"
-            ? (trade.entryPrice - exitPrice) / trade.riskPerShare
-            : (exitPrice - trade.entryPrice) / trade.riskPerShare)
-          : 0;
-
-        totalPnl += pnl;
-        if (pnl > 0) winCount++; else lossCount++;
-        grossPnlTotal += grossPnl;
-        totalCommissions += commission;
-        tradeRs.push(rMultiple);
-        tradeGrossPnls.push(grossPnl);
-        tradeNetPnls.push(pnl);
-
-        const trDir = trade.direction === "SHORT" ? "orf_short" : "orf_long";
-        if (!tradesByTier[trDir]) tradesByTier[trDir] = { wins: 0, losses: 0, pnl: 0 };
-        tradesByTier[trDir].pnl += pnl;
-        if (pnl > 0) tradesByTier[trDir].wins++; else tradesByTier[trDir].losses++;
-
-        addTrade(buildAnalyticsRecord(
-          { entryPrice: trade.entryPrice, stopPrice: trade.originalStopPrice, shares: trade.shares, tier: trDir, direction: trade.direction, entryBarIndex: trade.entryBarIndex },
-          ticker, exitPrice, "End of day close",
-          lastBar.timestamp,
+        closeTrade(trade, eodTrace.finalPrice, "End of day close", ticker, lastBar.timestamp,
           tickerBars5m[trade.entryBarIndex]?.timestamp ?? lastBar.timestamp,
-          rMultiple, pnl,
-          { entryMode: "orf" },
-        ));
-
-        if (!isDryRun) {
-          await storage.createTrade({
-            userId,
-            simulationRunId: runId,
-            signalId: null,
-            ticker,
-            side: trade.direction === "SHORT" ? "short" : "long",
-            entryPrice: Number(trade.entryPrice.toFixed(2)),
-            exitPrice: Number(exitPrice.toFixed(2)),
-            stopPrice: Number(trade.originalStopPrice.toFixed(2)),
-            originalStopPrice: Number(trade.originalStopPrice.toFixed(2)),
-            target1: Number(trade.targetPrice.toFixed(2)),
-            target2: Number(trade.targetPrice.toFixed(2)),
-            shares: trade.shares,
-            pnl: Number(pnl.toFixed(2)),
-            pnlPercent: Number(((trade.direction === "SHORT" ? (trade.entryPrice - exitPrice) : (exitPrice - trade.entryPrice)) / trade.entryPrice * 100).toFixed(2)),
-            rMultiple: Number(rMultiple.toFixed(2)),
-            status: "closed",
-            exitReason: `[SIM-ORF] End of day close`,
-            isPartiallyExited: false,
-            partialExitPrice: null,
-            partialExitShares: null,
-            stopMovedToBE: false,
-            runnerShares: null,
-            trailingStopPrice: trade.trailingStopPrice ? Number(trade.trailingStopPrice.toFixed(2)) : null,
-            dollarRisk: Number(trade.dollarRisk.toFixed(2)),
-            score: 0,
-            scoreTier: trDir,
-            entryMode: "orf",
-            isPowerSetup: false,
-            realizedR: Number(rMultiple.toFixed(2)),
-            tier: "B" as TradeTier,
-            direction: trade.direction,
-            scoreBreakdown: {
-              mfeR: Number(trade.mfeR.toFixed(3)),
-              maeR: Number(trade.maeR.toFixed(3)),
-              strategy: "orf",
-            },
-          });
-          tradesGenerated++;
-        } else {
-          tradesGenerated++;
-        }
-
-        log(`[ORFSim] ${ticker} EOD CLOSE: R=${rMultiple.toFixed(2)} PnL=$${pnl.toFixed(2)}`, "historical");
+          tickerBars5m.length * 5, null, calculateATR(bars5mAccum, 14));
         activeTrade = null;
       }
 
       log(
-        `[ORFSim] ${ticker} pipeline: bars=${tickerBars5m.length}, OR=[${tickerOR.low.toFixed(2)}-${tickerOR.high.toFixed(2)}], breaks=${diag.breaks}, failures=${diag.failures}, spyDiv=${diag.spyDivergent}, entries=${diag.entries}`,
+        `[ORFSim] ${ticker} pipeline: bars=${tickerBars5m.length}, OR=[${tickerOR.low.toFixed(2)}-${tickerOR.high.toFixed(2)}], orSkips=${diag.orQualitySkips}, breaks=${diag.breaks}, breakSkips=${diag.breakQualitySkips}, failures=${diag.failures}, rsSkips=${diag.rsSkips}, entries=${diag.entries}`,
         "historical",
       );
     }

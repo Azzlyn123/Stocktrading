@@ -1,0 +1,120 @@
+Here’s the exact order I’d do it in (highest ROI first):
+
+1) Add a “quality gate” so you only trade ORFs that can actually move
+
+Right now ORF can trigger on dead, tiny mornings and you’ll get chopped.
+
+Build these 2 filters (simple, huge impact):
+
+A) Minimum Opening Range size vs ATR
+
+Skip if OR is too small:
+
+OR_range = ORH - ORL
+
+Require: OR_range >= minOR_ATR * ATR14
+Default: minOR_ATR = 0.25 (25% of ATR)
+
+B) Minimum break distance in ATR terms
+
+Skip weak breaks:
+
+Require: breakDistance >= minBreak_ATR * ATR14
+Default: minBreak_ATR = 0.10
+
+✅ This alone usually improves win rate and average win.
+
+2) Make exits smarter (but still simple)
+
+Right now you’ve got stop + 2R target. Great. But we can improve payoff stability.
+
+Add:
+
+A) Partial at 1R, then let runner go
+
+Take 50% at +1R
+
+Move stop to breakeven
+
+Keep target at 2R or trail
+
+This improves equity curve and reduces “almost winners → losers”.
+
+B) A “VWAP touch” exit option
+
+Many ORFs snap to VWAP and bounce/reverse.
+So add an optional exit:
+
+If price hits VWAP → take profit (or take partial)
+
+You can test:
+
+Fixed 2R only
+
+VWAP exit only
+
+Hybrid (partial at VWAP, rest to 2R)
+
+3) Add one more divergence layer: relative strength vs SPY
+
+Your current divergence is “SPY didn’t break”.
+
+Upgrade to a stronger filter:
+
+Relative Strength confirmation
+
+Compute:
+
+RS = stock_return_since_open - spy_return_since_open
+
+Only take:
+
+ORF_SHORT if RS is falling (stock weaker than SPY)
+
+ORF_LONG if RS is rising (stock stronger than SPY)
+
+This is very institutional.
+
+4) Scale trade count without lowering quality
+
+To get results faster, increase opportunities.
+
+Best way is NOT loosening rules.
+It’s expanding the universe:
+
+Add 10–20 mega liquid names:
+AMZN, GOOGL, AMD, NFLX, JPM, AVGO, COST, QQQ, SPY, etc.
+
+You’ll get 3–10x the trades and quicker learning.
+
+5) Build the Settings Endpoint + Backtest Sweep UI
+
+Once signal + risk + exit are stable, then we wrap it:
+
+Strategy settings endpoint
+
+Parameter sweep runner for:
+
+breakPct
+
+failWindowBars
+
+targetR
+
+minOR_ATR
+
+partial exit on/off
+
+And output:
+
+Avg R
+
+Win rate
+
+Avg win/loss
+
+Max DD
+
+Trades/day
+
+Regime splits (trend day vs chop)
