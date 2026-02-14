@@ -415,6 +415,7 @@ interface HistoricalTickerState {
     maeBarIndex: number;
     mfe30minR: number;
     mfe30minPrice: number;
+    breakevenLocked: boolean;
   } | null;
 }
 
@@ -913,6 +914,16 @@ export async function runHistoricalSimulation(
             if (minutesSinceEntry <= 30 && barMfeR > trade.mfe30minR) {
               trade.mfe30minR = barMfeR;
               trade.mfe30minPrice = bar.high;
+            }
+
+            if (!trade.breakevenLocked && trade.mfeR >= 0.5) {
+              const newStop = Math.max(trade.stopPrice, trade.entryPrice);
+              log(
+                `[HistSim] ${ticker} BE LOCK: MFE hit +${trade.mfeR.toFixed(2)}R, stop moved from $${trade.stopPrice.toFixed(2)} to $${newStop.toFixed(2)} (entry)`,
+                "historical",
+              );
+              trade.stopPrice = newStop;
+              trade.breakevenLocked = true;
             }
           }
 
@@ -1897,6 +1908,7 @@ export async function runHistoricalSimulation(
                   maeBarIndex: i,
                   mfe30minR: 0,
                   mfe30minPrice: entryPrice,
+                  breakevenLocked: false,
                 };
 
                 log(
