@@ -1,0 +1,118 @@
+What to focus on first
+
+Do one surgical change first:
+
+✅ Add a per-entry volatility expansion requirement
+
+Because your biggest problem is no follow-through and your dominant exit is the time stop. That screams “entered during compression.”
+
+If you add too many filters at once (ATR slope + range expansion + tier tightening), you won’t know what actually helped.
+
+The first filter I’d add (ATR expansion)
+
+You want something that’s:
+
+simple
+
+hard to game
+
+works across tickers
+
+directly attacks compression breakouts
+
+Recommended ATR slope rule (5-min bars)
+
+Pick one of these:
+
+Option A (clean + robust):
+
+ATR(14) now > SMA(ATR(14), 10) by at least +5%
+
+i.e. atr14 / atr14_sma10 >= 1.05
+
+Option B (slope check):
+
+ATR(14) increasing over last 3 bars:
+
+atr14_now > atr14_1bar_ago > atr14_2bars_ago
+
+This is stricter but can be too restrictive.
+
+Option C (split windows):
+
+avg ATR of last 3 bars > avg ATR of prior 5 bars by +5–10%
+
+mean(atr[-3:]) / mean(atr[-8:-3]) >= 1.08
+
+If you want the best balance: Option C.
+
+Tier tightening (do after ATR slope, but here are sane defaults)
+
+Right now your tier ATR thresholds are way too permissive.
+
+A good starting point:
+
+Tier A: atr_ratio >= 1.05
+
+Tier B: atr_ratio >= 1.00
+
+Tier C: disabled until you prove edge
+
+Where atr_ratio = atr14 / sma(atr14, 20).
+
+If you insist on keeping C:
+
+Tier C: atr_ratio >= 0.95 AND must pass the slope rule.
+
+But honestly, your stats say C is just noise.
+
+Range expansion filter (second change, not first)
+
+This helps a lot, but it overlaps with ATR slope. Add it second so you can measure incremental impact.
+
+A solid rule:
+
+breakout candle true range ≥ 1.5× average true range of last 10 bars
+(TR_now / SMA(TR,10) >= 1.5)
+
+If you find you’re filtering too hard, drop to 1.3×.
+
+What success looks like after just ATR slope
+
+You’re trying to kill time-stops.
+
+After the ATR expansion filter, your goal is:
+
+Time stop share drops from ~70% of exits → <40%
+
+Avg win rises from +0.20R → +0.60R or higher
+
+Win rate can stay low, but expectancy must improve
+
+You do NOT need a high win rate if wins get larger.
+
+The one thing I’d watch like a hawk
+
+Your time stop is currently:
+
+“exit if not +0.5R within 30 min”
+
+If you add expansion filters and still see tons of time-stops, then your entry timing is late (chasing), not just compression.
+
+But don’t change the time stop yet—use it as a diagnostic.
+
+Answer to your last question
+
+Discuss thresholds first.
+
+Start with:
+
+ATR expansion Option C with 1.08
+
+Disable Tier C
+
+Keep everything else identical
+
+Re-run the same 5-day sim
+
+If results improve, then add range expansion next.
