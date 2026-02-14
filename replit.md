@@ -42,10 +42,19 @@ The backend features a modular strategy engine composed of pure TypeScript modul
 - Stricter filters improve R but don't achieve positive expectancy
 - Average winner (~1.0R) approximately equals average loser (~-1.0R), no payoff ratio edge
 
+### Opening Range Failure (ORF) Strategy (9-Day Validation, Feb 3-13 2026)
+- **Result: NO EDGE** - All configurations show negative expectancy
+- Tickers tested: AAPL, MSFT, NVDA, TSLA, META with SPY divergence filter
+- Default config (0.25% break, 3-bar fail window, 2R target, vol confirmation): 26 trades, 19.2% WR, -0.504R avg
+- Reduced target (1.5R, trail at 1.0R, max 2/ticker): 27 trades, 25.9% WR, -0.367R avg
+- Relaxed config (0.3% break, 5-bar fail, no vol req): 30 trades, 26.7% WR, -0.355R avg
+- **Critical finding**: Average winner (~0.9R) still approximately equals average loser (~0.83R) — the 2R target is NOT reached; trades exit via time/trailing stops before achieving target R
+- ORF strategy files: `server/strategy/orfDetector.ts`, endpoints: `/api/simulations/orf`, `/api/internal/orf-validate`
+
 ### Key Findings
-- Neither momentum breakout nor mean-reversion produces an edge on these mega-cap tickers
+- **Three strategies tested, zero edge found**: Momentum breakout (-0.309R), VWAP reversion (-0.253R), and Opening Range Failure (-0.504R) all produce negative expectancy on mega-cap tickers
+- Fundamental issue across all strategies: winners (~1R) ≈ losers (~1R), no payoff ratio advantage regardless of target setting
 - Fill modeling with realistic slippage, spread, and commissions is critical - many "paper edges" disappear
-- VWAP reversion is marginally better than breakout but still negative
 - The platform infrastructure (simulation engine, fill modeling, regime detection) is production-grade and reusable for testing other strategies
 
 ## External Dependencies
