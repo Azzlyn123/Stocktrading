@@ -643,15 +643,36 @@ export async function registerRoutes(
       const allRs: number[] = [];
       const allMFEs: number[] = [];
       const allMAEs: number[] = [];
+      const lossBuckets: Record<string, number> = {
+        stopped_before_0.3R: 0,
+        reversed_after_0.3R: 0,
+        partial_then_scratch: 0,
+        other: 0
+      };
       
+      let mfe1R = 0, mfe15R = 0, mfe2R = 0;
+
       for (const day of results) {
         if (day.error || !day.tradeRs) continue;
         trades += day.trades ?? 0;
         wins += day.wins ?? 0;
         totalR += (day.tradeRs as number[]).reduce((a, b) => a + b, 0);
         allRs.push(...day.tradeRs);
-        if (day.tradeMFEs) allMFEs.push(...day.tradeMFEs);
+        if (day.tradeMFEs) {
+          allMFEs.push(...day.tradeMFEs);
+          for (const mfe of day.tradeMFEs) {
+            if (mfe >= 1.0) mfe1R++;
+            if (mfe >= 1.5) mfe15R++;
+            if (mfe >= 2.0) mfe2R++;
+          }
+        }
         if (day.tradeMAEs) allMAEs.push(...day.tradeMAEs);
+        if (day.tradeLossBuckets) {
+          for (const bucket of day.tradeLossBuckets) {
+            if (lossBuckets[bucket] !== undefined) lossBuckets[bucket]++;
+            else lossBuckets.other++;
+          }
+        }
       }
       
       const sortedMFE = [...allMFEs].sort((a, b) => a - b);
@@ -665,13 +686,87 @@ export async function registerRoutes(
         avgR: trades > 0 ? (totalR / trades).toFixed(3) : "0",
         medianMFE: medianMFE.toFixed(3),
         medianMAE: medianMAE.toFixed(3),
+        mfeDist: {
+          ge1R: trades > 0 ? (mfe1R / trades * 100).toFixed(1) + "%" : "0%",
+          ge15R: trades > 0 ? (mfe15R / trades * 100).toFixed(1) + "%" : "0%",
+          ge2R: trades > 0 ? (mfe2R / trades * 100).toFixed(1) + "%" : "0%"
+        },
+        lossDecomp: lossBuckets
       };
     };
+
+    const variant1Results = await runVariant({ noTarget: false, noPartial: false });
+    const variant2Results = await runVariant({ noTarget: true, noPartial: false });
+    const variant3Results = await runVariant({ noTarget: true, noPartial: true });
 
     res.json({
       variant1: aggregate(variant1Results),
       variant2: aggregate(variant2Results),
+      variant3: aggregate(variant3Results),
       dates
+    });
+  });
+
+  app.post("/api/internal/rs-phase-b", async (req, res) => {
+    const { tickers } = req.body;
+    const devDates = [
+      "2025-12-01", "2025-12-02", "2025-12-03", "2025-12-04", "2025-12-05",
+      "2025-12-08", "2025-12-09", "2025-12-10", "2025-12-11", "2025-12-12",
+      "2025-12-15", "2025-12-16", "2025-12-17", "2025-12-18", "2025-12-19",
+      "2025-12-22", "2025-12-23", "2025-12-24", "2025-12-26", "2025-12-29",
+      "2025-12-30", "2025-12-31",
+      "2026-01-02", "2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08",
+      "2026-01-09", "2026-01-12", "2026-01-13", "2026-01-14", "2026-01-15",
+      "2026-01-16", "2026-01-20", "2026-01-21", "2026-01-22", "2026-01-23",
+      "2026-01-26", "2026-01-27", "2026-01-28", "2026-01-29", "2026-01-30"
+    ];
+    const testDates = [
+      "2026-02-02", "2026-02-03", "2026-02-04", "2026-02-05", "2026-02-06",
+      "2026-02-09", "2026-02-10", "2026-02-11", "2026-02-12", "2026-02-13"
+    ];
+
+    const tickerList = tickers ?? [
+      "AAPL","MSFT","NVDA","TSLA","META","AMZN","GOOGL","AMD","NFLX","AVGO",
+      "JPM","COST","QQQ","CRM","ORCL",
+    ];
+    const userId = "1a70fbad-ee1b-46ea-96a3-36749e24f3ba";
+
+    const runVariantOnDates = async (config: Partial<RSConfig>, dates: string[]) => {
+      const results: any[] = [];
+      for (const date of dates) {
+        try {
+          const result = await runRSContinuationSimulation(
+            `phase-b-${date}-${Date.now()}`,
+            date,
+            userId,
+            storage,
+            tickerList,
+            { dryRun: true, rsConfig: { ...DEFAULT_RS_CONFIG, ...config } },
+          );
+          results.push({ date, ...(result as any) });
+        } catch (err: any) {
+          results.push({ date, error: err.message });
+        }
+      }
+      return results;
+    };
+
+    const runFullValidation = async (config: Partial<RSConfig>) => {
+      const devRes = await runVariantOnDates(config, devDates);
+      const testRes = await runVariantOnDates(config, testDates);
+      return {
+        dev: aggregate(devRes),
+        test: aggregate(testRes)
+      };
+    };
+
+    const v1 = await runFullValidation({ noTarget: false, noPartial: false });
+    const v2 = await runFullValidation({ noTarget: true, noPartial: false });
+    const v3 = await runFullValidation({ noTarget: true, noPartial: true });
+
+    res.json({
+      v1, v2, v3,
+      windows: { dev: devDates.length, test: testDates.length }
     });
   });
 

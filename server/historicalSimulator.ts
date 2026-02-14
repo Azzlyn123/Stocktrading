@@ -243,6 +243,7 @@ export interface DryRunResult {
   tradeHitTarget?: number[];
   tradeSlippageCostsR?: number[];
   tradeScratchAfterPartial?: number[];
+  tradeLossBuckets?: string[];
   tradeTickers?: string[];
   tradeRegimes?: string[];
   maxDrawdown: number;
@@ -3878,6 +3879,7 @@ export async function runORFSimulation(
     const tradeMAEs: number[] = [];
     const tradeSlippageCostsR: number[] = [];
     const tradeScratchAfterPartial: number[] = [];
+    const tradeLossBuckets: string[] = [];
     const tradeTickers: string[] = [];
     const tradeRegimes: string[] = [];
     const tradeGrossPnls: number[] = [];
@@ -3946,7 +3948,7 @@ export async function runORFSimulation(
       tradeScratchAfterPartial.push(isScratchAfterPartial ? 1 : 0);
 
       tradeTickers.push(ticker);
-
+      tradeLossBuckets.push(lossBucket);
       const trSession = minutesSinceOpen <= 90 ? "open" : minutesSinceOpen <= 240 ? "mid" : "power";
       const trRegime = regimeResult?.aligned ? "trending" : regimeResult?.chopping ? "choppy" : "neutral";
       tradeRegimes.push(trRegime);
@@ -4430,6 +4432,7 @@ export async function runORFSimulation(
         tradeHitTarget: tradeHitTarget.length > 0 ? tradeHitTarget : undefined,
         tradeSlippageCostsR: tradeSlippageCostsR.length > 0 ? tradeSlippageCostsR : undefined,
         tradeScratchAfterPartial: tradeScratchAfterPartial.length > 0 ? tradeScratchAfterPartial : undefined,
+        tradeLossBuckets: tradeLossBuckets.length > 0 ? tradeLossBuckets : undefined,
         tradeTickers: tradeTickers.length > 0 ? tradeTickers : undefined,
         tradeRegimes: tradeRegimes.length > 0 ? tradeRegimes : undefined,
         maxDrawdown: Number(maxDD.toFixed(2)),
@@ -4580,6 +4583,7 @@ export async function runRSContinuationSimulation(
     const tradeMAEs: number[] = [];
     const tradeSlippageCostsR: number[] = [];
     const tradeScratchAfterPartial: number[] = [];
+    const tradeLossBuckets: string[] = [];
     const tradeTickers: string[] = [];
     const tradeRegimes: string[] = [];
     const tradeGrossPnls: number[] = [];
@@ -4633,6 +4637,18 @@ export async function runRSContinuationSimulation(
       tradeHit1R.push(trade.mfeR >= 1.0 ? 1 : 0);
       tradeHitTarget.push(trade.mfeR >= trade.targetR ? 1 : 0);
 
+      // Loss Decomposition
+      let lossBucket = "other";
+      if (compositeR <= 0) {
+        if (trade.mfeR < 0.3) {
+          lossBucket = "stopped_before_0.3R";
+        } else if (trade.mfeR >= 0.3 && !trade.partialExitDone) {
+          lossBucket = "reversed_after_0.3R";
+        } else if (trade.partialExitDone && trade.stopMovedToBE && Math.abs(runnerR) < 0.15) {
+          lossBucket = "partial_then_scratch";
+        }
+      }
+
       const frictionCostR = riskPerShare > 0 && trade.originalShares > 0 ? (commission / (riskPerShare * trade.originalShares)) : 0;
       tradeSlippageCostsR.push(frictionCostR);
 
@@ -4640,7 +4656,7 @@ export async function runRSContinuationSimulation(
       tradeScratchAfterPartial.push(isScratchAfterPartial ? 1 : 0);
 
       tradeTickers.push(ticker);
-
+      tradeLossBuckets.push(lossBucket);
       const trSession = minutesSinceOpen <= 90 ? "open" : minutesSinceOpen <= 240 ? "mid" : "power";
       const trRegime = regimeResult?.aligned ? "trending" : regimeResult?.chopping ? "choppy" : "neutral";
       tradeRegimes.push(trRegime);
@@ -4720,7 +4736,7 @@ export async function runRSContinuationSimulation(
               trade.maeBarIndex = i;
             }
 
-            if (!trade.partialExitDone && trade.mfeR >= 1.0) {
+            if (!trade.partialExitDone && trade.mfeR >= 1.0 && !rsConfig.noPartial) {
               const partialShares = Math.max(1, Math.floor(trade.originalShares * 0.5));
               if (partialShares < trade.shares) {
                 const partialPrice = trade.entryPrice + 1.0 * riskPerShare;
@@ -4952,6 +4968,7 @@ export async function runRSContinuationSimulation(
         tradeHitTarget: tradeHitTarget.length > 0 ? tradeHitTarget : undefined,
         tradeSlippageCostsR: tradeSlippageCostsR.length > 0 ? tradeSlippageCostsR : undefined,
         tradeScratchAfterPartial: tradeScratchAfterPartial.length > 0 ? tradeScratchAfterPartial : undefined,
+        tradeLossBuckets: tradeLossBuckets.length > 0 ? tradeLossBuckets : undefined,
         tradeTickers: tradeTickers.length > 0 ? tradeTickers : undefined,
         tradeRegimes: tradeRegimes.length > 0 ? tradeRegimes : undefined,
         maxDrawdown: Number(maxDD.toFixed(2)),

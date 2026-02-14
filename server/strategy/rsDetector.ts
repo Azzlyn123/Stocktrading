@@ -13,6 +13,7 @@ export interface RSConfig {
   maxTradesPerTicker: number;
   timeExitMinutes: number;
   noTarget?: boolean;          // Variant 2: Let winners run (no hard target)
+  noPartial?: boolean;         // Variant 3: No partial at 1R, just trail
 }
 
 export const DEFAULT_RS_CONFIG: RSConfig = {
