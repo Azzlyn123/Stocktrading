@@ -48,6 +48,8 @@ function buildAnalyticsRecord(
     tier: string;
     direction: string;
     entryBarIndex: number;
+    score?: number;
+    scoreTier?: string;
   },
   ticker: string,
   exitPrice: number,
@@ -56,6 +58,14 @@ function buildAnalyticsRecord(
   entryBarTimestamp: number,
   totalR: number,
   pnl: number,
+  context?: {
+    marketRegime?: string;
+    session?: string;
+    spyAligned?: boolean;
+    volatilityGatePassed?: boolean;
+    entryMode?: string | null;
+    isPowerSetup?: boolean;
+  },
   tradeId?: string,
 ): TradeRecord {
   const riskDist = Math.abs(trade.entryPrice - trade.stopPrice);
@@ -75,6 +85,13 @@ function buildAnalyticsRecord(
     pnlDollars: pnl,
     durationMinutes: (exitBarTimestamp - entryBarTimestamp) / 60000,
     exitReason: classifyExitReason(exitReason),
+    score: trade.score ?? 0,
+    marketRegime: (context?.marketRegime as any) ?? "unknown",
+    session: (context?.session as any) ?? "unknown",
+    spyAligned: context?.spyAligned ?? false,
+    volatilityGatePassed: context?.volatilityGatePassed ?? false,
+    entryMode: context?.entryMode ?? null,
+    isPowerSetup: context?.isPowerSetup ?? false,
     notes: riskDist === 0 ? "invalid risk distance" : undefined,
   };
 }
@@ -1009,6 +1026,14 @@ export async function runHistoricalSimulation(
               bar.timestamp,
               tickerBars5m[trade.entryBarIndex]?.timestamp ?? bar.timestamp,
               totalR, pnl,
+              {
+                marketRegime: regimeResult.chopping ? "choppy" : regimeResult.aligned ? "aligned" : "misaligned",
+                session: state.minutesSinceOpen <= 90 ? "open" : state.minutesSinceOpen <= 240 ? "mid" : "power",
+                spyAligned: regimeResult.aligned,
+                volatilityGatePassed: volGateResult.passes,
+                entryMode: "conservative",
+                isPowerSetup: false,
+              },
             ));
 
             if (!isDryRun) {
@@ -1253,16 +1278,19 @@ export async function runHistoricalSimulation(
                 (partialShares / shares);
 
               if (SIM_DEBUG) {
+                const isPartialTickAligned = (price: number, tick = 0.01, eps = 1e-6) => {
+                  const q = price / tick;
+                  return Math.abs(q - Math.round(q)) < eps;
+                };
                 simAssert(
-                  isTickAligned(exitPrice, 0.01),
-                    "Pending exit price must align to $0.01 tick grid",
-                    invariantViolations,
-                    "TICK_ALIGNMENT",
-                    i,
-                    ticker,
-                    { exitPrice }
-                  );
-                    }
+                  isPartialTickAligned(partialExitPrice, 0.01),
+                  "Partial exit price must align to $0.01 tick grid",
+                  invariantViolations,
+                  "TICK_ALIGNMENT",
+                  i,
+                  ticker,
+                  { exitPrice: partialExitPrice },
+                );
               }
               if (tradeTraces.length < 200) {
                 tradeTraces.push({
@@ -1416,6 +1444,14 @@ export async function runHistoricalSimulation(
               bar.timestamp,
               tickerBars5m[trade.entryBarIndex]?.timestamp ?? bar.timestamp,
               totalR, pnl,
+              {
+                marketRegime: regimeResult.chopping ? "choppy" : regimeResult.aligned ? "aligned" : "misaligned",
+                session: state.minutesSinceOpen <= 90 ? "open" : state.minutesSinceOpen <= 240 ? "mid" : "power",
+                spyAligned: regimeResult.aligned,
+                volatilityGatePassed: volGateResult.passes,
+                entryMode: "conservative",
+                isPowerSetup: false,
+              },
             ));
 
             if (!isDryRun) {
@@ -1655,15 +1691,13 @@ export async function runHistoricalSimulation(
               const riskPerShare = Math.abs(entryPrice - stopPrice);
 
               if (SIM_DEBUG) {
-               function isTickAligned(price: number, tick = 0.01, eps = 1e-6){
-                 const q = price / tick;
-                 return Math.abs(q - Math.round(q)) < eps;
-               }
                 simAssert(
                   isTickAligned(entryPrice, 0.01),
                   "Entry price must align to $0.01 tick grid",
                   invariantViolations,
                   "TICK_ALIGNMENT",
+                  i,
+                  ticker,
                   {
                     frictionAdjusted: entryTraceResult.frictionAdjustedPrice,
                     raw: retestResult.entryPrice,
@@ -1892,11 +1926,6 @@ export async function runHistoricalSimulation(
           "historical",
         );
 
-        if (SIM_DEBUG) {
-          
-          
-      
-
         const rMultiple =
           trade.riskPerShare > 0
             ? (exitPrice - trade.entryPrice) / trade.riskPerShare
@@ -1969,6 +1998,14 @@ export async function runHistoricalSimulation(
           lastBar.timestamp,
           tickerBars5m[trade.entryBarIndex]?.timestamp ?? lastBar.timestamp,
           totalR, pnl,
+          {
+            marketRegime: lastRegimeResult?.chopping ? "choppy" : lastRegimeResult?.aligned ? "aligned" : "misaligned",
+            session: state.minutesSinceOpen <= 90 ? "open" : state.minutesSinceOpen <= 240 ? "mid" : "power",
+            spyAligned: lastRegimeResult?.aligned ?? false,
+            volatilityGatePassed: true,
+            entryMode: "conservative",
+            isPowerSetup: false,
+          },
         ));
 
         if (!isDryRun) {
