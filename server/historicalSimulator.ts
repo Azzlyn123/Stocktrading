@@ -3043,6 +3043,7 @@ export async function runReversionSimulation(
       const bars5mAccum: Candle[] = [];
       let activeTrade: ReversionTradeState | null = null;
       let cooldownUntilBar = 0;
+      let tickerTradeCount = 0;
       let lastRegimeResult = checkMarketRegime([], DEFAULT_STRATEGY_CONFIG.marketRegime);
 
       let diag = { overextensions: 0, exhaustions: 0, entries: 0 };
@@ -3206,7 +3207,7 @@ export async function runReversionSimulation(
 
             log(`[RevSim] ${ticker} CLOSED: ${trade.pendingExit.reason} | R=${totalR.toFixed(2)} PnL=$${pnl.toFixed(2)}`, "historical");
             activeTrade = null;
-            cooldownUntilBar = i + 3;
+            cooldownUntilBar = i + (revConfig.cooldownBars ?? 3);
             processedBars++;
             continue;
           }
@@ -3413,7 +3414,7 @@ export async function runReversionSimulation(
 
             log(`[RevSim] ${ticker} CLOSED: ${exitReason} | R=${totalR.toFixed(2)} PnL=$${pnl.toFixed(2)}`, "historical");
             activeTrade = null;
-            cooldownUntilBar = i + 3;
+            cooldownUntilBar = i + (revConfig.cooldownBars ?? 3);
           }
 
           processedBars++;
@@ -3421,6 +3422,11 @@ export async function runReversionSimulation(
         }
 
         if (i < cooldownUntilBar) {
+          processedBars++;
+          continue;
+        }
+
+        if (tickerTradeCount >= (revConfig.maxTradesPerTicker ?? 10)) {
           processedBars++;
           continue;
         }
@@ -3450,6 +3456,7 @@ export async function runReversionSimulation(
 
             if (riskPerShare > 0 && riskPerShare < entryPrice * 0.05) {
               diag.entries++;
+              tickerTradeCount++;
               const dollarRisk = accountSize * revConfig.riskPct;
               const shares = Math.max(1, Math.floor(dollarRisk / riskPerShare));
 

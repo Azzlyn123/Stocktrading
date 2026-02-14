@@ -13,6 +13,9 @@ export interface VwapReversionConfig {
   target2ReversionPct: number;
   riskPct: number;
   minATR14: number;
+  cooldownBars: number;
+  minExhaustionSignals: number;
+  maxTradesPerTicker: number;
 }
 
 export const DEFAULT_REVERSION_CONFIG: VwapReversionConfig = {
@@ -27,6 +30,9 @@ export const DEFAULT_REVERSION_CONFIG: VwapReversionConfig = {
   target2ReversionPct: 1.0,
   riskPct: 0.005,
   minATR14: 0,
+  cooldownBars: 3,
+  minExhaustionSignals: 2,
+  maxTradesPerTicker: 10,
 };
 
 export interface OverextensionResult {
@@ -148,8 +154,9 @@ export function checkExhaustion(
   if (ema9Crossed) signals++;
   if (failedExtreme) signals++;
 
-  const exhausted = signals >= 2;
-  if (!exhausted && signals > 0) reasons.push(`Only ${signals}/2 exhaustion signals`);
+  const minSignals = config.minExhaustionSignals ?? 2;
+  const exhausted = signals >= minSignals;
+  if (!exhausted && signals > 0) reasons.push(`Only ${signals}/${minSignals} exhaustion signals`);
 
   return { exhausted, wickRatio, volumeDecline, volumeRatio, ema9Crossed, reasons };
 }

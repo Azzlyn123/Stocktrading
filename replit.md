@@ -24,7 +24,29 @@ The backend features a modular strategy engine composed of pure TypeScript modul
 - **Risk Management**: Daily max loss, trade limits, and cooldown periods.
 - **Learning System**: Post-trade analysis, pattern classification, adaptive score penalties, and actionable insights.
 - **Historical Simulation Engine**: Capable of replaying past trading days to backtest strategy performance.
+- **VWAP Reversion Strategy Module**: Alternative strategy that fades overextended moves from VWAP, with configurable parameters.
 - **UI/UX**: Features a comprehensive dashboard, scanner, watchlist, signals feed, trades log, and settings page, all designed with a default dark theme and toggle functionality.
+
+## Strategy Backtesting Results (Feb 2026)
+
+### Breakout + Retest Strategy (3-Month Test)
+- **Result: NO EDGE** - 108 trades, -0.309R expectancy, 12% win rate
+- Median MFE +0.05R shows trades stall/revert rather than expand
+- Confirmed across all market regimes and sessions
+
+### VWAP Reversion Strategy (9-Day Validation, Feb 3-13 2026)
+- **Result: NO EDGE** - All configurations show negative expectancy
+- Tickers tested: AAPL, MSFT, NVDA, TSLA, META
+- Best config (3.0 ATR deviation, 3+ exhaustion signals, 1 trade/ticker max): 7 trades, 28.6% WR, -0.253R avg
+- More aggressive configs (1.5-2.5 ATR): 27-79 trades, 16-25% WR, -0.55 to -0.73R avg
+- Stricter filters improve R but don't achieve positive expectancy
+- Average winner (~1.0R) approximately equals average loser (~-1.0R), no payoff ratio edge
+
+### Key Findings
+- Neither momentum breakout nor mean-reversion produces an edge on these mega-cap tickers
+- Fill modeling with realistic slippage, spread, and commissions is critical - many "paper edges" disappear
+- VWAP reversion is marginally better than breakout but still negative
+- The platform infrastructure (simulation engine, fill modeling, regime detection) is production-grade and reusable for testing other strategies
 
 ## External Dependencies
 - **Alpaca API**: Used for live bars, snapshots, WebSocket data streams, market clock, and historical bar data.

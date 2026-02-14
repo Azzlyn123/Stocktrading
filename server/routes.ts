@@ -500,6 +500,37 @@ export async function registerRoutes(
     });
   });
 
+  app.post("/api/internal/reversion-validate", async (req, res) => {
+    const { dates, tickers, reversionConfig } = req.body;
+    if (!dates || !Array.isArray(dates)) {
+      return res.status(400).json({ error: "dates array required" });
+    }
+    const tickerList = tickers ?? ["AAPL", "MSFT", "NVDA", "TSLA", "META"];
+
+    const userId = "1a70fbad-ee1b-46ea-96a3-36749e24f3ba";
+
+    const results: any[] = [];
+
+    for (const date of dates) {
+      try {
+        const dummyRunId = `validation-${date}-${Date.now()}`;
+        const result = await runReversionSimulation(
+          dummyRunId,
+          date,
+          userId,
+          storage,
+          tickerList,
+          { dryRun: true, reversionConfig: reversionConfig ?? undefined },
+        );
+        results.push({ date, ...(result as any) });
+      } catch (err: any) {
+        results.push({ date, error: err.message, trades: 0, wins: 0, losses: 0, netPnl: 0 });
+      }
+    }
+
+    res.json({ results });
+  });
+
   // Start simulated market data feed
   startSimulatedDataFeed(broadcast, storage);
 
