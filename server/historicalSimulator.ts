@@ -936,7 +936,7 @@ export async function runHistoricalSimulation(
             }
 
             const barsSinceEntry = i - trade.entryBarIndex;
-            if (!trade.validated && barsSinceEntry >= 3) {
+            if (!trade.validated && !trade.pendingExit && barsSinceEntry >= 3) {
               const currentR = (bar.close - trade.entryPrice) / riskPerShare;
               trade.pendingExit = {
                 reason: `Validation failed: not +0.3R within ${barsSinceEntry} bars (current ${currentR >= 0 ? "+" : ""}${currentR.toFixed(2)}R)`,
