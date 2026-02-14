@@ -181,6 +181,8 @@ export const paperTrades = pgTable("paper_trades", {
   realizedR: real("realized_r").default(0),
   tier: text("tier"),
   direction: text("direction").default("LONG"),
+  scoreBreakdown: jsonb("score_breakdown"),
+  simulationRunId: varchar("simulation_run_id"),
 });
 
 export const dailySummaries = pgTable("daily_summaries", {

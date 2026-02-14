@@ -1,0 +1,76 @@
+What to do next
+
+Don’t immediately change tickers or date range yet. First, run one diagnostic that tells us which failure mode it is.
+
+The single best diagnostic
+
+For every trade, record the Maximum Favorable Excursion (MFE) in R within 30 minutes:
+
+MFE_R = (max_high_after_entry - entryPrice) / riskPerShare for longs
+
+also track time-to-MFE
+
+Then look at:
+
+% of trades that ever hit +0.5R
+
+% that ever hit +1.0R
+
+median time to +0.5R
+
+Interpretation:
+
+If most trades NEVER hit +0.5R → entries are fundamentally bad / levels not real / balance regime.
+
+If many trades hit +0.5R but don’t close green → exit logic is killing you.
+
+If trades hit +0.5R quickly but reverse → you’re buying exhaustion (late entry).
+
+That one metric ends the guessing.
+
+Parameter change I’d try (only if MFE confirms “late entry”)
+
+If MFE shows you often get a quick pop then stall, fix timing:
+
+Add a “breakout strength within N bars” rule
+
+After entry, require:
+
+reach +0.3R within 2 bars (10 minutes on 5-min bars)
+If not, scratch the trade early (small loss / flat), not a 30-minute time stop.
+
+That converts “dead trades” into tiny losses and protects expectancy.
+
+If MFE confirms “levels not meaningful”
+
+Then the fix is not ATR/TR. It’s the breakout definition.
+
+Two high-impact level upgrades:
+
+Use 15-min structure for breakout levels (less noise), enter on 5-min
+
+Require breakout above prior swing high AND above VWAP (for longs)
+
+About changing date range / tickers
+
+Yes — but do it methodically:
+
+Expand to 3 months of data (not 5 days)
+
+Expand universe to 20–50 liquid names (or SPY/QQQ + top movers)
+
+Report results segmented by:
+
+market regime (SPY trend vs chop)
+
+session (open/mid/power)
+
+Right now, 16 trades is too small to conclude the pattern “doesn’t work,” but it’s enough to conclude your current implementation isn’t capturing expansion.
+
+What I want you to do next (pick one)
+
+MFE diagnostic (best next step)
+
+Run 3-month sim on 20 tickers with current rules (no more tweaks yet)
+
+If you choose (2), tell me which universe you’re using (S&P 50? your watchlist?) and what bar timeframe you simulate on.

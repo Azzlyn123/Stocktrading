@@ -407,6 +407,14 @@ interface HistoricalTickerState {
       exitType: string;
       decisionBarIndex: number;
     } | null;
+    mfePrice: number;
+    mfeR: number;
+    mfeBarIndex: number;
+    maePrice: number;
+    maeR: number;
+    maeBarIndex: number;
+    mfe30minR: number;
+    mfe30minPrice: number;
   } | null;
 }
 
@@ -889,6 +897,25 @@ export async function runHistoricalSimulation(
           const riskPerShare = trade.riskPerShare;
           const minutesSinceEntry = (i - trade.entryBarIndex) * 5;
 
+          if (riskPerShare > 0) {
+            const barMfeR = (bar.high - trade.entryPrice) / riskPerShare;
+            const barMaeR = (bar.low - trade.entryPrice) / riskPerShare;
+            if (barMfeR > trade.mfeR) {
+              trade.mfeR = barMfeR;
+              trade.mfePrice = bar.high;
+              trade.mfeBarIndex = i;
+            }
+            if (barMaeR < trade.maeR) {
+              trade.maeR = barMaeR;
+              trade.maePrice = bar.low;
+              trade.maeBarIndex = i;
+            }
+            if (minutesSinceEntry <= 30 && barMfeR > trade.mfe30minR) {
+              trade.mfe30minR = barMfeR;
+              trade.mfe30minPrice = bar.high;
+            }
+          }
+
           if (trade.pendingExit) {
             const rawFill = bar.open;
             const exitTrace = applyFrictionAndRoundWithTrace({
@@ -1039,6 +1066,7 @@ export async function runHistoricalSimulation(
             if (!isDryRun) {
               const tradeRecord = await storage.createTrade({
                 userId,
+                simulationRunId: runId,
                 signalId: trade.signalId,
                 ticker,
                 side: "long",
@@ -1072,6 +1100,13 @@ export async function runHistoricalSimulation(
                 realizedR: Number(totalR.toFixed(2)),
                 tier: trade.tier,
                 direction: "LONG",
+                scoreBreakdown: {
+                  mfeR: Number(trade.mfeR.toFixed(3)),
+                  maeR: Number(trade.maeR.toFixed(3)),
+                  mfe30minR: Number(trade.mfe30minR.toFixed(3)),
+                  timeToMfeBars: trade.mfeBarIndex - trade.entryBarIndex,
+                  timeToMaeBars: trade.maeBarIndex - trade.entryBarIndex,
+                },
               });
               tradesGenerated++;
 
@@ -1457,6 +1492,7 @@ export async function runHistoricalSimulation(
             if (!isDryRun) {
               const tradeRecord = await storage.createTrade({
                 userId,
+                simulationRunId: runId,
                 signalId: trade.signalId,
                 ticker,
                 side: "long",
@@ -1490,6 +1526,13 @@ export async function runHistoricalSimulation(
                 realizedR: Number(totalR.toFixed(2)),
                 tier: trade.tier,
                 direction: "LONG",
+                scoreBreakdown: {
+                  mfeR: Number(trade.mfeR.toFixed(3)),
+                  maeR: Number(trade.maeR.toFixed(3)),
+                  mfe30minR: Number(trade.mfe30minR.toFixed(3)),
+                  timeToMfeBars: trade.mfeBarIndex - trade.entryBarIndex,
+                  timeToMaeBars: trade.maeBarIndex - trade.entryBarIndex,
+                },
               });
               tradesGenerated++;
 
@@ -1846,6 +1889,14 @@ export async function runHistoricalSimulation(
                   riskPerShare,
                   signalId: null,
                   pendingExit: null,
+                  mfePrice: entryPrice,
+                  mfeR: 0,
+                  mfeBarIndex: i,
+                  maePrice: entryPrice,
+                  maeR: 0,
+                  maeBarIndex: i,
+                  mfe30minR: 0,
+                  mfe30minPrice: entryPrice,
                 };
 
                 log(
@@ -2011,6 +2062,7 @@ export async function runHistoricalSimulation(
         if (!isDryRun) {
           const tradeRecord = await storage.createTrade({
             userId,
+            simulationRunId: runId,
             signalId: trade.signalId,
             ticker,
             side: "long",
@@ -2049,6 +2101,13 @@ export async function runHistoricalSimulation(
             realizedR: Number(totalR.toFixed(2)),
             tier: trade.tier,
             direction: "LONG",
+            scoreBreakdown: {
+              mfeR: Number(trade.mfeR.toFixed(3)),
+              maeR: Number(trade.maeR.toFixed(3)),
+              mfe30minR: Number(trade.mfe30minR.toFixed(3)),
+              timeToMfeBars: trade.mfeBarIndex - trade.entryBarIndex,
+              timeToMaeBars: trade.maeBarIndex - trade.entryBarIndex,
+            },
           });
 
           tradesGenerated++;
