@@ -601,6 +601,214 @@ export async function registerRoutes(
     res.json({ results });
   });
 
+  app.post("/api/internal/orf-walkforward", async (req, res) => {
+    const { devDates, testDates, tickers, orfConfig } = req.body;
+    if (!devDates || !Array.isArray(devDates) || !testDates || !Array.isArray(testDates)) {
+      return res.status(400).json({ error: "devDates and testDates arrays required" });
+    }
+    const tickerList = tickers ?? [
+      "AAPL","MSFT","NVDA","TSLA","META","AMZN","GOOGL","AMD","NFLX","SPY",
+      "QQQ","AVGO","CRM","ORCL","COIN",
+    ];
+    const userId = "1a70fbad-ee1b-46ea-96a3-36749e24f3ba";
+
+    function aggregateWindow(dayResults: any[]) {
+      const allRs: number[] = [];
+      const allMFEs: number[] = [];
+      const allMAEs: number[] = [];
+      const allHit1R: number[] = [];
+      const allHitTarget: number[] = [];
+      const allSlipR: number[] = [];
+      const allScratch: number[] = [];
+      const allTickers: string[] = [];
+      const allRegimes: string[] = [];
+      let totalTrades = 0, totalWins = 0, totalLosses = 0;
+      let totalGrossPnl = 0, totalNetPnl = 0, totalComm = 0, totalSlip = 0;
+      const byRegime: Record<string, { wins: number; losses: number; pnl: number; trades: number }> = {};
+      const bySymbol: Record<string, { wins: number; losses: number; pnl: number; trades: number; rs: number[] }> = {};
+      const byDayOfWeek: Record<string, { wins: number; losses: number; pnl: number; trades: number }> = {};
+      const dailyPnls: { date: string; trades: number; netPnl: number; avgR: number }[] = [];
+
+      for (const day of dayResults) {
+        if (day.error || day.trades === 0) {
+          dailyPnls.push({ date: day.date, trades: 0, netPnl: 0, avgR: 0 });
+          continue;
+        }
+        totalTrades += day.trades;
+        totalWins += day.wins;
+        totalLosses += day.losses;
+        totalGrossPnl += day.grossPnl ?? 0;
+        totalNetPnl += day.netPnl ?? 0;
+        totalComm += day.totalCommissions ?? 0;
+        totalSlip += day.totalSlippageCosts ?? 0;
+
+        const tradeCount = day.tradeRs?.length ?? 0;
+        for (let i = 0; i < tradeCount; i++) {
+          const r = day.tradeRs[i];
+          allRs.push(r);
+          if (day.tradeMFEs && i < day.tradeMFEs.length) allMFEs.push(day.tradeMFEs[i]);
+          if (day.tradeMAEs && i < day.tradeMAEs.length) allMAEs.push(day.tradeMAEs[i]);
+          if (day.tradeHit1R && i < day.tradeHit1R.length) allHit1R.push(day.tradeHit1R[i]);
+          if (day.tradeHitTarget && i < day.tradeHitTarget.length) allHitTarget.push(day.tradeHitTarget[i]);
+          if (day.tradeSlippageCostsR && i < day.tradeSlippageCostsR.length) allSlipR.push(day.tradeSlippageCostsR[i]);
+          if (day.tradeScratchAfterPartial && i < day.tradeScratchAfterPartial.length) allScratch.push(day.tradeScratchAfterPartial[i]);
+
+          const ticker = day.tradeTickers && i < day.tradeTickers.length ? day.tradeTickers[i] : undefined;
+          const regime = day.tradeRegimes && i < day.tradeRegimes.length ? day.tradeRegimes[i] : undefined;
+          if (ticker) allTickers.push(ticker);
+          if (regime) allRegimes.push(regime);
+
+          if (ticker) {
+            if (!bySymbol[ticker]) bySymbol[ticker] = { wins: 0, losses: 0, pnl: 0, trades: 0, rs: [] };
+            bySymbol[ticker].trades++;
+            bySymbol[ticker].rs.push(r);
+            bySymbol[ticker].pnl += r;
+            if (r > 0) bySymbol[ticker].wins++; else bySymbol[ticker].losses++;
+          }
+        }
+
+        const dayAvgR = tradeCount > 0
+          ? day.tradeRs.reduce((a: number, b: number) => a + b, 0) / tradeCount : 0;
+        dailyPnls.push({ date: day.date, trades: day.trades, netPnl: day.netPnl ?? 0, avgR: Number(dayAvgR.toFixed(3)) });
+
+        const dow = new Date(day.date + "T12:00:00Z").toLocaleDateString("en-US", { weekday: "short" });
+        if (!byDayOfWeek[dow]) byDayOfWeek[dow] = { wins: 0, losses: 0, pnl: 0, trades: 0 };
+        byDayOfWeek[dow].trades += day.trades;
+        byDayOfWeek[dow].wins += day.wins;
+        byDayOfWeek[dow].losses += day.losses;
+        byDayOfWeek[dow].pnl += day.netPnl ?? 0;
+      }
+
+      const avgR = allRs.length > 0 ? allRs.reduce((a, b) => a + b, 0) / allRs.length : 0;
+      const winRate = totalTrades > 0 ? totalWins / totalTrades : 0;
+      const avgMFE = allMFEs.length > 0 ? allMFEs.reduce((a, b) => a + b, 0) / allMFEs.length : 0;
+      const avgMAE = allMAEs.length > 0 ? allMAEs.reduce((a, b) => a + b, 0) / allMAEs.length : 0;
+      const medianMFE = allMFEs.length > 0 ? allMFEs.sort((a, b) => a - b)[Math.floor(allMFEs.length / 2)] : 0;
+      const hit1RPct = allHit1R.length > 0 ? allHit1R.reduce((a, b) => a + b, 0) / allHit1R.length : 0;
+      const hitTargetPct = allHitTarget.length > 0 ? allHitTarget.reduce((a, b) => a + b, 0) / allHitTarget.length : 0;
+      const avgSlipR = allSlipR.length > 0 ? allSlipR.reduce((a, b) => a + b, 0) / allSlipR.length : 0;
+      const scratchPct = allScratch.length > 0 ? allScratch.reduce((a, b) => a + b, 0) / allScratch.length : 0;
+
+      const winners = allRs.filter(r => r > 0);
+      const losers = allRs.filter(r => r <= 0);
+      const avgWinR = winners.length > 0 ? winners.reduce((a, b) => a + b, 0) / winners.length : 0;
+      const avgLossR = losers.length > 0 ? losers.reduce((a, b) => a + b, 0) / losers.length : 0;
+      const profitFactor = losers.length > 0 && Math.abs(avgLossR * losers.length) > 0
+        ? (avgWinR * winners.length) / Math.abs(avgLossR * losers.length) : 0;
+
+      let maxDD = 0, peak = 0, equity = 0;
+      for (const r of allRs) {
+        equity += r;
+        if (equity > peak) peak = equity;
+        const dd = peak - equity;
+        if (dd > maxDD) maxDD = dd;
+      }
+
+      const regimeSummary: Record<string, any> = {};
+      for (let i = 0; i < allRegimes.length; i++) {
+        const reg = allRegimes[i];
+        if (!regimeSummary[reg]) regimeSummary[reg] = { trades: 0, wins: 0, totalR: 0 };
+        regimeSummary[reg].trades++;
+        if (allRs[i] > 0) regimeSummary[reg].wins++;
+        regimeSummary[reg].totalR += allRs[i];
+      }
+      for (const k of Object.keys(regimeSummary)) {
+        const s = regimeSummary[k];
+        s.avgR = s.trades > 0 ? Number((s.totalR / s.trades).toFixed(3)) : 0;
+        s.winRate = s.trades > 0 ? Number((s.wins / s.trades).toFixed(3)) : 0;
+      }
+
+      const symbolSummary: Record<string, any> = {};
+      for (const [sym, data] of Object.entries(bySymbol)) {
+        const symAvgR = data.rs.length > 0 ? data.rs.reduce((a, b) => a + b, 0) / data.rs.length : 0;
+        symbolSummary[sym] = {
+          trades: data.trades,
+          wins: data.wins,
+          losses: data.losses,
+          avgR: Number(symAvgR.toFixed(3)),
+          winRate: data.trades > 0 ? Number((data.wins / data.trades).toFixed(3)) : 0,
+        };
+      }
+
+      return {
+        core: {
+          trades: totalTrades,
+          wins: totalWins,
+          losses: totalLosses,
+          winRate: Number(winRate.toFixed(3)),
+          avgR: Number(avgR.toFixed(3)),
+          avgWinR: Number(avgWinR.toFixed(3)),
+          avgLossR: Number(avgLossR.toFixed(3)),
+          profitFactor: Number(profitFactor.toFixed(3)),
+          maxDrawdownR: Number(maxDD.toFixed(3)),
+          totalNetPnl: Number(totalNetPnl.toFixed(2)),
+        },
+        structure: {
+          avgMFE: Number(avgMFE.toFixed(3)),
+          medianMFE: Number(medianMFE.toFixed(3)),
+          avgMAE: Number(avgMAE.toFixed(3)),
+          hit1RPct: Number(hit1RPct.toFixed(3)),
+          hitTargetPct: Number(hitTargetPct.toFixed(3)),
+        },
+        execution: {
+          avgSlippageCostR: Number(avgSlipR.toFixed(4)),
+          scratchAfterPartialPct: Number(scratchPct.toFixed(3)),
+          totalCommissions: Number(totalComm.toFixed(2)),
+          totalSlippageCosts: Number(totalSlip.toFixed(2)),
+        },
+        robustness: {
+          byRegime: regimeSummary,
+          byDayOfWeek,
+        },
+        perSymbol: symbolSummary,
+        dailyPnls,
+      };
+    }
+
+    try {
+      const devResults: any[] = [];
+      for (const date of devDates) {
+        try {
+          const result = await runORFSimulation(
+            `wf-dev-${date}-${Date.now()}`, date, userId, storage, tickerList,
+            { dryRun: true, orfConfig: orfConfig ?? undefined },
+          );
+          devResults.push({ date, ...(result as any) });
+        } catch (err: any) {
+          devResults.push({ date, error: err.message, trades: 0, wins: 0, losses: 0, netPnl: 0 });
+        }
+      }
+
+      const testResults: any[] = [];
+      for (const date of testDates) {
+        try {
+          const result = await runORFSimulation(
+            `wf-test-${date}-${Date.now()}`, date, userId, storage, tickerList,
+            { dryRun: true, orfConfig: orfConfig ?? undefined },
+          );
+          testResults.push({ date, ...(result as any) });
+        } catch (err: any) {
+          testResults.push({ date, error: err.message, trades: 0, wins: 0, losses: 0, netPnl: 0 });
+        }
+      }
+
+      const devAgg = aggregateWindow(devResults);
+      const testAgg = aggregateWindow(testResults);
+
+      const degradation = devAgg.core.avgR !== 0
+        ? Number(((testAgg.core.avgR - devAgg.core.avgR) / Math.abs(devAgg.core.avgR)).toFixed(3)) : 0;
+
+      res.json({
+        devWindow: { dates: devDates.length, ...devAgg },
+        testWindow: { dates: testDates.length, ...testAgg },
+        walkForwardDegradation: degradation,
+        verdict: testAgg.core.avgR >= -0.10 ? "MARGINAL" : "NO_EDGE",
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Start simulated market data feed
   startSimulatedDataFeed(broadcast, storage);
 

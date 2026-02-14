@@ -237,6 +237,14 @@ export interface DryRunResult {
   totalCommissions: number;
   totalSlippageCosts: number;
   tradeRs: number[];
+  tradeMFEs?: number[];
+  tradeMAEs?: number[];
+  tradeHit1R?: number[];
+  tradeHitTarget?: number[];
+  tradeSlippageCostsR?: number[];
+  tradeScratchAfterPartial?: number[];
+  tradeTickers?: string[];
+  tradeRegimes?: string[];
   maxDrawdown: number;
   byRegime: Record<string, BreakdownBucket>;
   bySession: Record<string, BreakdownBucket>;
@@ -3860,6 +3868,11 @@ export async function runORFSimulation(
     const tradeMFEs: number[] = [];
     const tradeHit1R: number[] = [];
     const tradeHitTarget: number[] = [];
+    const tradeMAEs: number[] = [];
+    const tradeSlippageCostsR: number[] = [];
+    const tradeScratchAfterPartial: number[] = [];
+    const tradeTickers: string[] = [];
+    const tradeRegimes: string[] = [];
     const tradeGrossPnls: number[] = [];
     const tradeNetPnls: number[] = [];
     const tradesByRegime: Record<string, { wins: number; losses: number; pnl: number }> = {};
@@ -3915,11 +3928,21 @@ export async function runORFSimulation(
       tradeNetPnls.push(pnl);
 
       tradeMFEs.push(trade.mfeR);
+      tradeMAEs.push(trade.maeR);
       tradeHit1R.push(trade.mfeR >= 1.0 ? 1 : 0);
       tradeHitTarget.push(trade.mfeR >= trade.targetR ? 1 : 0);
 
+      const frictionCostR = riskPerShare > 0 && trade.originalShares > 0 ? (commission / (riskPerShare * trade.originalShares)) : 0;
+      tradeSlippageCostsR.push(frictionCostR);
+
+      const isScratchAfterPartial = trade.partialExitDone && trade.stopMovedToBE && Math.abs(totalWeightedR) < 0.15;
+      tradeScratchAfterPartial.push(isScratchAfterPartial ? 1 : 0);
+
+      tradeTickers.push(ticker);
+
       const trSession = minutesSinceOpen <= 90 ? "open" : minutesSinceOpen <= 240 ? "mid" : "power";
       const trRegime = regimeResult?.aligned ? "trending" : regimeResult?.chopping ? "choppy" : "neutral";
+      tradeRegimes.push(trRegime);
       const trDir = trade.direction === "SHORT" ? "orf_short" : "orf_long";
       if (!tradesByRegime[trRegime]) tradesByRegime[trRegime] = { wins: 0, losses: 0, pnl: 0 };
       if (!tradesBySession[trSession]) tradesBySession[trSession] = { wins: 0, losses: 0, pnl: 0 };
@@ -4395,8 +4418,13 @@ export async function runORFSimulation(
         totalSlippageCosts: Number(totalSlippageCosts.toFixed(2)),
         tradeRs,
         tradeMFEs: tradeMFEs.length > 0 ? tradeMFEs : undefined,
+        tradeMAEs: tradeMAEs.length > 0 ? tradeMAEs : undefined,
         tradeHit1R: tradeHit1R.length > 0 ? tradeHit1R : undefined,
         tradeHitTarget: tradeHitTarget.length > 0 ? tradeHitTarget : undefined,
+        tradeSlippageCostsR: tradeSlippageCostsR.length > 0 ? tradeSlippageCostsR : undefined,
+        tradeScratchAfterPartial: tradeScratchAfterPartial.length > 0 ? tradeScratchAfterPartial : undefined,
+        tradeTickers: tradeTickers.length > 0 ? tradeTickers : undefined,
+        tradeRegimes: tradeRegimes.length > 0 ? tradeRegimes : undefined,
         maxDrawdown: Number(maxDD.toFixed(2)),
         byRegime: tradesByRegime,
         bySession: tradesBySession,

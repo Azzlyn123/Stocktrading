@@ -49,13 +49,28 @@ The backend features a modular strategy engine composed of pure TypeScript modul
 - Reduced target (1.5R, trail at 1.0R, max 2/ticker): 27 trades, 25.9% WR, -0.367R avg
 - Relaxed config (0.3% break, 5-bar fail, no vol req): 30 trades, 26.7% WR, -0.355R avg
 - **Critical finding**: Average winner (~0.9R) still approximately equals average loser (~0.83R) — the 2R target is NOT reached; trades exit via time/trailing stops before achieving target R
-- ORF strategy files: `server/strategy/orfDetector.ts`, endpoints: `/api/simulations/orf`, `/api/internal/orf-validate`
+- ORF strategy files: `server/strategy/orfDetector.ts`, endpoints: `/api/simulations/orf`, `/api/internal/orf-validate`, `/api/internal/orf-walkforward`
+
+### ORF v2 Walk-Forward Validation (Dec 2025 - Feb 2026)
+- **Result: NO EDGE** - Confirmed with 3-month walk-forward (42-day dev, 9-day test)
+- ORF v2 enhancements: quality gates (minOR_ATR=0.25), partial exits at 1R w/ BE+0.02R buffer, VWAP touch modes, RS filter, 15-ticker universe, 1.35R runner target
+- **Dev Window (Dec 2025 - Jan 2026)**: 52 trades, 30.8% WR, -0.313R avg, PF 0.361, max DD 16.27R
+  - Avg MFE: 0.436R (median 0.297R), Avg MAE: -0.704R, hit 1R: 17.3%, hit target: 1.9%
+  - Slippage cost: 0.0044R, scratch-after-partial: 3.8%
+- **Test Window (Feb 2026)**: 13 trades, 7.7% WR, -0.670R avg, PF 0.048, max DD 8.71R
+  - Avg MFE: 0.172R (median 0.041R), Avg MAE: -0.705R, hit 1R: 7.7%, hit target: 0.0%
+- **Walk-Forward Degradation: -114%** — test window significantly worse than dev
+- **Regime breakdown**: Neutral regime worst (-0.216R dev, -0.810R test); trending regime also negative (-0.409R dev, -0.506R test)
+- **Per-symbol**: NVDA highest trade count (19 dev), all symbols negative avgR; no symbol shows edge
+- **Structural diagnosis**: Median MFE 0.297R (dev) / 0.041R (test) confirms trades rarely extend beyond entry noise; MAE ~0.7R shows rapid adverse moves
+- **Conclusion**: ORF failure move trades in mega-caps are structurally negative — the "failure" bounce is too weak and too brief to overcome friction costs
 
 ### Key Findings
-- **Three strategies tested, zero edge found**: Momentum breakout (-0.309R), VWAP reversion (-0.253R), and Opening Range Failure (-0.504R) all produce negative expectancy on mega-cap tickers
-- Fundamental issue across all strategies: winners (~1R) ≈ losers (~1R), no payoff ratio advantage regardless of target setting
+- **Four strategy variants tested, zero edge found**: Momentum breakout (-0.309R), VWAP reversion (-0.253R), ORF v1 (-0.504R), ORF v2 walk-forward (-0.313R dev / -0.670R test) all produce negative expectancy on mega-cap tickers
+- Fundamental issue across all strategies: winners (~0.5-1R) ≈ losers (~0.7-1R), no payoff ratio advantage regardless of target setting
+- Walk-forward validation shows -114% degradation from dev to test, confirming no stable edge
 - Fill modeling with realistic slippage, spread, and commissions is critical - many "paper edges" disappear
-- The platform infrastructure (simulation engine, fill modeling, regime detection) is production-grade and reusable for testing other strategies
+- The platform infrastructure (simulation engine, fill modeling, regime detection, walk-forward framework) is production-grade and reusable for testing other strategies
 
 ## External Dependencies
 - **Alpaca API**: Used for live bars, snapshots, WebSocket data streams, market clock, and historical bar data.
