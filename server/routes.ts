@@ -9,7 +9,7 @@ import type { User } from "@shared/schema";
 import { startSimulatedDataFeed, registerUser, unregisterUser, getScannerData, getDataSource, isLiveConnected, getSharedUserId } from "./simulator";
 import { seedDemoData } from "./seed";
 import { generateAdaptiveInsights } from "./strategy/learning";
-import { runHistoricalSimulation, getActiveSimulations, cancelSimulation, startAutoRun, getAutoRunStatus, cancelAutoRun, runCostSensitivity, runWalkForwardEvaluation, getWalkForwardStatus, cancelWalkForward } from "./historicalSimulator";
+import { runHistoricalSimulation, runReversionSimulation, getActiveSimulations, cancelSimulation, startAutoRun, getAutoRunStatus, cancelAutoRun, runCostSensitivity, runWalkForwardEvaluation, getWalkForwardStatus, cancelWalkForward } from "./historicalSimulator";
 
 declare global {
   namespace Express {
@@ -300,6 +300,46 @@ export async function registerRoutes(
       tickers && tickers.length > 0 ? tickers : undefined
     ).catch((err) => {
       console.error("Historical simulation error:", err);
+    });
+
+    res.status(201).json(run);
+  });
+
+  app.post("/api/simulations/reversion", requireAuth, async (req, res) => {
+    const userId = (req.user as User).id;
+    const { simulationDate, tickers, reversionConfig } = req.body;
+
+    if (!simulationDate || typeof simulationDate !== "string") {
+      return res.status(400).json({ error: "simulationDate is required (YYYY-MM-DD)" });
+    }
+
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(simulationDate)) {
+      return res.status(400).json({ error: "Invalid date format. Use YYYY-MM-DD." });
+    }
+
+    const today = new Date();
+    const simDate = new Date(simulationDate + "T12:00:00Z");
+    if (simDate >= today) {
+      return res.status(400).json({ error: "Simulation date must be in the past." });
+    }
+
+    const run = await storage.createSimulationRun({
+      userId,
+      simulationDate,
+      status: "pending",
+      tickers: tickers ?? null,
+    });
+
+    runReversionSimulation(
+      run.id,
+      simulationDate,
+      userId,
+      storage,
+      tickers && tickers.length > 0 ? tickers : undefined,
+      { reversionConfig },
+    ).catch((err) => {
+      console.error("Reversion simulation error:", err);
     });
 
     res.status(201).json(run);
