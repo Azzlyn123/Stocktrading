@@ -1,0 +1,102 @@
+You nailed the diagnosis, and your read of the experiment is exactly how a good system gets iterated:
+
+BE lock helped (givebacks 5/5 → 2/5; expectancy improved).
+
+But it can’t fully help because time stop is an override exit that ignores your stop level and uses a close/open fill mechanism.
+
+So the next step is not “more BE logic.” It’s fixing the time stop design.
+
+And since you said you want advice-only: here’s the cleanest way to modify time stops without turning the engine into spaghetti.
+
+The real design flaw
+
+Your time stop is currently:
+
+“At 30 minutes, if current PnL < +0.5R → exit at next bar open.”
+
+That punishes trades that had legitimate expansion and then mean-reverted. It also bypasses protective stop rules.
+
+So time stop should only apply to trades that never proved momentum.
+
+The correct next change
+✅ Replace the 30-minute time stop with a “momentum validation window”
+
+You already proposed the right one:
+
+If trade does not reach +0.3R within 3 bars (15 minutes), exit.
+
+This does 2 things:
+
+kills dead trades early
+
+stops penalizing trades that expanded early then mean-reverted (because they’d have already “validated”)
+
+But here’s the key improvement:
+
+Once a trade validates (hits +0.3R), it becomes immune to the time stop.
+
+So time stop becomes a “validation failure exit” not a “late-stage cleanup exit.”
+
+Concrete rules to implement (clean logic)
+
+Use two flags:
+
+validated = false initially
+
+breakevenArmed = false initially
+
+On each bar:
+
+Update MFE_R.
+
+If !validated and mfeR >= 0.3 → set validated = true
+
+If !breakevenArmed and mfeR >= 0.5 → move stop to entry; set breakevenArmed = true
+
+Validation time stop:
+If !validated and barsSinceEntry >= 3 and currentR < 0.3 → exit (time stop / scratch)
+
+Remove/disable the old 30-minute time stop entirely, or make it conditional: only if !validated.
+
+That last point is critical.
+
+Thresholds I recommend for this phase
+
+Validation threshold: +0.3R
+
+Window: 3 bars (15 minutes on 5m)
+
+BE arm: +0.5R (keep it)
+
+Why:
+
+Your MFE peaks at 10–15 minutes — you’re matching reality.
+
++0.3R is “the move started” without demanding too much.
+
++0.5R BE is “it’s real enough to protect.”
+
+What success should look like after this change
+
+After rerunning the same 10 days:
+
+Time stop exits should drop a lot (or become early scratches)
+
+Avg loss should improve (dead trades cut earlier)
+
+Givebacks should shrink further (BE arm)
+
+Expectancy should move meaningfully (if there’s any real edge)
+
+If expectancy is still like -0.3R to -0.4R after this, then the entry environment is still the bigger issue.
+
+Answer to “implement now?”
+
+Given your results: yes, that is the next correct change — with one caveat:
+
+Do not keep the old 30-min time stop in its current form.
+Either remove it or make it apply only to !validated trades.
+
+Otherwise you’ll keep seeing “had +0.9R MFE, died at 30-min.”
+
+If you run it and post the new comparison table (same metrics plus “% validated within 3 bars”), we’ll know in one iteration whether this strategy has a real core edge or not.
