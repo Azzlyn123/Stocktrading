@@ -9,7 +9,7 @@ import type { User } from "@shared/schema";
 import { startSimulatedDataFeed, registerUser, unregisterUser, getScannerData, getDataSource, isLiveConnected, getSharedUserId } from "./simulator";
 import { seedDemoData } from "./seed";
 import { generateAdaptiveInsights } from "./strategy/learning";
-import { runHistoricalSimulation, runReversionSimulation, getActiveSimulations, cancelSimulation, startAutoRun, getAutoRunStatus, cancelAutoRun, runCostSensitivity, runWalkForwardEvaluation, getWalkForwardStatus, cancelWalkForward } from "./historicalSimulator";
+import { runHistoricalSimulation, runReversionSimulation, runORFSimulation, getActiveSimulations, cancelSimulation, startAutoRun, getAutoRunStatus, cancelAutoRun, runCostSensitivity, runWalkForwardEvaluation, getWalkForwardStatus, cancelWalkForward } from "./historicalSimulator";
 
 declare global {
   namespace Express {
@@ -498,6 +498,76 @@ export async function registerRoutes(
       trades,
       totalTracked: getTradeCount(),
     });
+  });
+
+  app.post("/api/simulations/orf", requireAuth, async (req, res) => {
+    const userId = (req.user as User).id;
+    const { simulationDate, tickers, orfConfig } = req.body;
+
+    if (!simulationDate || typeof simulationDate !== "string") {
+      return res.status(400).json({ error: "simulationDate is required (YYYY-MM-DD)" });
+    }
+
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(simulationDate)) {
+      return res.status(400).json({ error: "Invalid date format. Use YYYY-MM-DD." });
+    }
+
+    const today = new Date();
+    const simDate = new Date(simulationDate + "T12:00:00Z");
+    if (simDate >= today) {
+      return res.status(400).json({ error: "Simulation date must be in the past." });
+    }
+
+    const run = await storage.createSimulationRun({
+      userId,
+      simulationDate,
+      status: "pending",
+      tickers: tickers ?? null,
+    });
+
+    runORFSimulation(
+      run.id,
+      simulationDate,
+      userId,
+      storage,
+      tickers && tickers.length > 0 ? tickers : undefined,
+      { orfConfig },
+    ).catch((err) => {
+      console.error("ORF simulation error:", err);
+    });
+
+    res.status(201).json(run);
+  });
+
+  app.post("/api/internal/orf-validate", async (req, res) => {
+    const { dates, tickers, orfConfig } = req.body;
+    if (!dates || !Array.isArray(dates)) {
+      return res.status(400).json({ error: "dates array required" });
+    }
+    const tickerList = tickers ?? ["AAPL", "MSFT", "NVDA", "TSLA", "META"];
+    const userId = "1a70fbad-ee1b-46ea-96a3-36749e24f3ba";
+
+    const results: any[] = [];
+
+    for (const date of dates) {
+      try {
+        const dummyRunId = `orf-validation-${date}-${Date.now()}`;
+        const result = await runORFSimulation(
+          dummyRunId,
+          date,
+          userId,
+          storage,
+          tickerList,
+          { dryRun: true, orfConfig: orfConfig ?? undefined },
+        );
+        results.push({ date, ...(result as any) });
+      } catch (err: any) {
+        results.push({ date, error: err.message, trades: 0, wins: 0, losses: 0, netPnl: 0 });
+      }
+    }
+
+    res.json({ results });
   });
 
   app.post("/api/internal/reversion-validate", async (req, res) => {
