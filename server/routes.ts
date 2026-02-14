@@ -373,7 +373,8 @@ export async function registerRoutes(
   app.post("/api/simulations/:id/cost-sensitivity", requireAuth, async (req, res) => {
     try {
       const user = req.user as User;
-      const result = await runCostSensitivity(req.params.id, user.id, storage);
+      const simulationId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const result = await runCostSensitivity(simulationId, user.id, storage);
       if ("error" in result) {
         return res.status(400).json(result);
       }

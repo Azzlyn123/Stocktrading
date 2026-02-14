@@ -4775,11 +4775,12 @@ export async function runRSContinuationSimulation(
             exitReason = bar.open <= trade.stopPrice
               ? `Gap-through stop at $${bar.open.toFixed(2)}`
               : `Stop hit at $${trade.stopPrice.toFixed(2)}${trade.stopMovedToBE ? " (BE)" : ""}`;
-          } else if (bar.high >= trade.targetPrice) {
-            shouldExit = true;
-            exitReason = bar.open >= trade.targetPrice
-              ? `Target ${trade.targetR}R hit (gap-through) at $${bar.open.toFixed(2)}`
-              : `Target ${trade.targetR}R hit at $${trade.targetPrice.toFixed(2)}`;
+            if (bar.high >= trade.targetPrice) {
+              shouldExit = true;
+              exitReason = bar.open >= trade.targetPrice
+                ? `Target ${trade.targetR}R hit (gap-through) at $${bar.open.toFixed(2)}`
+                : `Target ${trade.targetR}R hit at $${trade.targetPrice.toFixed(2)}`;
+            }
           }
 
           if (!shouldExit && minutesSinceOpen >= rsConfig.timeExitMinutes) {
@@ -4867,42 +4868,42 @@ export async function runRSContinuationSimulation(
           if (riskPerShare > 0 && riskPerShare < entryPrice * 0.03) {
             const dollarRisk = accountSize * rsConfig.riskPct;
             const shares = Math.max(1, Math.floor(dollarRisk / riskPerShare));
-            const targetPrice = entryPrice + riskPerShare * rsConfig.targetMultiple;
+          const targetPrice = rsConfig.noTarget ? 999999 : (entryPrice + riskPerShare * rsConfig.targetMultiple);
 
-            activeTrade = {
-              direction: "LONG",
-              entryPrice,
-              stopPrice: stopLevel,
-              originalStopPrice: stopLevel,
-              targetPrice,
-              shares,
-              originalShares: shares,
-              entryBarIndex: i,
-              dollarRisk,
-              riskPerShare,
-              targetR: rsConfig.targetMultiple,
-              pendingExit: null,
-              mfeR: 0,
-              mfePrice: entryPrice,
-              mfeBarIndex: i,
-              maeR: 0,
-              maePrice: entryPrice,
-              maeBarIndex: i,
-              trailingStopPrice: null,
-              trailingActivated: false,
-              partialExitDone: false,
-              partialExitPrice: null,
-              partialExitShares: 0,
-              partialPnl: 0,
-              stopMovedToBE: false,
-              rsAtEntry: signal.rsValue,
-            };
+          activeTrade = {
+            direction: "LONG",
+            entryPrice,
+            stopPrice: stopLevel,
+            originalStopPrice: stopLevel,
+            targetPrice,
+            shares,
+            originalShares: shares,
+            entryBarIndex: i,
+            dollarRisk,
+            riskPerShare,
+            targetR: rsConfig.noTarget ? 99 : rsConfig.targetMultiple,
+            pendingExit: null,
+            mfeR: 0,
+            mfePrice: entryPrice,
+            mfeBarIndex: i,
+            maeR: 0,
+            maePrice: entryPrice,
+            maeBarIndex: i,
+            trailingStopPrice: null,
+            trailingActivated: false,
+            partialExitDone: false,
+            partialExitPrice: null,
+            partialExitShares: 0,
+            partialPnl: 0,
+            stopMovedToBE: false,
+            rsAtEntry: signal.rsValue,
+          };
 
-            totalSlippageCosts += entryTrace.slippageBps;
-            log(
-              `[RSSim] ${ticker} ENTRY LONG at $${entryPrice.toFixed(2)} | stop=$${stopLevel.toFixed(2)} | target=$${targetPrice.toFixed(2)} (${rsConfig.targetMultiple}R) | ${shares}sh | RS=${signal.rsValue.toFixed(4)} slope=${signal.rsSlope.toFixed(4)} | ${signal.reasons.join("; ")}`,
-              "historical",
-            );
+          totalSlippageCosts += entryTrace.slippageBps;
+          log(
+            `[RSSim] ${ticker} ENTRY LONG at $${entryPrice.toFixed(2)} | stop=$${stopLevel.toFixed(2)} | target=${rsConfig.noTarget ? "NONE" : targetPrice.toFixed(2)} | ${shares}sh | RS=${signal.rsValue.toFixed(4)} slope=${signal.rsSlope.toFixed(4)} | ${signal.reasons.join("; ")}`,
+            "historical",
+          );
           }
         }
 
