@@ -28,6 +28,23 @@ import {
 } from "./alpaca";
 import type { TradeRecord, ExitReasonType } from "./analytics/tradeAnalytics";
 import { addTrade } from "./analytics/tradeStore";
+import {
+  type SmallCapConfig,
+  type SmallCapQualification,
+  DEFAULT_SMALLCAP_CONFIG,
+  qualifySmallCapGapper,
+  computeATRFromDailyBars,
+  computeAvgDailyVolume,
+} from "./strategy/smallCapScanner";
+import {
+  type PullbackConfig,
+  type PullbackSignal,
+  type HODState,
+  DEFAULT_PULLBACK_CONFIG,
+  initHODState,
+  updateHODState,
+  checkPullbackRebreak,
+} from "./strategy/pullbackDetector";
 
 function classifyExitReason(reason: string): ExitReasonType {
   const r = reason.toLowerCase();
@@ -250,6 +267,7 @@ export interface DryRunResult {
   byRegime: Record<string, BreakdownBucket>;
   bySession: Record<string, BreakdownBucket>;
   byTier: Record<string, BreakdownBucket>;
+  qualifications?: SmallCapQualification[];
 }
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -5639,6 +5657,516 @@ export async function runGapContinuationSimulation(
       errorMessage: error.message,
       completedAt: new Date(),
     });
+  } finally {
+    if (!isDryRun) {
+      activeSimulations.delete(runId);
+    }
+  }
+}
+
+// ===== SMALL-CAP MOMENTUM: FIRST PULLBACK AFTER HOD BREAK =====
+
+interface SmallCapTradeState {
+  direction: "LONG";
+  entryPrice: number;
+  stopPrice: number;
+  originalStopPrice: number;
+  shares: number;
+  originalShares: number;
+  entryBarIndex: number;
+  dollarRisk: number;
+  riskPerShare: number;
+  mfeR: number;
+  mfePrice: number;
+  mfeBarIndex: number;
+  maeR: number;
+  maePrice: number;
+  maeBarIndex: number;
+  partialFilled: boolean;
+  partialShares: number;
+  partialR: number;
+  trailingActivated: boolean;
+  trailingStopPrice: number | null;
+  pendingExit: { reason: string; exitType: string; decisionBarIndex: number } | null;
+  pullbackSignal: PullbackSignal;
+}
+
+export interface SmallCapGapperEvent {
+  ticker: string;
+  date: string;
+  priorClose?: number;
+  floatShares?: number;
+  premarketVolume?: number;
+  catalyst?: string;
+}
+
+export async function runSmallCapMomentumSimulation(
+  runId: string,
+  simulationDate: string,
+  userId: string,
+  storage: IStorage,
+  tickerList: string[],
+  options?: {
+    costOverrides?: CostOverrides;
+    dryRun?: boolean;
+    smallCapConfig?: Partial<SmallCapConfig>;
+    pullbackConfig?: Partial<PullbackConfig>;
+    floatData?: Record<string, number>;
+    premarketVolData?: Record<string, number>;
+  },
+): Promise<DryRunResult | void> {
+  const isDryRun = options?.dryRun ?? false;
+  const costOverrides = options?.costOverrides;
+  const scConfig: SmallCapConfig = { ...DEFAULT_SMALLCAP_CONFIG, ...(options?.smallCapConfig ?? {}) };
+  const pbConfig: PullbackConfig = { ...DEFAULT_PULLBACK_CONFIG, ...(options?.pullbackConfig ?? {}) };
+  const floatData = options?.floatData ?? {};
+  const premarketVolData = options?.premarketVolData ?? {};
+
+  const control = { cancel: false };
+  if (!isDryRun) {
+    activeSimulations.set(runId, control);
+  }
+
+  try {
+    if (!isAlpacaConfigured()) {
+      if (!isDryRun) {
+        await storage.updateSimulationRun(runId, {
+          status: "failed",
+          errorMessage: "Alpaca API keys not configured.",
+          completedAt: new Date(),
+        });
+      }
+      return;
+    }
+
+    const allSymbols = Array.from(new Set([...tickerList, "SPY"]));
+    const bars5mMap = await fetchBarsForDate(allSymbols, simulationDate, "5Min");
+    const multiDayBars = await fetchMultiDayDailyBars(allSymbols, simulationDate, 20);
+
+    const spyBars5m = bars5mMap.get("SPY") ?? [];
+    if (spyBars5m.length === 0) {
+      if (!isDryRun) {
+        await storage.updateSimulationRun(runId, {
+          status: "failed",
+          errorMessage: `No SPY data for ${simulationDate}.`,
+          completedAt: new Date(),
+        });
+      }
+      return;
+    }
+
+    let accountSize = 100000;
+    try {
+      const user = await storage.getUser(userId);
+      if (user) accountSize = user.accountSize ?? 100000;
+    } catch {}
+
+    let tradesGenerated = 0;
+    let totalPnl = 0;
+    let winCount = 0;
+    let lossCount = 0;
+    let grossPnlTotal = 0;
+    let totalCommissions = 0;
+    let totalSlippageCosts = 0;
+    const tradeRs: number[] = [];
+    const tradeMFEs: number[] = [];
+    const tradeMAEs: number[] = [];
+    const tradeHit1R: number[] = [];
+    const tradeHitTarget: number[] = [];
+    const tradeSlippageCostsR: number[] = [];
+    const tradeScratchAfterPartial: number[] = [];
+    const tradeLossBuckets: string[] = [];
+    const tradeTickers: string[] = [];
+    const tradeRegimes: string[] = [];
+    const tradeGrossPnls: number[] = [];
+    const tradeNetPnls: number[] = [];
+    const tradesByRegime: Record<string, { wins: number; losses: number; pnl: number }> = {};
+    const tradesBySession: Record<string, { wins: number; losses: number; pnl: number }> = {};
+    const tradesByTier: Record<string, { wins: number; losses: number; pnl: number }> = {};
+    const qualifications: SmallCapQualification[] = [];
+
+    const closeSmallCapTrade = (
+      trade: SmallCapTradeState,
+      exitPrice: number,
+      exitReason: string,
+      ticker: string,
+      barTimestamp: number,
+      entryTimestamp: number,
+      minutesSinceOpen: number,
+      atr14: number,
+    ) => {
+      const shares = trade.shares;
+      const riskPerShare = trade.riskPerShare;
+
+      const grossPnl = (exitPrice - trade.entryPrice) * shares;
+      const commission = calculateCommission(trade.originalShares, costOverrides) * 2;
+      const partialGrossPnl = trade.partialFilled
+        ? (trade.partialR * riskPerShare) * trade.partialShares
+        : 0;
+      const totalGrossPnl = grossPnl + partialGrossPnl;
+      const pnl = totalGrossPnl - commission;
+
+      const remainingR = riskPerShare > 0
+        ? (exitPrice - trade.entryPrice) / riskPerShare
+        : 0;
+      const compositeR = riskPerShare > 0 && trade.originalShares > 0
+        ? ((trade.partialFilled ? trade.partialR * trade.partialShares : 0) + remainingR * shares) / trade.originalShares
+        : 0;
+
+      totalPnl += pnl;
+      if (pnl > 0) winCount++; else lossCount++;
+      grossPnlTotal += totalGrossPnl;
+      totalCommissions += commission;
+      tradeRs.push(compositeR);
+      tradeGrossPnls.push(totalGrossPnl);
+      tradeNetPnls.push(pnl);
+
+      tradeMFEs.push(trade.mfeR);
+      tradeMAEs.push(trade.maeR);
+      tradeHit1R.push(trade.mfeR >= 1.0 ? 1 : 0);
+      tradeHitTarget.push(trade.mfeR >= scConfig.partialExitR ? 1 : 0);
+
+      let lossBucket = "winner";
+      if (compositeR < 0) {
+        if (trade.mfeR < 0.3) {
+          lossBucket = "stopped_before_0.3R";
+        } else if (trade.mfeR >= 0.3 && trade.mfeR < 1.0) {
+          lossBucket = "reversed_after_0.3R";
+        } else if (trade.partialFilled && compositeR < 0) {
+          lossBucket = "partial_then_scratch";
+        } else {
+          lossBucket = "other_loss";
+        }
+      }
+
+      const frictionCostR = riskPerShare > 0 && trade.originalShares > 0 ? (commission / (riskPerShare * trade.originalShares)) : 0;
+      tradeSlippageCostsR.push(frictionCostR);
+      tradeScratchAfterPartial.push(trade.partialFilled && compositeR < 0.1 ? 1 : 0);
+
+      tradeTickers.push(ticker);
+      tradeLossBuckets.push(lossBucket);
+      const trSession = minutesSinceOpen <= 90 ? "open" : minutesSinceOpen <= 240 ? "mid" : "power";
+      const trRegime = "smallcap";
+      tradeRegimes.push(trRegime);
+      const tierName = "pullback_long";
+      if (!tradesByRegime[trRegime]) tradesByRegime[trRegime] = { wins: 0, losses: 0, pnl: 0 };
+      if (!tradesBySession[trSession]) tradesBySession[trSession] = { wins: 0, losses: 0, pnl: 0 };
+      if (!tradesByTier[tierName]) tradesByTier[tierName] = { wins: 0, losses: 0, pnl: 0 };
+      tradesByRegime[trRegime].pnl += pnl;
+      tradesBySession[trSession].pnl += pnl;
+      tradesByTier[tierName].pnl += pnl;
+      if (pnl > 0) { tradesByRegime[trRegime].wins++; tradesBySession[trSession].wins++; tradesByTier[tierName].wins++; }
+      else { tradesByRegime[trRegime].losses++; tradesBySession[trSession].losses++; tradesByTier[tierName].losses++; }
+
+      tradesGenerated++;
+      log(`[SmallCapSim] ${ticker} CLOSED: ${exitReason} | R=${compositeR.toFixed(2)} MFE=${trade.mfeR.toFixed(2)}R PnL=$${pnl.toFixed(2)}${trade.partialFilled ? " (partial filled)" : ""}`, "historical");
+    };
+
+    for (const ticker of tickerList) {
+      if (control.cancel) break;
+
+      const tickerBars5m = bars5mMap.get(ticker) ?? [];
+      const dailyHistory = multiDayBars.get(ticker) ?? [];
+
+      if (tickerBars5m.length < 10) continue;
+
+      const priorClose = dailyHistory.length > 0 ? dailyHistory[dailyHistory.length - 1].close : 0;
+      if (priorClose <= 0) continue;
+
+      const todayOpen = tickerBars5m[0].open;
+      const atr14Daily = computeATRFromDailyBars(dailyHistory, 14);
+      const avgDailyVol = computeAvgDailyVolume(dailyHistory, 20);
+      const premarketVol = premarketVolData[ticker] ?? tickerBars5m[0].volume * 3;
+      const floatShares = floatData[ticker] ?? 0;
+
+      const qual = qualifySmallCapGapper(
+        ticker, priorClose, todayOpen, atr14Daily,
+        premarketVol, avgDailyVol, floatShares, scConfig,
+      );
+      qualifications.push(qual);
+
+      if (!qual.passed) {
+        log(`[SmallCapSim] ${ticker} REJECTED: ${qual.rejectReason}`, "historical");
+        continue;
+      }
+
+      if (qual.gapDirection !== "LONG") {
+        log(`[SmallCapSim] ${ticker} skipped - SHORT gap (long-only strategy)`, "historical");
+        continue;
+      }
+
+      log(`[SmallCapSim] ${ticker} QUALIFIED: gap=${(qual.gapPct * 100).toFixed(1)}% ATR%=${(qual.atrPct * 100).toFixed(1)}% preVol=${premarketVol.toLocaleString()}`, "historical");
+
+      let hodState = initHODState();
+      hodState.hodPrice = todayOpen;
+      hodState.hodBarIndex = 0;
+
+      let activeTrade: SmallCapTradeState | null = null;
+      let tickerTradeCount = 0;
+      const bars5mAccum: Candle[] = [];
+
+      for (let i = 0; i < tickerBars5m.length; i++) {
+        if (control.cancel) break;
+
+        const bar = tickerBars5m[i];
+        bars5mAccum.push(bar);
+        if (bars5mAccum.length > 200) bars5mAccum.shift();
+
+        const minutesSinceOpen = (i + 1) * 5;
+        const atr14 = calculateATR(bars5mAccum, 14);
+
+        if (activeTrade) {
+          const trade = activeTrade;
+          const riskPerShare = trade.riskPerShare;
+
+          if (riskPerShare > 0) {
+            const barMfeR = (bar.high - trade.entryPrice) / riskPerShare;
+            const barMaeR = (bar.low - trade.entryPrice) / riskPerShare;
+
+            if (barMfeR > trade.mfeR) {
+              trade.mfeR = barMfeR;
+              trade.mfePrice = bar.high;
+              trade.mfeBarIndex = i;
+            }
+            if (barMaeR < trade.maeR) {
+              trade.maeR = barMaeR;
+              trade.maePrice = bar.low;
+              trade.maeBarIndex = i;
+            }
+
+            if (!trade.partialFilled && trade.mfeR >= scConfig.partialExitR) {
+              const partialShares = Math.floor(trade.originalShares * scConfig.partialExitPct);
+              if (partialShares > 0) {
+                const partialPrice = trade.entryPrice + riskPerShare * scConfig.partialExitR;
+                const partialTrace = applyFrictionAndRoundWithTrace({
+                  rawPrice: partialPrice,
+                  side: "long",
+                  direction: "exit",
+                  atr14,
+                  costOverrides,
+                });
+                trade.partialFilled = true;
+                trade.partialShares = partialShares;
+                trade.partialR = (partialTrace.finalPrice - trade.entryPrice) / riskPerShare;
+                trade.shares -= partialShares;
+                totalSlippageCosts += partialTrace.slippageBps;
+
+                trade.stopPrice = trade.entryPrice + riskPerShare * 0.1;
+                trade.trailingStopPrice = trade.stopPrice;
+
+                log(`[SmallCapSim] ${ticker} PARTIAL at ${scConfig.partialExitR}R: ${partialShares}sh @ $${partialTrace.finalPrice.toFixed(2)} | stop moved to BE+0.1R`, "historical");
+              }
+            }
+
+            if (!trade.trailingActivated && trade.mfeR >= scConfig.trailActivationR) {
+              trade.trailingActivated = true;
+              if (trade.trailingStopPrice === null) {
+                trade.trailingStopPrice = Math.max(trade.stopPrice, bar.high - riskPerShare * scConfig.trailOffsetR);
+              }
+              log(`[SmallCapSim] ${ticker} trail activated at ${trade.mfeR.toFixed(2)}R MFE (threshold: ${scConfig.trailActivationR}R), trail=$${trade.trailingStopPrice.toFixed(2)}`, "historical");
+            }
+
+            if (trade.trailingActivated && trade.trailingStopPrice !== null) {
+              const newTrail = bar.high - riskPerShare * scConfig.trailOffsetR;
+              if (newTrail > trade.trailingStopPrice) {
+                trade.trailingStopPrice = newTrail;
+              }
+              trade.stopPrice = Math.max(trade.stopPrice, trade.trailingStopPrice);
+            }
+          }
+
+          if (trade.pendingExit) {
+            const exitTrace = applyFrictionAndRoundWithTrace({
+              rawPrice: bar.open,
+              side: "long",
+              direction: "exit",
+              atr14,
+              costOverrides,
+            });
+            closeSmallCapTrade(trade, exitTrace.finalPrice, trade.pendingExit.reason, ticker, bar.timestamp,
+              tickerBars5m[trade.entryBarIndex]?.timestamp ?? bar.timestamp, minutesSinceOpen, atr14);
+            totalSlippageCosts += exitTrace.slippageBps;
+            activeTrade = null;
+            continue;
+          }
+
+          let shouldExit = false;
+          let exitReason = "";
+
+          if (bar.low <= trade.stopPrice) {
+            shouldExit = true;
+            exitReason = bar.open <= trade.stopPrice
+              ? `Gap-through stop at $${bar.open.toFixed(2)}`
+              : `Stop hit at $${trade.stopPrice.toFixed(2)}${trade.trailingActivated ? " (trailing)" : ""}`;
+          }
+
+          if (!shouldExit && minutesSinceOpen >= scConfig.timeExitMinutes) {
+            trade.pendingExit = {
+              reason: `Time exit at ${minutesSinceOpen}min`,
+              exitType: "time_stop",
+              decisionBarIndex: i,
+            };
+            continue;
+          }
+
+          if (shouldExit) {
+            const rawFill = bar.open <= trade.stopPrice ? bar.open : trade.stopPrice;
+            const exitTrace = applyFrictionAndRoundWithTrace({
+              rawPrice: rawFill,
+              side: "long",
+              direction: "exit",
+              atr14,
+              costOverrides,
+            });
+            closeSmallCapTrade(trade, exitTrace.finalPrice, exitReason, ticker, bar.timestamp,
+              tickerBars5m[trade.entryBarIndex]?.timestamp ?? bar.timestamp, minutesSinceOpen, atr14);
+            totalSlippageCosts += exitTrace.slippageBps;
+            activeTrade = null;
+          }
+
+          continue;
+        }
+
+        if (tickerTradeCount >= scConfig.maxTradesPerTicker) continue;
+        if (minutesSinceOpen <= 15) {
+          if (bar.high > hodState.hodPrice) {
+            hodState.hodPrice = bar.high;
+            hodState.hodBarIndex = i;
+          }
+          continue;
+        }
+
+        hodState = updateHODState(hodState, bar, i, todayOpen, bars5mAccum.slice(-20));
+
+        if (hodState.pullbackStarted && !hodState.signalFired) {
+          const signal = checkPullbackRebreak(hodState, bar, i, pbConfig);
+          if (signal) {
+            hodState.signalFired = true;
+            tickerTradeCount++;
+
+            const entryTrace = applyFrictionAndRoundWithTrace({
+              rawPrice: signal.entryPrice,
+              side: "long",
+              direction: "entry",
+              atr14,
+              costOverrides,
+            });
+            const entryPrice = entryTrace.finalPrice;
+            const riskPerShare = entryPrice - signal.stopPrice;
+
+            if (riskPerShare <= 0 || riskPerShare > entryPrice * 0.05) {
+              tickerTradeCount--;
+              continue;
+            }
+
+            const dollarRisk = accountSize * scConfig.riskPct;
+            const shares = Math.max(1, Math.floor(dollarRisk / riskPerShare));
+
+            activeTrade = {
+              direction: "LONG",
+              entryPrice,
+              stopPrice: signal.stopPrice,
+              originalStopPrice: signal.stopPrice,
+              shares,
+              originalShares: shares,
+              entryBarIndex: i,
+              dollarRisk,
+              riskPerShare,
+              mfeR: 0,
+              mfePrice: entryPrice,
+              mfeBarIndex: i,
+              maeR: 0,
+              maePrice: entryPrice,
+              maeBarIndex: i,
+              partialFilled: false,
+              partialShares: 0,
+              partialR: 0,
+              trailingActivated: false,
+              trailingStopPrice: null,
+              pendingExit: null,
+              pullbackSignal: signal,
+            };
+
+            totalSlippageCosts += entryTrace.slippageBps;
+            log(
+              `[SmallCapSim] ${ticker} ENTRY LONG at $${entryPrice.toFixed(2)} | stop=$${signal.stopPrice.toFixed(2)} | ${shares}sh | HOD=$${signal.hodPrice.toFixed(2)} pullback=${signal.pullbackBars}bars depth=${(signal.pullbackDepthPct * 100).toFixed(1)}%`,
+              "historical",
+            );
+          }
+        }
+      }
+
+      if (activeTrade) {
+        const lastBar = tickerBars5m[tickerBars5m.length - 1];
+        const eodTrace = applyFrictionAndRoundWithTrace({
+          rawPrice: lastBar.close,
+          side: "long",
+          direction: "exit",
+          atr14: calculateATR(bars5mAccum, 14),
+          costOverrides,
+        });
+        closeSmallCapTrade(activeTrade, eodTrace.finalPrice, "End of day close", ticker, lastBar.timestamp,
+          tickerBars5m[activeTrade.entryBarIndex]?.timestamp ?? lastBar.timestamp,
+          tickerBars5m.length * 5, calculateATR(bars5mAccum, 14));
+        activeTrade = null;
+      }
+    }
+
+    let maxDD = 0;
+    let peak = 0;
+    let equity = 0;
+    for (const r of tradeNetPnls) {
+      equity += r;
+      if (equity > peak) peak = equity;
+      const dd = peak - equity;
+      if (dd > maxDD) maxDD = dd;
+    }
+
+    const result: DryRunResult = {
+      trades: tradesGenerated,
+      wins: winCount,
+      losses: lossCount,
+      grossPnl: Number(grossPnlTotal.toFixed(2)),
+      netPnl: Number(totalPnl.toFixed(2)),
+      totalCommissions: Number(totalCommissions.toFixed(2)),
+      totalSlippageCosts: Number(totalSlippageCosts.toFixed(2)),
+      tradeRs,
+      tradeMFEs: tradeMFEs.length > 0 ? tradeMFEs : undefined,
+      tradeMAEs: tradeMAEs.length > 0 ? tradeMAEs : undefined,
+      tradeHit1R: tradeHit1R.length > 0 ? tradeHit1R : undefined,
+      tradeHitTarget: tradeHitTarget.length > 0 ? tradeHitTarget : undefined,
+      tradeSlippageCostsR: tradeSlippageCostsR.length > 0 ? tradeSlippageCostsR : undefined,
+      tradeScratchAfterPartial: tradeScratchAfterPartial.length > 0 ? tradeScratchAfterPartial : undefined,
+      tradeLossBuckets: tradeLossBuckets.length > 0 ? tradeLossBuckets : undefined,
+      tradeTickers: tradeTickers.length > 0 ? tradeTickers : undefined,
+      tradeRegimes: tradeRegimes.length > 0 ? tradeRegimes : undefined,
+      maxDrawdown: Number(maxDD.toFixed(2)),
+      byRegime: tradesByRegime,
+      bySession: tradesBySession,
+      byTier: tradesByTier,
+      qualifications: qualifications,
+    };
+
+    if (isDryRun) {
+      return result;
+    }
+
+    log(
+      `[SmallCapSim] ${simulationDate} COMPLETE: ${tradesGenerated} trades, ${winCount}W/${lossCount}L, PnL=$${totalPnl.toFixed(2)}, MaxDD=$${maxDD.toFixed(2)}`,
+      "historical",
+    );
+  } catch (error: any) {
+    log(`[SmallCapSim] Error: ${error.message}`, "historical");
+    if (isDryRun) {
+      throw error;
+    }
+    if (!isDryRun) {
+      await storage.updateSimulationRun(runId, {
+        status: "failed",
+        errorMessage: error.message,
+        completedAt: new Date(),
+      });
+    }
   } finally {
     if (!isDryRun) {
       activeSimulations.delete(runId);

@@ -9,9 +9,12 @@ import type { User } from "@shared/schema";
 import { startSimulatedDataFeed, registerUser, unregisterUser, getScannerData, getDataSource, isLiveConnected, getSharedUserId } from "./simulator";
 import { seedDemoData } from "./seed";
 import { generateAdaptiveInsights } from "./strategy/learning";
-import { runHistoricalSimulation, runReversionSimulation, runORFSimulation, runRSContinuationSimulation, runGapContinuationSimulation, getActiveSimulations, cancelSimulation, startAutoRun, getAutoRunStatus, cancelAutoRun, runCostSensitivity, runWalkForwardEvaluation, getWalkForwardStatus, cancelWalkForward } from "./historicalSimulator";
+import { runHistoricalSimulation, runReversionSimulation, runORFSimulation, runRSContinuationSimulation, runGapContinuationSimulation, runSmallCapMomentumSimulation, getActiveSimulations, cancelSimulation, startAutoRun, getAutoRunStatus, cancelAutoRun, runCostSensitivity, runWalkForwardEvaluation, getWalkForwardStatus, cancelWalkForward } from "./historicalSimulator";
 import { DEFAULT_RS_CONFIG, type RSConfig } from "./strategy/rsDetector";
 import { DEFAULT_GAP_CONFIG, type GapConfig } from "./strategy/gapDetector";
+import { DEFAULT_SMALLCAP_CONFIG } from "./strategy/smallCapScanner";
+import { DEFAULT_PULLBACK_CONFIG } from "./strategy/pullbackDetector";
+import { SMALLCAP_SCAN_TICKERS, buildScanDatesRange } from "./strategy/smallCapUniverse";
 import { fetchMultiDayDailyBars, fetchForwardDailyBars } from "./alpaca";
 
 declare global {
@@ -1268,6 +1271,208 @@ export async function registerRoutes(
         testWindow: { dates: testDates.length, ...testAgg },
         walkForwardDegradation: degradation,
         verdict: testAgg.core.avgR >= -0.10 ? "MARGINAL" : "NO_EDGE",
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ===== SMALL-CAP MOMENTUM VALIDATION =====
+  app.post("/api/internal/smallcap-validate", async (req, res) => {
+    const {
+      tickers: userTickers,
+      dates: userDates,
+      smallCapConfig: userScConfig,
+      pullbackConfig: userPbConfig,
+      floatData: userFloatData,
+      premarketVolData: userPremarketData,
+      startDate,
+      endDate,
+    } = req.body;
+
+    const tickerList: string[] = userTickers ?? SMALLCAP_SCAN_TICKERS;
+
+    let dates: string[];
+    if (userDates && Array.isArray(userDates) && userDates.length > 0) {
+      dates = userDates;
+    } else if (startDate && endDate) {
+      dates = buildScanDatesRange(startDate, endDate);
+    } else {
+      dates = buildScanDatesRange("2026-01-06", "2026-02-14");
+    }
+
+    const userId = "1a70fbad-ee1b-46ea-96a3-36749e24f3ba";
+    const scConfig = userScConfig ?? {};
+    const pbConfig = userPbConfig ?? {};
+    const floatData = userFloatData ?? {};
+    const premarketVolData = userPremarketData ?? {};
+
+    const aggregate = (results: any[]) => {
+      let trades = 0, wins = 0, totalR = 0;
+      const allRs: number[] = [];
+      const allMFEs: number[] = [];
+      const allMAEs: number[] = [];
+      const lossBuckets: Record<string, number> = {
+        "stopped_before_0.3R": 0,
+        "reversed_after_0.3R": 0,
+        "partial_then_scratch": 0,
+        "winner": 0,
+        "other_loss": 0,
+      };
+      let mfe1R = 0, mfe15R = 0, mfe2R = 0, mfe3R = 0;
+      const bySymbol: Record<string, { trades: number; rs: number[]; wins: number }> = {};
+      const allSlippageCostsR: number[] = [];
+      const allQualifications: any[] = [];
+      let daysWithTrades = 0;
+
+      for (const day of results) {
+        if (day.error || !day.tradeRs) continue;
+        trades += day.trades ?? 0;
+        wins += day.wins ?? 0;
+        if ((day.trades ?? 0) > 0) daysWithTrades++;
+        totalR += (day.tradeRs as number[]).reduce((a: number, b: number) => a + b, 0);
+        allRs.push(...day.tradeRs);
+        if (day.tradeMFEs) {
+          allMFEs.push(...day.tradeMFEs);
+          for (const mfe of day.tradeMFEs) {
+            if (mfe >= 1.0) mfe1R++;
+            if (mfe >= 1.5) mfe15R++;
+            if (mfe >= 2.0) mfe2R++;
+            if (mfe >= 3.0) mfe3R++;
+          }
+        }
+        if (day.tradeMAEs) allMAEs.push(...day.tradeMAEs);
+        if (day.tradeLossBuckets) {
+          for (const bucket of day.tradeLossBuckets) {
+            if (lossBuckets[bucket] !== undefined) lossBuckets[bucket]++;
+            else lossBuckets.other_loss++;
+          }
+        }
+        if (day.tradeTickers && day.tradeRs) {
+          for (let i = 0; i < day.tradeTickers.length; i++) {
+            const sym = day.tradeTickers[i];
+            const r = day.tradeRs[i] ?? 0;
+            if (!bySymbol[sym]) bySymbol[sym] = { trades: 0, rs: [], wins: 0 };
+            bySymbol[sym].trades++;
+            bySymbol[sym].rs.push(r);
+            if (r > 0) bySymbol[sym].wins++;
+          }
+        }
+        if (day.tradeSlippageCostsR) allSlippageCostsR.push(...day.tradeSlippageCostsR);
+        if (day.qualifications) allQualifications.push(...day.qualifications);
+      }
+
+      const sortedMFE = [...allMFEs].sort((a, b) => a - b);
+      const medianMFE = sortedMFE.length > 0 ? sortedMFE[Math.floor(sortedMFE.length / 2)] : 0;
+      const avgMFE = allMFEs.length > 0 ? allMFEs.reduce((a, b) => a + b, 0) / allMFEs.length : 0;
+      const sortedMAE = [...allMAEs].sort((a, b) => a - b);
+      const medianMAE = sortedMAE.length > 0 ? sortedMAE[Math.floor(sortedMAE.length / 2)] : 0;
+      const avgMAE = allMAEs.length > 0 ? allMAEs.reduce((a, b) => a + b, 0) / allMAEs.length : 0;
+      const avgSlippageR = allSlippageCostsR.length > 0
+        ? allSlippageCostsR.reduce((a, b) => a + b, 0) / allSlippageCostsR.length : 0;
+
+      const symbolSummary: Record<string, any> = {};
+      for (const [sym, data] of Object.entries(bySymbol)) {
+        const symAvgR = data.rs.length > 0 ? data.rs.reduce((a, b) => a + b, 0) / data.rs.length : 0;
+        symbolSummary[sym] = {
+          trades: data.trades,
+          avgR: Number(symAvgR.toFixed(3)),
+          winRate: Number((data.wins / data.trades).toFixed(3)),
+          maxR: data.rs.length > 0 ? Number(Math.max(...data.rs).toFixed(3)) : 0,
+          minR: data.rs.length > 0 ? Number(Math.min(...data.rs).toFixed(3)) : 0,
+        };
+      }
+
+      const qualPassed = allQualifications.filter((q: any) => q.passed).length;
+      const qualTotal = allQualifications.length;
+
+      const sortedRs = [...allRs].sort((a, b) => a - b);
+
+      return {
+        core: {
+          trades,
+          wins,
+          losses: trades - wins,
+          winRate: trades > 0 ? Number((wins / trades * 100).toFixed(1)) : 0,
+          avgR: trades > 0 ? Number((totalR / trades).toFixed(3)) : 0,
+          totalR: Number(totalR.toFixed(3)),
+          medianR: sortedRs.length > 0 ? Number(sortedRs[Math.floor(sortedRs.length / 2)].toFixed(3)) : 0,
+          daysScanned: dates.length,
+          daysWithTrades,
+        },
+        mfe: {
+          avg: Number(avgMFE.toFixed(3)),
+          median: Number(medianMFE.toFixed(3)),
+          ge1R: trades > 0 ? Number((mfe1R / trades * 100).toFixed(1)) : 0,
+          ge15R: trades > 0 ? Number((mfe15R / trades * 100).toFixed(1)) : 0,
+          ge2R: trades > 0 ? Number((mfe2R / trades * 100).toFixed(1)) : 0,
+          ge3R: trades > 0 ? Number((mfe3R / trades * 100).toFixed(1)) : 0,
+        },
+        mae: {
+          avg: Number(avgMAE.toFixed(3)),
+          median: Number(medianMAE.toFixed(3)),
+        },
+        friction: {
+          avgSlippageCostR: Number(avgSlippageR.toFixed(4)),
+        },
+        lossDecomp: lossBuckets,
+        bySymbol: symbolSummary,
+        qualification: {
+          scanned: qualTotal,
+          passed: qualPassed,
+          passRate: qualTotal > 0 ? Number((qualPassed / qualTotal * 100).toFixed(1)) : 0,
+        },
+      };
+    };
+
+    try {
+      const results: any[] = [];
+      for (const date of dates) {
+        try {
+          const result = await runSmallCapMomentumSimulation(
+            `smallcap-${date}-${Date.now()}`,
+            date,
+            userId,
+            storage,
+            tickerList,
+            {
+              dryRun: true,
+              smallCapConfig: scConfig,
+              pullbackConfig: pbConfig,
+              floatData,
+              premarketVolData,
+            },
+          );
+          results.push({ date, ...(result as any) });
+        } catch (err: any) {
+          results.push({ date, error: err?.message ?? String(err), trades: 0, tradeRs: [] });
+        }
+      }
+
+      const agg = aggregate(results);
+      const verdict = agg.core.avgR >= 0.1
+        ? "POTENTIAL_EDGE"
+        : agg.core.avgR >= -0.1
+          ? "MARGINAL"
+          : "NO_EDGE";
+
+      res.json({
+        strategy: "Small-Cap Momentum: First Pullback After HOD Break",
+        config: { smallCap: { ...DEFAULT_SMALLCAP_CONFIG, ...scConfig }, pullback: { ...DEFAULT_PULLBACK_CONFIG, ...pbConfig } },
+        dateRange: { start: dates[0], end: dates[dates.length - 1], totalDays: dates.length },
+        tickerCount: tickerList.length,
+        ...agg,
+        verdict,
+        perDay: results.map(r => ({
+          date: r.date,
+          trades: r.trades ?? 0,
+          wins: r.wins ?? 0,
+          losses: r.losses ?? 0,
+          avgR: r.tradeRs && r.tradeRs.length > 0
+            ? Number((r.tradeRs.reduce((a: number, b: number) => a + b, 0) / r.tradeRs.length).toFixed(3))
+            : null,
+          error: r.error ?? null,
+        })),
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
