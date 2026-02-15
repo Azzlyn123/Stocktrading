@@ -926,11 +926,12 @@ export async function registerRoutes(
   });
 
   app.post("/api/internal/gap-phase-a", async (req, res) => {
-    const { tickers, gapConfig: userGapConfig } = req.body;
-    const dates = [
+    const { tickers, gapConfig: userGapConfig, dates: userDates } = req.body;
+    const defaultDates = [
       "2026-02-03", "2026-02-04", "2026-02-05", "2026-02-06", "2026-02-09",
       "2026-02-10", "2026-02-11", "2026-02-12", "2026-02-13"
     ];
+    const dates: string[] = (userDates && Array.isArray(userDates) && userDates.length > 0) ? userDates : defaultDates;
     const tickerList = tickers ?? [
       "AAPL","MSFT","NVDA","TSLA","META","AMZN","GOOGL","AMD","NFLX","AVGO",
       "JPM","COST","QQQ","CRM","ORCL",
