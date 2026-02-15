@@ -262,6 +262,7 @@ export interface DryRunResult {
   tradeScratchAfterPartial?: number[];
   tradeLossBuckets?: string[];
   tradeTickers?: string[];
+  tradeGapPcts?: number[];
   tradeRegimes?: string[];
   maxDrawdown: number;
   byRegime: Record<string, BreakdownBucket>;
@@ -5898,6 +5899,7 @@ export async function runSmallCapMomentumSimulation(
     const tradeScratchAfterPartial: number[] = [];
     const tradeLossBuckets: string[] = [];
     const tradeTickers: string[] = [];
+    const tradeGapPcts: number[] = [];
     const tradeRegimes: string[] = [];
     const tradeGrossPnls: number[] = [];
     const tradeNetPnls: number[] = [];
@@ -5966,6 +5968,8 @@ export async function runSmallCapMomentumSimulation(
       tradeScratchAfterPartial.push(trade.partialFilled && compositeR < 0.1 ? 1 : 0);
 
       tradeTickers.push(ticker);
+      const tickerQual = qualifications.find(q => q.ticker === ticker);
+      tradeGapPcts.push(tickerQual ? Math.abs(tickerQual.gapPct) : 0);
       tradeLossBuckets.push(lossBucket);
       const trSession = minutesSinceOpen <= 90 ? "open" : minutesSinceOpen <= 240 ? "mid" : "power";
       const trRegime = "smallcap";
@@ -6268,6 +6272,7 @@ export async function runSmallCapMomentumSimulation(
       tradeScratchAfterPartial: tradeScratchAfterPartial.length > 0 ? tradeScratchAfterPartial : undefined,
       tradeLossBuckets: tradeLossBuckets.length > 0 ? tradeLossBuckets : undefined,
       tradeTickers: tradeTickers.length > 0 ? tradeTickers : undefined,
+      tradeGapPcts: tradeGapPcts.length > 0 ? tradeGapPcts : undefined,
       tradeRegimes: tradeRegimes.length > 0 ? tradeRegimes : undefined,
       maxDrawdown: Number(maxDD.toFixed(2)),
       byRegime: tradesByRegime,

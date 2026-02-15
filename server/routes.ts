@@ -1866,6 +1866,275 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/internal/smallcap-extended-oos", async (req, res) => {
+    const userId = getSharedUserId() ?? "internal";
+    const {
+      startDate,
+      endDate,
+      gapScanConfig: userGapScanConfig,
+    } = req.body;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({ error: "startDate and endDate required" });
+    }
+
+    const frozenConfig = {
+      ...DEFAULT_SMALLCAP_CONFIG,
+      minGapPct: 0.06,
+      minPremarketVolume: 1000000,
+      trailOffsetR: 0.75,
+      trailActivationR: 1.25,
+      maxSpreadPct: 0.015,
+      minDollarVolume: 2000000,
+    };
+
+    const basePbConfig = DEFAULT_PULLBACK_CONFIG;
+    const scanDates = buildScanDatesRange(startDate, endDate);
+
+    try {
+      const { batchScanForGappers } = await import("./strategy/batchGapScanner");
+
+      const gapCfg = { ...(userGapScanConfig ?? {}), useFullMarket: true };
+      if (frozenConfig.minPrice) gapCfg.minPrice = gapCfg.minPrice ?? frozenConfig.minPrice;
+      if (frozenConfig.maxPrice) gapCfg.maxPrice = gapCfg.maxPrice ?? frozenConfig.maxPrice;
+      gapCfg.minGapPct = frozenConfig.minGapPct;
+
+      const batchResult = await batchScanForGappers(scanDates[0], scanDates[scanDates.length - 1], gapCfg);
+      const batchGapResults = new Map<string, { qualifiers: any[], scannedCount: number, dataReturnedCount: number, qualifiedCount: number }>();
+      batchResult.dailyResults.forEach((dr, date) => {
+        batchGapResults.set(date, {
+          qualifiers: dr.qualifiers,
+          scannedCount: dr.scannedCount,
+          dataReturnedCount: dr.dataReturnedCount,
+          qualifiedCount: dr.qualifiedCount,
+        });
+      });
+
+      const sharedBarsCache: BarsCache = new Map();
+      const dayResults: any[] = [];
+
+      const allTradeDetails: Array<{
+        date: string;
+        ticker: string;
+        r: number;
+        mfe: number;
+        mae: number;
+        gapPct: number;
+      }> = [];
+
+      for (const date of scanDates) {
+        try {
+          const dayGap = batchGapResults.get(date);
+          let tickersForDay: string[] = [];
+
+          if (dayGap) {
+            tickersForDay = dayGap.qualifiers
+              .filter((q: any) => q.gapDirection === "LONG" && Math.abs(q.gapPct) >= frozenConfig.minGapPct)
+              .map((q: any) => q.ticker);
+          }
+
+          if (tickersForDay.length === 0) {
+            dayResults.push({ date, trades: 0, tradeRs: [], dayR: 0 });
+            continue;
+          }
+
+          const result = await runSmallCapMomentumSimulation(
+            `oos-${date}-${Date.now()}`,
+            date, userId, storage, tickersForDay,
+            {
+              dryRun: true,
+              smallCapConfig: frozenConfig,
+              pullbackConfig: basePbConfig,
+              barsCache: sharedBarsCache,
+            },
+          );
+          const r = result as any;
+          const dayRs = r.tradeRs as number[] ?? [];
+          const dayR = dayRs.reduce((a: number, b: number) => a + b, 0);
+          dayResults.push({ date, ...r, dayR });
+
+          const tickers = r.tradeTickers ?? [];
+          const mfes = r.tradeMFEs ?? [];
+          const maes = r.tradeMAEs ?? [];
+          const gapPcts = r.tradeGapPcts ?? [];
+          for (let i = 0; i < dayRs.length; i++) {
+            allTradeDetails.push({
+              date,
+              ticker: tickers[i] ?? "UNK",
+              r: dayRs[i],
+              mfe: mfes[i] ?? 0,
+              mae: maes[i] ?? 0,
+              gapPct: gapPcts[i] ?? 0,
+            });
+          }
+        } catch (err: any) {
+          dayResults.push({ date, error: err?.message, trades: 0, tradeRs: [], dayR: 0 });
+        }
+      }
+
+      const allRs = allTradeDetails.map(t => t.r);
+      const trades = allRs.length;
+      const wins = allRs.filter(r => r > 0).length;
+      const totalR = allRs.reduce((a, b) => a + b, 0);
+      const avgR = trades > 0 ? totalR / trades : 0;
+      const grossWinR = allRs.filter(r => r > 0).reduce((a, b) => a + b, 0);
+      const grossLossR = allRs.filter(r => r < 0).reduce((a, b) => a + Math.abs(b), 0);
+      const profitFactor = grossLossR > 0 ? grossWinR / grossLossR : grossWinR > 0 ? Infinity : 0;
+      const sortedRs = [...allRs].sort((a, b) => a - b);
+      const medianR = sortedRs.length > 0 ? sortedRs[Math.floor(sortedRs.length / 2)] : 0;
+
+      let maxDD = 0, equity = 0, peak = 0;
+      for (const r of allRs) {
+        equity += r;
+        if (equity > peak) peak = equity;
+        const dd = peak - equity;
+        if (dd > maxDD) maxDD = dd;
+      }
+
+      const allMFEs = allTradeDetails.map(t => t.mfe);
+      const allMAEs = allTradeDetails.map(t => t.mae);
+      const mfe1R = allMFEs.filter(m => m >= 1.0).length;
+      const mfe2R = allMFEs.filter(m => m >= 2.0).length;
+      const sortedMFE = [...allMFEs].sort((a, b) => a - b);
+      const medianMFE = sortedMFE.length > 0 ? sortedMFE[Math.floor(sortedMFE.length / 2)] : 0;
+      const avgMFE = allMFEs.length > 0 ? allMFEs.reduce((a, b) => a + b, 0) / allMFEs.length : 0;
+      const sortedMAE = [...allMAEs].sort((a, b) => a - b);
+      const medianMAE = sortedMAE.length > 0 ? sortedMAE[Math.floor(sortedMAE.length / 2)] : 0;
+      const worstTradeR = sortedRs.length > 0 ? sortedRs[0] : 0;
+      const tail3RCount = allRs.filter(r => r <= -3).length;
+      const daysWithTrades = dayResults.filter(d => (d.trades ?? 0) > 0).length;
+      const spreadRejects = dayResults.reduce((a, d) => a + (d.spreadRejects ?? 0), 0);
+
+      const rDistribution: Record<string, number> = {
+        "< -2R": 0, "-2R to -1.5R": 0, "-1.5R to -1R": 0, "-1R to -0.5R": 0,
+        "-0.5R to 0": 0, "0 to 0.5R": 0, "0.5R to 1R": 0, "1R to 1.5R": 0,
+        "1.5R to 2R": 0, "2R to 3R": 0, "> 3R": 0,
+      };
+      for (const r of allRs) {
+        if (r < -2) rDistribution["< -2R"]++;
+        else if (r < -1.5) rDistribution["-2R to -1.5R"]++;
+        else if (r < -1) rDistribution["-1.5R to -1R"]++;
+        else if (r < -0.5) rDistribution["-1R to -0.5R"]++;
+        else if (r < 0) rDistribution["-0.5R to 0"]++;
+        else if (r < 0.5) rDistribution["0 to 0.5R"]++;
+        else if (r < 1) rDistribution["0.5R to 1R"]++;
+        else if (r < 1.5) rDistribution["1R to 1.5R"]++;
+        else if (r < 2) rDistribution["1.5R to 2R"]++;
+        else if (r < 3) rDistribution["2R to 3R"]++;
+        else rDistribution["> 3R"]++;
+      }
+
+      const sorted = [...allTradeDetails].sort((a, b) => b.r - a.r);
+      const topWinners = sorted.slice(0, 5).map(t => ({
+        ticker: t.ticker, date: t.date, r: Number(t.r.toFixed(3)),
+        mfe: Number(t.mfe.toFixed(3)), gapPct: Number((t.gapPct * 100).toFixed(1)),
+      }));
+      const topLosers = sorted.slice(-5).reverse().map(t => ({
+        ticker: t.ticker, date: t.date, r: Number(t.r.toFixed(3)),
+        mfe: Number(t.mfe.toFixed(3)), mae: Number(t.mae.toFixed(3)),
+        gapPct: Number((t.gapPct * 100).toFixed(1)),
+      }));
+
+      const dailyPnL: Record<string, number> = {};
+      for (const d of dayResults) {
+        if (d.date) dailyPnL[d.date] = Number((d.dayR ?? 0).toFixed(3));
+      }
+      const dailyRValues = Object.values(dailyPnL).filter(v => v !== 0);
+      const positiveDays = dailyRValues.filter(v => v > 0).length;
+      const negativeDays = dailyRValues.filter(v => v < 0).length;
+      const bestDay = dailyRValues.length > 0 ? Math.max(...dailyRValues) : 0;
+      const worstDay = dailyRValues.length > 0 ? Math.min(...dailyRValues) : 0;
+      const top3DaysR = [...dailyRValues].sort((a, b) => b - a).slice(0, 3).reduce((a, b) => a + b, 0);
+      const pctFromTop3Days = totalR !== 0 ? top3DaysR / totalR * 100 : 0;
+
+      const gapSizeDist: Record<string, { trades: number; avgR: number; winRate: number; totalR: number }> = {
+        "6-8%": { trades: 0, avgR: 0, winRate: 0, totalR: 0 },
+        "8-10%": { trades: 0, avgR: 0, winRate: 0, totalR: 0 },
+        "10-15%": { trades: 0, avgR: 0, winRate: 0, totalR: 0 },
+        "15-20%": { trades: 0, avgR: 0, winRate: 0, totalR: 0 },
+        "20%+": { trades: 0, avgR: 0, winRate: 0, totalR: 0 },
+      };
+      const gapBucketWins: Record<string, number> = { "6-8%": 0, "8-10%": 0, "10-15%": 0, "15-20%": 0, "20%+": 0 };
+      for (const t of allTradeDetails) {
+        const gp = t.gapPct * 100;
+        let bucket: string;
+        if (gp < 8) bucket = "6-8%";
+        else if (gp < 10) bucket = "8-10%";
+        else if (gp < 15) bucket = "10-15%";
+        else if (gp < 20) bucket = "15-20%";
+        else bucket = "20%+";
+        gapSizeDist[bucket].trades++;
+        gapSizeDist[bucket].totalR += t.r;
+        if (t.r > 0) gapBucketWins[bucket]++;
+      }
+      for (const key of Object.keys(gapSizeDist)) {
+        const b = gapSizeDist[key];
+        b.avgR = b.trades > 0 ? Number((b.totalR / b.trades).toFixed(3)) : 0;
+        b.winRate = b.trades > 0 ? Number((gapBucketWins[key] / b.trades * 100).toFixed(1)) : 0;
+        b.totalR = Number(b.totalR.toFixed(3));
+      }
+
+      const passCriteria = {
+        avgR_ge_0_15: avgR >= 0.15,
+        pf_ge_1_3: profitFactor >= 1.3,
+        mfe2R_ge_20pct: trades > 0 && (mfe2R / trades * 100) >= 20,
+        no_regime_collapse: worstDay > -5 && tail3RCount <= Math.max(1, Math.floor(trades * 0.03)),
+      };
+      const passCount = Object.values(passCriteria).filter(Boolean).length;
+      const verdict = passCount === 4 ? "PAPER_READY" : passCount >= 3 ? "MARGINAL" : "NOT_READY";
+
+      res.json({
+        strategy: "Small-Cap Momentum Extended OOS",
+        frozenConfig: {
+          minGapPct: frozenConfig.minGapPct,
+          minPremarketVolume: frozenConfig.minPremarketVolume,
+          trailOffsetR: frozenConfig.trailOffsetR,
+          trailActivationR: frozenConfig.trailActivationR,
+        },
+        window: { start: startDate, end: endDate, tradingDays: scanDates.length },
+        coreMetrics: {
+          trades, wins, losses: trades - wins,
+          winRate: trades > 0 ? Number((wins / trades * 100).toFixed(1)) : 0,
+          avgR: Number(avgR.toFixed(3)),
+          medianR: Number(medianR.toFixed(3)),
+          totalR: Number(totalR.toFixed(3)),
+          profitFactor: Number(profitFactor.toFixed(3)),
+          maxDrawdownR: Number(maxDD.toFixed(2)),
+          daysWithTrades,
+          tradesPerDay: Number((trades / scanDates.length).toFixed(2)),
+          mfeMedian: Number(medianMFE.toFixed(3)),
+          mfeAvg: Number(avgMFE.toFixed(3)),
+          mfe1RPct: trades > 0 ? Number((mfe1R / trades * 100).toFixed(1)) : 0,
+          mfe2RPct: trades > 0 ? Number((mfe2R / trades * 100).toFixed(1)) : 0,
+          maeMedian: Number(medianMAE.toFixed(3)),
+          worstTradeR: Number(worstTradeR.toFixed(3)),
+          tail3RCount,
+          spreadRejects,
+        },
+        diagnostics: {
+          rDistribution,
+          topWinners,
+          topLosers,
+          dailyClustering: {
+            positiveDays,
+            negativeDays,
+            zeroDays: scanDates.length - positiveDays - negativeDays,
+            bestDayR: Number(bestDay.toFixed(3)),
+            worstDayR: Number(worstDay.toFixed(3)),
+            top3DaysR: Number(top3DaysR.toFixed(3)),
+            pctPnLFromTop3Days: Number(pctFromTop3Days.toFixed(1)),
+            dailyPnL,
+          },
+          gapSizeBreakdown: gapSizeDist,
+        },
+        passCriteria,
+        verdict,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Start simulated market data feed
   startSimulatedDataFeed(broadcast, storage);
 

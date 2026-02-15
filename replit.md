@@ -27,6 +27,28 @@ The backend features a modular strategy engine with pure TypeScript modules. A s
 -   **Dynamic Market Scanning Infrastructure**: Efficiently scans entire equity markets (e.g., 11,210 symbols) using batch API calls and local gap computation for full-market backtesting.
 -   **UI/UX**: Dashboard, scanner, watchlist, signals feed, trades log, and settings with a default dark theme.
 
+## Strategy Validation Results
+
+### Small-Cap Momentum: First Pullback After HOD Break — EXTENDED OOS COMPLETE
+- **Frozen Config**: gap ≥ 6%, premarket vol ≥ 1M, trail at 0.75R, activation at 1.25R, spread ≤ 1.5%, min dollar vol $2M
+- **Phase B Walk-Forward**: PASSED (Feb 3-14: 13 trades, +0.553R, 69.2% WR, PF 2.53) — uses walk-forward sweep with combo-specific universe
+- **Extended OOS Endpoint**: `/api/internal/smallcap-extended-oos` with enhanced diagnostics — uses dynamic gap scanner (full-market scan, different candidate pool yields different trade counts)
+- **Extended OOS Results (all non-dev windows combined)**:
+  - Jun-Jul 2025: 44 days, 8 trades, 25% WR, -0.619R avgR, PF 0.20
+  - Aug-Oct 2025: 66 days, 21 trades, 38.1% WR, -0.333R avgR, PF 0.52
+  - Feb 3-14 2026: 9 days, 23 trades, 65.2% WR, +0.445R avgR, PF 2.21
+  - **Combined: 119 days, 52 trades, -0.033R avgR, -1.7R totalR**
+- **Critical Diagnostics**:
+  - **Trade frequency extremely regime-dependent**: 0.26/day pre-dev vs 2.6/day Feb (crypto/momentum surge)
+  - **Daily clustering**: 168.8% of Feb PnL from top 3 days; Feb 6 alone = +16R
+  - **R Distribution (Feb)**: 7 trades in -1.5R to -1R bucket, 4 in 1.5R-2R, binary outcome pattern
+  - **Gap size analysis**: 6-8% gaps positive (0.37R avg), 10%+ gaps negative (-0.65R avg)
+  - **Pre-dev OOS negative**: Jun-Oct combined -12R across 29 trades
+- **Paper Trading Criteria** (avgR ≥ 0.15, PF ≥ 1.3, ≥20% 2R MFE, no regime collapse):
+  - **NOT MET**: Combined avgR -0.033 fails threshold; edge concentrated in Feb regime only
+  - **Verdict: NOT_READY for paper trading**
+- **Key files**: `server/strategy/batchGapScanner.ts`, `server/strategy/dynamicGapScanner.ts`, `server/strategy/smallCapScanner.ts`, `server/strategy/pullbackDetector.ts`, `server/historicalSimulator.ts`
+
 ## External Dependencies
 -   **Alpaca API**: Live bars, snapshots, WebSocket data streams, market clock, and historical bar data.
 -   **PostgreSQL**: Relational database.
