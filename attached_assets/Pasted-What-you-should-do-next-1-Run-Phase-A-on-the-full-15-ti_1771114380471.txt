@@ -1,0 +1,83 @@
+What you should do next
+
+1) Run Phase A on the full 15-ticker universe (Feb 3–13)
+
+Do the endpoint run exactly as you said (empty body defaults). Your goal here is not profitability yet — it’s to confirm:
+	•	Trade count is reasonable for the filter
+	•	Gap detection + OR breakout logic fires on multiple names
+	•	Longs and shorts both occur
+	•	Loss buckets + MFE distribution look sane across trades
+
+If it’s still only a couple trades, don’t change logic yet—change the sample window.
+
+⸻
+
+2) Expand the Phase A window immediately (this is critical)
+
+A 1.5% gap on mega-caps is rare. 9 days is basically a unit test.
+
+Run the same Phase A endpoint over at least 3 months (even if you still call it “Phase A sanity”):
+	•	Nov 2025 – Feb 2026 (or as far back as your data allows cleanly)
+
+You want 50–200 trades before you infer anything about edge.
+
+If your system only finds ~1 trade per 9 days per 15 symbols, you’re looking at maybe ~3–6 per month — which means you must widen the time range.
+
+⸻
+
+3) If trade count is still too low, adjust only ONE knob: gap threshold
+
+Don’t add filters. Don’t tune exits. Don’t touch OR logic.
+
+Just run a controlled trade-count sweep:
+	•	Gap threshold: 1.0%, 1.25%, 1.5%, 2.0%
+	•	Keep everything else fixed
+
+Your target is roughly:
+	•	0.1 to 0.3 trades/day across the universe (so you can learn at a reasonable pace)
+	•	Not “more trades at any cost,” just enough to evaluate
+
+If 1.0% produces 10× the trades but garbage MFE/MAE, you’ll see it immediately in telemetry.
+
+⸻
+
+4) Use your telemetry to decide the “real” exit variant
+
+Right now A/B are identical because the trade stopped intraday. That’s normal.
+
+Once you have enough trades, compare A vs B by looking at:
+	•	% of trades that survive to close
+	•	% that continue next day (Variant B’s whole thesis)
+	•	MFE tail (do you ever see 3R+ excursions?)
+
+If there’s no fat tail, multi-day holds won’t help.
+
+⸻
+
+One thing I’d change in your expectations (not your code)
+
+That TSLA trade’s stats (MFE 0.46R, MAE -1.06R) are still valuable because it confirms the pathology:
+	•	even real gaps can whip and reverse
+	•	you need either:
+	•	wider structural stops (OR-based is good), and/or
+	•	time/volatility filters that avoid “gap-and-flush” chop
+
+But don’t add those yet until sample size is real.
+
+⸻
+
+The next output I want you to paste here
+
+After you run /api/internal/gap-phase-a on all 15 tickers (and ideally over a longer range), paste:
+	•	Total trades
+	•	Avg R
+	•	Median MFE / MAE
+	•	% reaching 1R, 2R
+	•	Loss bucket counts
+	•	Long vs short breakdown
+
+With that, we’ll know whether:
+	•	the setup has a real imbalance signature, or
+	•	gaps in mega-caps are still being liquidity-arbed too efficiently.
+
+Bottom line: run Phase A on all 15, then immediately expand the date range. Your system is working — now we feed it enough data to tell the truth.
