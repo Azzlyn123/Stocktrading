@@ -88,6 +88,18 @@ The backend features a modular strategy engine composed of pure TypeScript modul
 - **Default universe**: 15 mega-cap tickers (AAPL, MSFT, NVDA, TSLA, META, AMZN, GOOGL, AMD, NFLX, AVGO, JPM, COST, QQQ, CRM, ORCL)
 - **Status**: Phase B Walk-forward validation in progress
 
+### Overnight Gap + Continuation Strategy - PENDING PHASE A RESULTS
+- **Concept**: Trade gap-driven imbalance — overnight gaps create liquidity voids that continuation can exploit before mean-reversion kicks in
+- **Rationale**: Gaps break the mega-cap liquidity recycling loop by creating imbalance when liquidity is thin (overnight)
+- **Entry Criteria**: Gap ≥1.5%, RVOL ≥1.5x (first bar vs avg), 30-min opening range breakout in gap direction, stop at opposite OR side
+- **Variant A**: Hold to close (time exit at 375min/3:45 PM), trailing stop at 0.5R after 1.5R MFE
+- **Variant B**: Multi-day hold (max 3 days), exit when daily close breaks prior day low (LONG) or high (SHORT)
+- **Risk**: 0.5% of account per trade, max 1 trade per ticker per day
+- **Files**: `server/strategy/gapDetector.ts` (pure functions), `runGapContinuationSimulation` in `server/historicalSimulator.ts`
+- **Endpoint**: `/api/internal/gap-phase-a` — runs both variants across Feb 3-13 with full aggregation (MFE distribution, loss decomposition, per-symbol/direction splits)
+- **Default universe**: 15 mega-cap tickers (AAPL, MSFT, NVDA, TSLA, META, AMZN, GOOGL, AMD, NFLX, AVGO, JPM, COST, QQQ, CRM, ORCL)
+- **Status**: Infrastructure built and verified. Awaiting full Phase A run with all 15 tickers
+
 ## External Dependencies
 - **Alpaca API**: Used for live bars, snapshots, WebSocket data streams, market clock, and historical bar data.
 - **PostgreSQL**: Relational database for storing all application data.
