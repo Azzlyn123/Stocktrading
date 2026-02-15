@@ -66,7 +66,7 @@ The backend features a modular strategy engine composed of pure TypeScript modul
 - **Conclusion**: ORF failure move trades in mega-caps are structurally negative — the "failure" bounce is too weak and too brief to overcome friction costs
 
 ### Key Findings
-- **Four strategy variants tested, zero edge found**: Momentum breakout (-0.309R), VWAP reversion (-0.253R), ORF v1 (-0.504R), ORF v2 walk-forward (-0.313R dev / -0.670R test) all produce negative expectancy on mega-cap tickers
+- **Five strategy variants tested, zero edge found**: Momentum breakout (-0.309R), VWAP reversion (-0.253R), ORF v1 (-0.504R), ORF v2 walk-forward (-0.313R dev / -0.670R test), Gap continuation (-0.323R Variant A / -0.472R Variant B) all produce negative expectancy on mega-cap tickers
 - Fundamental issue across all strategies: winners (~0.5-1R) ≈ losers (~0.7-1R), no payoff ratio advantage regardless of target setting
 - Walk-forward validation shows -114% degradation from dev to test, confirming no stable edge
 - Fill modeling with realistic slippage, spread, and commissions is critical - many "paper edges" disappear
@@ -88,7 +88,7 @@ The backend features a modular strategy engine composed of pure TypeScript modul
 - **Default universe**: 15 mega-cap tickers (AAPL, MSFT, NVDA, TSLA, META, AMZN, GOOGL, AMD, NFLX, AVGO, JPM, COST, QQQ, CRM, ORCL)
 - **Status**: Phase B Walk-forward validation in progress
 
-### Overnight Gap + Continuation Strategy - PENDING PHASE A RESULTS
+### Overnight Gap + Continuation Strategy - NO EDGE
 - **Concept**: Trade gap-driven imbalance — overnight gaps create liquidity voids that continuation can exploit before mean-reversion kicks in
 - **Rationale**: Gaps break the mega-cap liquidity recycling loop by creating imbalance when liquidity is thin (overnight)
 - **Entry Criteria**: Gap ≥1.5%, RVOL ≥1.5x (first bar vs avg), 30-min opening range breakout in gap direction, stop at opposite OR side
@@ -96,9 +96,22 @@ The backend features a modular strategy engine composed of pure TypeScript modul
 - **Variant B**: Multi-day hold (max 3 days), exit when daily close breaks prior day low (LONG) or high (SHORT)
 - **Risk**: 0.5% of account per trade, max 1 trade per ticker per day
 - **Files**: `server/strategy/gapDetector.ts` (pure functions), `runGapContinuationSimulation` in `server/historicalSimulator.ts`
-- **Endpoint**: `/api/internal/gap-phase-a` — runs both variants across Feb 3-13 with full aggregation (MFE distribution, loss decomposition, per-symbol/direction splits)
+- **Endpoint**: `/api/internal/gap-phase-a` — runs both variants with configurable dates and gap config via request body
 - **Default universe**: 15 mega-cap tickers (AAPL, MSFT, NVDA, TSLA, META, AMZN, GOOGL, AMD, NFLX, AVGO, JPM, COST, QQQ, CRM, ORCL)
-- **Status**: Infrastructure built and verified. Awaiting full Phase A run with all 15 tickers
+- **Phase A Results (Nov 2025 - Feb 2026, 70 trading days)**:
+  - **Variant A (Hold to Close)**: 81 trades, 34.6% WR, -0.323R avgR, median MFE 0.277R, median MAE -0.666R
+  - **Variant B (Multi-day Hold)**: 54 trades, 25.9% WR, -0.472R avgR, median MFE 0.250R, median MAE -0.740R
+  - Multi-day hold degrades performance: -46% more negative avgR, -8.7pp lower WR
+  - Only 9.9% of trades reach ≥1R MFE; 0% reach ≥2R
+  - 51% of losses (41/81) stop before 0.3R MFE — gaps reverse quickly in mega-caps
+  - TSLA only symbol with marginal positive avgR (+0.074R, 12 trades); NVDA worst (-0.721R, 15 trades)
+- **Gap Threshold Sweep (Variant A)**:
+  - 1.0%: 128 trades, 31.3% WR, -0.301R avgR (best avgR but still negative)
+  - 1.25%: 67 trades, 23.9% WR, -0.401R avgR
+  - 1.5%: 81 trades, 34.6% WR, -0.323R avgR (best WR and MFE)
+  - 2.0%: 28 trades, 28.6% WR, -0.432R avgR (zero 1R+ opportunities)
+  - No threshold achieves positive expectancy
+- **Conclusion**: Gap continuation in mega-caps is structurally negative — opening range breakouts after gaps reverse too quickly; the liquidity void hypothesis does not produce tradeable edge with these entry/exit rules
 
 ## External Dependencies
 - **Alpaca API**: Used for live bars, snapshots, WebSocket data streams, market clock, and historical bar data.
