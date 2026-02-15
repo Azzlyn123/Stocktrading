@@ -180,6 +180,38 @@ export async function fetchMultiDayDailyBars(
   return result;
 }
 
+export async function fetchForwardDailyBars(
+  symbols: string[],
+  afterDate: string,
+  forwardDays: number = 5
+): Promise<Map<string, Candle[]>> {
+  const result = new Map<string, Candle[]>();
+  const startDate = new Date(afterDate + "T12:00:00Z");
+  startDate.setDate(startDate.getDate() + 1);
+  const endDate = new Date(startDate);
+  endDate.setDate(endDate.getDate() + forwardDays + 3);
+  const start = startDate.toISOString().split("T")[0];
+  const end = endDate.toISOString().split("T")[0];
+
+  const symbolStr = symbols.join(",");
+  const url = `${DATA_BASE_URL}/stocks/bars?symbols=${symbolStr}&timeframe=1Day&start=${start}T00:00:00Z&end=${end}T23:59:59Z&limit=1000&feed=sip&adjustment=split`;
+
+  try {
+    const res = await fetch(url, { headers });
+    if (!res.ok) return result;
+    const data = await res.json();
+    const barsMap: Record<string, AlpacaBar[]> = data.bars || {};
+    for (const [sym, bars] of Object.entries(barsMap)) {
+      const candles = (bars as AlpacaBar[]).map(alpacaBarToCandle);
+      if (candles.length > 0) result.set(sym, candles.slice(0, forwardDays));
+    }
+  } catch (e: any) {
+    log(`Alpaca forward daily bars fetch failed: ${e.message}`, "alpaca");
+  }
+
+  return result;
+}
+
 export async function fetchDailyBarsForDate(
   symbols: string[],
   date: string

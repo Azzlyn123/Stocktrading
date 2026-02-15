@@ -5631,13 +5631,14 @@ export async function runGapContinuationSimulation(
     );
   } catch (error: any) {
     log(`[GapSim] Error: ${error.message}`, "historical");
-    if (!isDryRun) {
-      await storage.updateSimulationRun(runId, {
-        status: "failed",
-        errorMessage: error.message,
-        completedAt: new Date(),
-      });
+    if (isDryRun) {
+      throw error;
     }
+    await storage.updateSimulationRun(runId, {
+      status: "failed",
+      errorMessage: error.message,
+      completedAt: new Date(),
+    });
   } finally {
     if (!isDryRun) {
       activeSimulations.delete(runId);

@@ -12,7 +12,7 @@ import { generateAdaptiveInsights } from "./strategy/learning";
 import { runHistoricalSimulation, runReversionSimulation, runORFSimulation, runRSContinuationSimulation, runGapContinuationSimulation, getActiveSimulations, cancelSimulation, startAutoRun, getAutoRunStatus, cancelAutoRun, runCostSensitivity, runWalkForwardEvaluation, getWalkForwardStatus, cancelWalkForward } from "./historicalSimulator";
 import { DEFAULT_RS_CONFIG, type RSConfig } from "./strategy/rsDetector";
 import { DEFAULT_GAP_CONFIG, type GapConfig } from "./strategy/gapDetector";
-import { fetchMultiDayDailyBars } from "./alpaca";
+import { fetchMultiDayDailyBars, fetchForwardDailyBars } from "./alpaca";
 
 declare global {
   namespace Express {
@@ -1030,20 +1030,11 @@ export async function registerRoutes(
         try {
           let forwardDailyBars: Map<string, any[]> | undefined;
           if (variantB) {
-            const fwdDate = new Date(date + "T12:00:00Z");
-            fwdDate.setDate(fwdDate.getDate() + 10);
-            const fwdDateStr = fwdDate.toISOString().split("T")[0];
-            const allDailyBars = await fetchMultiDayDailyBars(
+            forwardDailyBars = await fetchForwardDailyBars(
               Array.from(new Set([...tickerList, "SPY"])),
-              fwdDateStr,
-              10
+              date,
+              gapCfg.variantB_maxHoldDays ?? 3
             );
-            forwardDailyBars = new Map();
-            for (const [sym, bars] of allDailyBars.entries()) {
-              const simDate = new Date(date + "T00:00:00Z").getTime();
-              const forwardBars = bars.filter((b: any) => b.timestamp > simDate);
-              if (forwardBars.length > 0) forwardDailyBars.set(sym, forwardBars);
-            }
           }
           const result = await runGapContinuationSimulation(
             `gap-phase-a-${date}-${Date.now()}`,
@@ -1055,7 +1046,7 @@ export async function registerRoutes(
           );
           results.push({ date, ...(result as any) });
         } catch (err: any) {
-          results.push({ date, error: err.message });
+          results.push({ date, error: err?.message ?? String(err), trades: 0, tradeRs: [] });
         }
       }
       return results;
