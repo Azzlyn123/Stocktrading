@@ -5740,8 +5740,31 @@ export async function runSmallCapMomentumSimulation(
     }
 
     const allSymbols = Array.from(new Set([...tickerList, "SPY"]));
-    const bars5mMap = await fetchBarsForDate(allSymbols, simulationDate, "5Min");
-    const multiDayBars = await fetchMultiDayDailyBars(allSymbols, simulationDate, 20);
+    const CHUNK_SIZE = 30;
+    const bars5mMap = new Map<string, Candle[]>();
+    const multiDayBars = new Map<string, any[]>();
+    const chunks: string[][] = [];
+    for (let i = 0; i < allSymbols.length; i += CHUNK_SIZE) {
+      chunks.push(allSymbols.slice(i, i + CHUNK_SIZE));
+    }
+    for (const chunk of chunks) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const [chunkBars, chunkDaily] = await Promise.all([
+            fetchBarsForDate(chunk, simulationDate, "5Min"),
+            fetchMultiDayDailyBars(chunk, simulationDate, 20),
+          ]);
+          for (const [sym, bars] of chunkBars) bars5mMap.set(sym, bars);
+          for (const [sym, bars] of chunkDaily) multiDayBars.set(sym, bars);
+          break;
+        } catch (e: any) {
+          log(`[SmallCapSim] Chunk fetch failed (attempt ${attempt + 1}): ${e.message}`, "historical");
+          if (attempt === 1) log(`[SmallCapSim] Skipping chunk: ${chunk.join(",")}`, "historical");
+        }
+      }
+    }
+
+    log(`[SmallCapSim] ${simulationDate}: fetched 5m data for ${bars5mMap.size}/${allSymbols.length} symbols, daily for ${multiDayBars.size}`, "historical");
 
     const spyBars5m = bars5mMap.get("SPY") ?? [];
     if (spyBars5m.length === 0) {
@@ -5784,6 +5807,7 @@ export async function runSmallCapMomentumSimulation(
     const tradesBySession: Record<string, { wins: number; losses: number; pnl: number }> = {};
     const tradesByTier: Record<string, { wins: number; losses: number; pnl: number }> = {};
     const qualifications: SmallCapQualification[] = [];
+    let spreadRejects = 0;
 
     const closeSmallCapTrade = (
       trade: SmallCapTradeState,
@@ -6041,6 +6065,13 @@ export async function runSmallCapMomentumSimulation(
         if (hodState.pullbackStarted && !hodState.signalFired) {
           const signal = checkPullbackRebreak(hodState, bar, i, pbConfig);
           if (signal) {
+            const barSpreadPct = bar.close > 0 ? (bar.high - bar.low) / bar.close : 0;
+            if (barSpreadPct > scConfig.maxSpreadPct) {
+              log(`[SmallCapSim] ${ticker} ENTRY SKIPPED: spread ${(barSpreadPct * 100).toFixed(2)}% > max ${(scConfig.maxSpreadPct * 100).toFixed(2)}%`, "historical");
+              spreadRejects++;
+              continue;
+            }
+
             hodState.signalFired = true;
             tickerTradeCount++;
 
@@ -6145,6 +6176,7 @@ export async function runSmallCapMomentumSimulation(
       bySession: tradesBySession,
       byTier: tradesByTier,
       qualifications: qualifications,
+      spreadRejects,
     };
 
     if (isDryRun) {

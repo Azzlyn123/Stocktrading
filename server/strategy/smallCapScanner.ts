@@ -8,6 +8,7 @@ export interface SmallCapConfig {
   minGapPct: number;
   minAtrPct: number;
   minAvgVolume: number;
+  maxSpreadPct: number;
   riskPct: number;
   maxTradesPerTicker: number;
   partialExitR: number;
@@ -25,6 +26,7 @@ export const DEFAULT_SMALLCAP_CONFIG: SmallCapConfig = {
   minGapPct: 0.05,
   minAtrPct: 0.08,
   minAvgVolume: 200_000,
+  maxSpreadPct: 0.01,
   riskPct: 0.005,
   maxTradesPerTicker: 1,
   partialExitR: 2.0,

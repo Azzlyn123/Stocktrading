@@ -1309,6 +1309,7 @@ export async function registerRoutes(
 
     const aggregate = (results: any[]) => {
       let trades = 0, wins = 0, totalR = 0;
+      let grossWinR = 0, grossLossR = 0;
       const allRs: number[] = [];
       const allMFEs: number[] = [];
       const allMAEs: number[] = [];
@@ -1319,19 +1320,33 @@ export async function registerRoutes(
         "winner": 0,
         "other_loss": 0,
       };
-      let mfe1R = 0, mfe15R = 0, mfe2R = 0, mfe3R = 0;
+      let mfe1R = 0, mfe15R = 0, mfe2R = 0, mfe3R = 0, mfe4R = 0, mfe6R = 0;
       const bySymbol: Record<string, { trades: number; rs: number[]; wins: number }> = {};
       const allSlippageCostsR: number[] = [];
       const allQualifications: any[] = [];
       let daysWithTrades = 0;
+      let totalSpreadRejects = 0;
+      let maxDD = 0;
+      let equity = 0;
+      let peak = 0;
 
       for (const day of results) {
         if (day.error || !day.tradeRs) continue;
-        trades += day.trades ?? 0;
+        const dayTrades = day.trades ?? 0;
+        trades += dayTrades;
         wins += day.wins ?? 0;
-        if ((day.trades ?? 0) > 0) daysWithTrades++;
-        totalR += (day.tradeRs as number[]).reduce((a: number, b: number) => a + b, 0);
-        allRs.push(...day.tradeRs);
+        if (dayTrades > 0) daysWithTrades++;
+        const dayRs = day.tradeRs as number[];
+        totalR += dayRs.reduce((a: number, b: number) => a + b, 0);
+        allRs.push(...dayRs);
+        for (const r of dayRs) {
+          if (r > 0) grossWinR += r;
+          else grossLossR += Math.abs(r);
+          equity += r;
+          if (equity > peak) peak = equity;
+          const dd = peak - equity;
+          if (dd > maxDD) maxDD = dd;
+        }
         if (day.tradeMFEs) {
           allMFEs.push(...day.tradeMFEs);
           for (const mfe of day.tradeMFEs) {
@@ -1339,6 +1354,8 @@ export async function registerRoutes(
             if (mfe >= 1.5) mfe15R++;
             if (mfe >= 2.0) mfe2R++;
             if (mfe >= 3.0) mfe3R++;
+            if (mfe >= 4.0) mfe4R++;
+            if (mfe >= 6.0) mfe6R++;
           }
         }
         if (day.tradeMAEs) allMAEs.push(...day.tradeMAEs);
@@ -1360,16 +1377,23 @@ export async function registerRoutes(
         }
         if (day.tradeSlippageCostsR) allSlippageCostsR.push(...day.tradeSlippageCostsR);
         if (day.qualifications) allQualifications.push(...day.qualifications);
+        if (day.spreadRejects) totalSpreadRejects += day.spreadRejects;
       }
 
       const sortedMFE = [...allMFEs].sort((a, b) => a - b);
       const medianMFE = sortedMFE.length > 0 ? sortedMFE[Math.floor(sortedMFE.length / 2)] : 0;
+      const p75MFE = sortedMFE.length > 0 ? sortedMFE[Math.floor(sortedMFE.length * 0.75)] : 0;
       const avgMFE = allMFEs.length > 0 ? allMFEs.reduce((a, b) => a + b, 0) / allMFEs.length : 0;
       const sortedMAE = [...allMAEs].sort((a, b) => a - b);
       const medianMAE = sortedMAE.length > 0 ? sortedMAE[Math.floor(sortedMAE.length / 2)] : 0;
       const avgMAE = allMAEs.length > 0 ? allMAEs.reduce((a, b) => a + b, 0) / allMAEs.length : 0;
       const avgSlippageR = allSlippageCostsR.length > 0
         ? allSlippageCostsR.reduce((a, b) => a + b, 0) / allSlippageCostsR.length : 0;
+
+      const profitFactor = grossLossR > 0 ? grossWinR / grossLossR : grossWinR > 0 ? Infinity : 0;
+      const tradesPerDay = dates.length > 0 ? trades / dates.length : 0;
+      const avgR = trades > 0 ? totalR / trades : 0;
+      const edgeDensity = tradesPerDay * avgR;
 
       const symbolSummary: Record<string, any> = {};
       for (const [sym, data] of Object.entries(bySymbol)) {
@@ -1383,8 +1407,28 @@ export async function registerRoutes(
         };
       }
 
-      const qualPassed = allQualifications.filter((q: any) => q.passed).length;
+      const qualPassed = allQualifications.filter((q: any) => q.passed);
+      const qualRejected = allQualifications.filter((q: any) => !q.passed);
       const qualTotal = allQualifications.length;
+
+      const rejectionReasons: Record<string, number> = {};
+      for (const q of qualRejected) {
+        const reason = q.rejectReason ?? "unknown";
+        const bucket = reason.includes("gap") ? "gap_too_small"
+          : reason.includes("vol") && reason.includes("premarket") ? "premarket_vol_low"
+          : reason.includes("vol") ? "avg_vol_low"
+          : reason.includes("ATR") ? "atr_too_low"
+          : reason.includes("float") ? "float_too_big"
+          : reason.includes("price") || reason.includes("open") ? "price_out_of_range"
+          : "other";
+        rejectionReasons[bucket] = (rejectionReasons[bucket] ?? 0) + 1;
+      }
+
+      const avgPremarketVol = qualPassed.length > 0
+        ? qualPassed.reduce((s: number, q: any) => s + (q.premarketVolume ?? 0), 0) / qualPassed.length : 0;
+      const avgFloat = qualPassed.length > 0
+        ? qualPassed.reduce((s: number, q: any) => s + (q.floatShares ?? 0), 0) / qualPassed.length : 0;
+      const candidatesPerDay = dates.length > 0 ? qualPassed.length / dates.length : 0;
 
       const sortedRs = [...allRs].sort((a, b) => a - b);
 
@@ -1394,19 +1438,26 @@ export async function registerRoutes(
           wins,
           losses: trades - wins,
           winRate: trades > 0 ? Number((wins / trades * 100).toFixed(1)) : 0,
-          avgR: trades > 0 ? Number((totalR / trades).toFixed(3)) : 0,
+          avgR: Number(avgR.toFixed(3)),
           totalR: Number(totalR.toFixed(3)),
           medianR: sortedRs.length > 0 ? Number(sortedRs[Math.floor(sortedRs.length / 2)].toFixed(3)) : 0,
+          profitFactor: Number(profitFactor.toFixed(3)),
+          maxDrawdownR: Number(maxDD.toFixed(2)),
+          tradesPerDay: Number(tradesPerDay.toFixed(2)),
+          edgeDensity: Number(edgeDensity.toFixed(4)),
           daysScanned: dates.length,
           daysWithTrades,
         },
         mfe: {
           avg: Number(avgMFE.toFixed(3)),
           median: Number(medianMFE.toFixed(3)),
+          p75: Number(p75MFE.toFixed(3)),
           ge1R: trades > 0 ? Number((mfe1R / trades * 100).toFixed(1)) : 0,
           ge15R: trades > 0 ? Number((mfe15R / trades * 100).toFixed(1)) : 0,
           ge2R: trades > 0 ? Number((mfe2R / trades * 100).toFixed(1)) : 0,
           ge3R: trades > 0 ? Number((mfe3R / trades * 100).toFixed(1)) : 0,
+          ge4R: trades > 0 ? Number((mfe4R / trades * 100).toFixed(1)) : 0,
+          ge6R: trades > 0 ? Number((mfe6R / trades * 100).toFixed(1)) : 0,
         },
         mae: {
           avg: Number(avgMAE.toFixed(3)),
@@ -1414,13 +1465,18 @@ export async function registerRoutes(
         },
         friction: {
           avgSlippageCostR: Number(avgSlippageR.toFixed(4)),
+          spreadRejects: totalSpreadRejects,
         },
         lossDecomp: lossBuckets,
         bySymbol: symbolSummary,
         qualification: {
           scanned: qualTotal,
-          passed: qualPassed,
-          passRate: qualTotal > 0 ? Number((qualPassed / qualTotal * 100).toFixed(1)) : 0,
+          passed: qualPassed.length,
+          passRate: qualTotal > 0 ? Number((qualPassed.length / qualTotal * 100).toFixed(1)) : 0,
+          candidatesPerDay: Number(candidatesPerDay.toFixed(2)),
+          avgPremarketVolForPassed: Math.round(avgPremarketVol),
+          avgFloatForPassed: Math.round(avgFloat),
+          rejectionReasons,
         },
       };
     };
