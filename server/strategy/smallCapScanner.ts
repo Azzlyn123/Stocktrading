@@ -8,6 +8,7 @@ export interface SmallCapConfig {
   minGapPct: number;
   minAtrPct: number;
   minAvgVolume: number;
+  minDollarVolume: number;
   maxSpreadPct: number;
   riskPct: number;
   maxTradesPerTicker: number;
@@ -26,7 +27,8 @@ export const DEFAULT_SMALLCAP_CONFIG: SmallCapConfig = {
   minGapPct: 0.05,
   minAtrPct: 0.08,
   minAvgVolume: 200_000,
-  maxSpreadPct: 0.01,
+  minDollarVolume: 2_000_000,
+  maxSpreadPct: 0.015,
   riskPct: 0.005,
   maxTradesPerTicker: 1,
   partialExitR: 2.0,
@@ -95,6 +97,13 @@ export function qualifySmallCapGapper(
 
   if (avgDailyVolume > 0 && avgDailyVolume < config.minAvgVolume) {
     return { ...base, passed: false, rejectReason: `avg vol ${avgDailyVolume.toLocaleString()} < ${config.minAvgVolume.toLocaleString()}` };
+  }
+
+  if (config.minDollarVolume > 0 && priorClose > 0 && avgDailyVolume > 0) {
+    const dollarVol = priorClose * avgDailyVolume;
+    if (dollarVol < config.minDollarVolume) {
+      return { ...base, passed: false, rejectReason: `dollar vol $${(dollarVol / 1e6).toFixed(1)}M < $${(config.minDollarVolume / 1e6).toFixed(0)}M` };
+    }
   }
 
   if (floatShares > 0 && floatShares > config.maxFloat) {

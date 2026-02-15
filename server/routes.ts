@@ -1430,6 +1430,7 @@ export async function registerRoutes(
       for (const q of qualRejected) {
         const reason = q.rejectReason ?? "unknown";
         const bucket = reason.includes("gap") ? "gap_too_small"
+          : reason.includes("dollar vol") ? "dollar_vol_low"
           : reason.includes("vol") && reason.includes("premarket") ? "premarket_vol_low"
           : reason.includes("vol") ? "avg_vol_low"
           : reason.includes("ATR") ? "atr_too_low"
@@ -1603,6 +1604,259 @@ export async function registerRoutes(
             : null,
           error: r.error ?? null,
         })),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/internal/smallcap-walkforward", async (req, res) => {
+    const {
+      devStartDate = "2025-11-01",
+      devEndDate = "2026-01-31",
+      testStartDate = "2026-02-01",
+      testEndDate = "2026-02-14",
+      gapThresholds = [0.04, 0.05, 0.06],
+      premarketVolFloors = [200_000, 500_000, 1_000_000],
+      trailOffsets = [0.5, 0.75, 1.0],
+      smallCapConfig: userScConfig,
+      pullbackConfig: userPbConfig,
+      gapScanConfig: userGapScanConfig,
+    } = req.body;
+
+    const userId = "1a70fbad-ee1b-46ea-96a3-36749e24f3ba";
+    const baseScConfig = { ...DEFAULT_SMALLCAP_CONFIG, ...(userScConfig ?? {}) };
+    const basePbConfig = { ...DEFAULT_PULLBACK_CONFIG, ...(userPbConfig ?? {}) };
+
+    const devDates = buildScanDatesRange(devStartDate, devEndDate);
+    const testDates = buildScanDatesRange(testStartDate, testEndDate);
+    const allDates = buildScanDatesRange(devStartDate, testEndDate);
+
+    const aggregateResults = (results: any[]) => {
+      let trades = 0, wins = 0, totalR = 0;
+      let grossWinR = 0, grossLossR = 0;
+      const allRs: number[] = [];
+      const allMFEs: number[] = [];
+      const allMAEs: number[] = [];
+      let mfe1R = 0, mfe2R = 0;
+      let maxDD = 0, equity = 0, peak = 0;
+      let totalSpreadRejects = 0;
+      let daysWithTrades = 0;
+      let worstTradeR = 0;
+
+      for (const day of results) {
+        if (day.error || !day.tradeRs) continue;
+        const dayTrades = day.trades ?? 0;
+        trades += dayTrades;
+        wins += day.wins ?? 0;
+        if (dayTrades > 0) daysWithTrades++;
+        const dayRs = day.tradeRs as number[];
+        totalR += dayRs.reduce((a: number, b: number) => a + b, 0);
+        allRs.push(...dayRs);
+        for (const r of dayRs) {
+          if (r > 0) grossWinR += r;
+          else grossLossR += Math.abs(r);
+          equity += r;
+          if (equity > peak) peak = equity;
+          const dd = peak - equity;
+          if (dd > maxDD) maxDD = dd;
+          if (r < worstTradeR) worstTradeR = r;
+        }
+        if (day.tradeMFEs) {
+          allMFEs.push(...day.tradeMFEs);
+          for (const mfe of day.tradeMFEs) {
+            if (mfe >= 1.0) mfe1R++;
+            if (mfe >= 2.0) mfe2R++;
+          }
+        }
+        if (day.tradeMAEs) allMAEs.push(...day.tradeMAEs);
+        if (day.spreadRejects) totalSpreadRejects += day.spreadRejects;
+      }
+
+      const avgR = trades > 0 ? totalR / trades : 0;
+      const profitFactor = grossLossR > 0 ? grossWinR / grossLossR : grossWinR > 0 ? Infinity : 0;
+      const sortedRs = [...allRs].sort((a, b) => a - b);
+      const medianR = sortedRs.length > 0 ? sortedRs[Math.floor(sortedRs.length / 2)] : 0;
+      const sortedMFE = [...allMFEs].sort((a, b) => a - b);
+      const medianMFE = sortedMFE.length > 0 ? sortedMFE[Math.floor(sortedMFE.length / 2)] : 0;
+      const avgMFE = allMFEs.length > 0 ? allMFEs.reduce((a, b) => a + b, 0) / allMFEs.length : 0;
+      const sortedMAE = [...allMAEs].sort((a, b) => a - b);
+      const medianMAE = sortedMAE.length > 0 ? sortedMAE[Math.floor(sortedMAE.length / 2)] : 0;
+      const tail3R = allRs.filter(r => r <= -3).length;
+
+      return {
+        trades, wins, losses: trades - wins,
+        winRate: trades > 0 ? Number((wins / trades * 100).toFixed(1)) : 0,
+        avgR: Number(avgR.toFixed(3)),
+        medianR: Number(medianR.toFixed(3)),
+        totalR: Number(totalR.toFixed(3)),
+        profitFactor: Number(profitFactor.toFixed(3)),
+        maxDrawdownR: Number(maxDD.toFixed(2)),
+        daysWithTrades,
+        tradesPerDay: Number((trades / results.length).toFixed(2)),
+        mfeMedian: Number(medianMFE.toFixed(3)),
+        mfeAvg: Number(avgMFE.toFixed(3)),
+        mfe1RPct: trades > 0 ? Number((mfe1R / trades * 100).toFixed(1)) : 0,
+        mfe2RPct: trades > 0 ? Number((mfe2R / trades * 100).toFixed(1)) : 0,
+        maeMedian: Number(medianMAE.toFixed(3)),
+        spreadRejects: totalSpreadRejects,
+        worstTradeR: Number(worstTradeR.toFixed(3)),
+        tail3RCount: tail3R,
+      };
+    };
+
+    try {
+      const { batchScanForGappers } = await import("./strategy/batchGapScanner");
+
+      const gapCfg = { ...(userGapScanConfig ?? {}), useFullMarket: true };
+      if (baseScConfig.minPrice) gapCfg.minPrice = gapCfg.minPrice ?? baseScConfig.minPrice;
+      if (baseScConfig.maxPrice) gapCfg.maxPrice = gapCfg.maxPrice ?? baseScConfig.maxPrice;
+
+      const combos: Array<{
+        label: string;
+        minGapPct: number;
+        minPremarketVolume: number;
+        trailOffsetR: number;
+      }> = [];
+
+      for (const gap of gapThresholds) {
+        for (const preVol of premarketVolFloors) {
+          for (const trail of trailOffsets) {
+            combos.push({
+              label: `gap${(gap*100).toFixed(0)}%_preVol${(preVol/1000).toFixed(0)}K_trail${trail}R`,
+              minGapPct: gap,
+              minPremarketVolume: preVol,
+              trailOffsetR: trail,
+            });
+          }
+        }
+      }
+
+      const runWindowForCombo = async (
+        combo: typeof combos[0],
+        windowDates: string[],
+        batchGapResults: Map<string, { qualifiers: any[], scannedCount: number, dataReturnedCount: number, qualifiedCount: number }>,
+      ) => {
+        const scConfig = {
+          ...baseScConfig,
+          minGapPct: combo.minGapPct,
+          minPremarketVolume: combo.minPremarketVolume,
+          trailOffsetR: combo.trailOffsetR,
+          trailActivationR: combo.trailOffsetR < 1.0 ? combo.trailOffsetR + 0.5 : combo.trailOffsetR + 0.25,
+        };
+
+        const results: any[] = [];
+        for (const date of windowDates) {
+          try {
+            const dayGap = batchGapResults.get(date);
+            let tickersForDay: string[] = [];
+            let scanStats: any = undefined;
+
+            if (dayGap) {
+              tickersForDay = dayGap.qualifiers
+                .filter((q: any) => {
+                  const absGap = Math.abs(q.gapPct);
+                  return q.gapDirection === "LONG" && absGap >= combo.minGapPct;
+                })
+                .map((q: any) => q.ticker);
+              scanStats = {
+                scannedCount: dayGap.scannedCount,
+                dataReturnedCount: dayGap.dataReturnedCount,
+                qualifiedCount: dayGap.qualifiedCount,
+                longCount: tickersForDay.length,
+                scanTimeMs: 0,
+              };
+            }
+
+            if (tickersForDay.length === 0) {
+              results.push({ date, trades: 0, tradeRs: [] });
+              continue;
+            }
+
+            const result = await runSmallCapMomentumSimulation(
+              `wf-${combo.label}-${date}-${Date.now()}`,
+              date, userId, storage, tickersForDay,
+              {
+                dryRun: true,
+                smallCapConfig: scConfig,
+                pullbackConfig: basePbConfig,
+              },
+            );
+            if (scanStats) (result as any).dynamicScannerStats = scanStats;
+            results.push({ date, ...(result as any) });
+          } catch (err: any) {
+            results.push({ date, error: err?.message ?? String(err), trades: 0, tradeRs: [] });
+          }
+        }
+        return aggregateResults(results);
+      };
+
+      const minGapForBatch = Math.min(...gapThresholds);
+      gapCfg.minGapPct = minGapForBatch;
+
+      const batchResult = await batchScanForGappers(allDates[0], allDates[allDates.length - 1], gapCfg);
+      const batchGapResults = new Map<string, { qualifiers: any[], scannedCount: number, dataReturnedCount: number, qualifiedCount: number }>();
+      batchResult.dailyResults.forEach((dr, date) => {
+        batchGapResults.set(date, {
+          qualifiers: dr.qualifiers,
+          scannedCount: dr.scannedCount,
+          dataReturnedCount: dr.dataReturnedCount,
+          qualifiedCount: dr.qualifiedCount,
+        });
+      });
+
+      const devResults: Array<{ combo: typeof combos[0]; metrics: ReturnType<typeof aggregateResults> }> = [];
+
+      for (const combo of combos) {
+        const metrics = await runWindowForCombo(combo, devDates, batchGapResults);
+        devResults.push({ combo, metrics });
+      }
+
+      devResults.sort((a, b) => b.metrics.avgR - a.metrics.avgR);
+
+      const bestDev = devResults[0];
+      const testMetrics = await runWindowForCombo(bestDev.combo, testDates, batchGapResults);
+
+      const passCriteria = {
+        avgR_ge_0: testMetrics.avgR >= 0,
+        pf_ge_1_1: testMetrics.profitFactor >= 1.1,
+        mfe2R_ge_15pct: testMetrics.mfe2RPct >= 15,
+        no_catastrophic_tails: testMetrics.tail3RCount <= 1,
+      };
+      const passCount = Object.values(passCriteria).filter(Boolean).length;
+      const verdict = passCount === 4 ? "PASS" : passCount >= 3 ? "MARGINAL_PASS" : "FAIL";
+
+      res.json({
+        strategy: "Small-Cap Momentum Walk-Forward Phase B",
+        devWindow: { start: devStartDate, end: devEndDate, days: devDates.length },
+        testWindow: { start: testStartDate, end: testEndDate, days: testDates.length },
+        parameterGrid: {
+          gapThresholds: gapThresholds.map((g: number) => `${(g * 100).toFixed(0)}%`),
+          premarketVolFloors: premarketVolFloors.map((v: number) => `${(v / 1000).toFixed(0)}K`),
+          trailOffsets: trailOffsets.map((t: number) => `${t}R`),
+          totalCombos: combos.length,
+        },
+        devSweep: devResults.map(d => ({
+          label: d.combo.label,
+          params: {
+            gapPct: d.combo.minGapPct,
+            premarketVol: d.combo.minPremarketVolume,
+            trailOffsetR: d.combo.trailOffsetR,
+          },
+          ...d.metrics,
+        })),
+        bestDevConfig: {
+          label: bestDev.combo.label,
+          params: {
+            gapPct: bestDev.combo.minGapPct,
+            premarketVol: bestDev.combo.minPremarketVolume,
+            trailOffsetR: bestDev.combo.trailOffsetR,
+          },
+          devMetrics: bestDev.metrics,
+        },
+        testResults: testMetrics,
+        passCriteria,
+        verdict,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
