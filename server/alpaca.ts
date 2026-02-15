@@ -242,6 +242,144 @@ export async function fetchDailyBarsForDate(
   return result;
 }
 
+export interface TwoDayBars {
+  priorClose: number;
+  priorVolume: number;
+  todayOpen: number;
+  todayHigh: number;
+  todayLow: number;
+  todayClose: number;
+  todayVolume: number;
+}
+
+export async function fetchTwoDayDailyBars(
+  symbols: string[],
+  date: string
+): Promise<Map<string, TwoDayBars>> {
+  const result = new Map<string, TwoDayBars>();
+  const endDate = new Date(date + "T12:00:00Z");
+  const startDate = new Date(endDate);
+  startDate.setDate(startDate.getDate() - 7);
+  const start = startDate.toISOString().split("T")[0];
+
+  const symbolStr = symbols.join(",");
+  const url = `${DATA_BASE_URL}/stocks/bars?symbols=${symbolStr}&timeframe=1Day&start=${start}T00:00:00Z&end=${date}T23:59:59Z&limit=10000&feed=sip&adjustment=split`;
+
+  try {
+    const res = await fetch(url, { headers });
+    if (!res.ok) return result;
+    const data = await res.json();
+    const barsMap: Record<string, AlpacaBar[]> = data.bars || {};
+    for (const [sym, bars] of Object.entries(barsMap)) {
+      const sorted = (bars as AlpacaBar[]).sort(
+        (a, b) => new Date(a.t).getTime() - new Date(b.t).getTime()
+      );
+      if (sorted.length >= 2) {
+        const prior = sorted[sorted.length - 2];
+        const today = sorted[sorted.length - 1];
+        const todayDateStr = new Date(today.t).toISOString().split("T")[0];
+        if (todayDateStr === date) {
+          result.set(sym, {
+            priorClose: prior.c,
+            priorVolume: prior.v,
+            todayOpen: today.o,
+            todayHigh: today.h,
+            todayLow: today.l,
+            todayClose: today.c,
+            todayVolume: today.v,
+          });
+        }
+      }
+    }
+  } catch (e: any) {
+    log(`Alpaca two-day bars fetch failed: ${e.message}`, "alpaca");
+  }
+
+  return result;
+}
+
+export interface DailyBar {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export async function fetchBulkDailyBars(
+  symbols: string[],
+  startDate: string,
+  endDate: string,
+): Promise<Map<string, DailyBar[]>> {
+  const result = new Map<string, DailyBar[]>();
+  const symbolStr = symbols.join(",");
+  const url = `${DATA_BASE_URL}/stocks/bars?symbols=${symbolStr}&timeframe=1Day&start=${startDate}T00:00:00Z&end=${endDate}T23:59:59Z&limit=10000&feed=sip&adjustment=split`;
+
+  try {
+    const res = await fetch(url, { headers });
+    if (!res.ok) return result;
+    const data = await res.json();
+    const barsMap: Record<string, AlpacaBar[]> = data.bars || {};
+    for (const [sym, bars] of Object.entries(barsMap)) {
+      const sorted = (bars as AlpacaBar[]).sort(
+        (a, b) => new Date(a.t).getTime() - new Date(b.t).getTime()
+      );
+      result.set(sym, sorted.map(b => ({
+        date: new Date(b.t).toISOString().split("T")[0],
+        open: b.o,
+        high: b.h,
+        low: b.l,
+        close: b.c,
+        volume: b.v,
+      })));
+    }
+  } catch (e: any) {
+    log(`Alpaca bulk daily bars fetch failed: ${e.message}`, "alpaca");
+  }
+
+  return result;
+}
+
+let cachedActiveSymbols: string[] | null = null;
+let cachedAt = 0;
+
+export async function fetchAllActiveEquitySymbols(): Promise<string[]> {
+  const now = Date.now();
+  if (cachedActiveSymbols && now - cachedAt < 24 * 60 * 60 * 1000) {
+    return cachedActiveSymbols;
+  }
+
+  const url = "https://paper-api.alpaca.markets/v2/assets?status=active&asset_class=us_equity";
+  try {
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      log(`Alpaca assets API error: ${res.status}`, "alpaca");
+      return cachedActiveSymbols ?? [];
+    }
+    const data: any[] = await res.json();
+    const symbols = data
+      .filter((a: any) => {
+        if (!a.tradable) return false;
+        const sym = a.symbol as string;
+        if (sym.length > 5 || sym.includes("/")) return false;
+        const name = (a.name as string) || "";
+        if (name.includes("Preferred") || name.includes("Warrant") ||
+            name.includes("Unit") || name.includes("Rights")) return false;
+        return true;
+      })
+      .map((a: any) => a.symbol as string);
+
+    cachedActiveSymbols = symbols;
+    cachedAt = now;
+    log(`Alpaca: cached ${symbols.length} active equity symbols`, "alpaca");
+    return symbols;
+  } catch (e: any) {
+    log(`Alpaca assets fetch failed: ${e.message}`, "alpaca");
+    return cachedActiveSymbols ?? [];
+  }
+}
+
 export async function fetchSnapshots(
   symbols: string[]
 ): Promise<Map<string, AlpacaSnapshot>> {

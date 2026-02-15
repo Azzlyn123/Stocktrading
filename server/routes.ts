@@ -1288,8 +1288,11 @@ export async function registerRoutes(
       premarketVolData: userPremarketData,
       startDate,
       endDate,
+      useDynamicScanner: userDynamicScanner,
+      gapScanConfig: userGapScanConfig,
     } = req.body;
 
+    const useDynamicScanner = userDynamicScanner ?? false;
     const tickerList: string[] = userTickers ?? SMALLCAP_SCAN_TICKERS;
 
     let dates: string[];
@@ -1329,6 +1332,11 @@ export async function registerRoutes(
       let maxDD = 0;
       let equity = 0;
       let peak = 0;
+      let totalScannerScanned = 0;
+      let totalScannerData = 0;
+      let totalScannerQualified = 0;
+      let totalScannerLong = 0;
+      let totalScannerTimeMs = 0;
 
       for (const day of results) {
         if (day.error || !day.tradeRs) continue;
@@ -1378,6 +1386,13 @@ export async function registerRoutes(
         if (day.tradeSlippageCostsR) allSlippageCostsR.push(...day.tradeSlippageCostsR);
         if (day.qualifications) allQualifications.push(...day.qualifications);
         if (day.spreadRejects) totalSpreadRejects += day.spreadRejects;
+        if (day.dynamicScannerStats) {
+          totalScannerScanned += day.dynamicScannerStats.scannedCount;
+          totalScannerData += day.dynamicScannerStats.dataReturnedCount;
+          totalScannerQualified += day.dynamicScannerStats.qualifiedCount;
+          totalScannerLong += day.dynamicScannerStats.longCount;
+          totalScannerTimeMs += day.dynamicScannerStats.scanTimeMs;
+        }
       }
 
       const sortedMFE = [...allMFEs].sort((a, b) => a - b);
@@ -1478,27 +1493,85 @@ export async function registerRoutes(
           avgFloatForPassed: Math.round(avgFloat),
           rejectionReasons,
         },
+        ...(useDynamicScanner ? {
+          dynamicScanner: {
+            totalScanned: totalScannerScanned,
+            totalDataReturned: totalScannerData,
+            totalQualified: totalScannerQualified,
+            totalLong: totalScannerLong,
+            avgQualifiedPerDay: dates.length > 0 ? Number((totalScannerQualified / dates.length).toFixed(1)) : 0,
+            avgLongPerDay: dates.length > 0 ? Number((totalScannerLong / dates.length).toFixed(1)) : 0,
+            totalScanTimeMs: totalScannerTimeMs,
+          },
+        } : {}),
       };
     };
 
     try {
+      let batchGapResults: Map<string, { qualifiers: any[], scannedCount: number, dataReturnedCount: number, qualifiedCount: number }> | null = null;
+
+      if (useDynamicScanner && userGapScanConfig?.useFullMarket && dates.length > 1) {
+        const { batchScanForGappers } = await import("./strategy/batchGapScanner");
+        const gapCfg = { ...(userGapScanConfig ?? {}), useFullMarket: true };
+        if (scConfig.minPrice) gapCfg.minPrice = gapCfg.minPrice ?? scConfig.minPrice;
+        if (scConfig.maxPrice) gapCfg.maxPrice = gapCfg.maxPrice ?? scConfig.maxPrice;
+        if (scConfig.minGapPct) gapCfg.minGapPct = gapCfg.minGapPct ?? scConfig.minGapPct;
+
+        const batchResult = await batchScanForGappers(dates[0], dates[dates.length - 1], gapCfg);
+        batchGapResults = new Map();
+        batchResult.dailyResults.forEach((dr, date) => {
+          batchGapResults!.set(date, {
+            qualifiers: dr.qualifiers,
+            scannedCount: dr.scannedCount,
+            dataReturnedCount: dr.dataReturnedCount,
+            qualifiedCount: dr.qualifiedCount,
+          });
+        });
+      }
+
       const results: any[] = [];
       for (const date of dates) {
         try {
+          let overrideTickerList = tickerList;
+          let preBatchScanStats: any = undefined;
+
+          if (batchGapResults) {
+            const dayGap = batchGapResults.get(date);
+            if (dayGap) {
+              overrideTickerList = dayGap.qualifiers
+                .filter((q: any) => q.gapDirection === "LONG")
+                .map((q: any) => q.ticker);
+              preBatchScanStats = {
+                scannedCount: dayGap.scannedCount,
+                dataReturnedCount: dayGap.dataReturnedCount,
+                qualifiedCount: dayGap.qualifiedCount,
+                longCount: overrideTickerList.length,
+                scanTimeMs: 0,
+              };
+            } else {
+              overrideTickerList = [];
+            }
+          }
+
           const result = await runSmallCapMomentumSimulation(
             `smallcap-${date}-${Date.now()}`,
             date,
             userId,
             storage,
-            tickerList,
+            batchGapResults ? overrideTickerList : tickerList,
             {
               dryRun: true,
               smallCapConfig: scConfig,
               pullbackConfig: pbConfig,
               floatData,
               premarketVolData,
+              useDynamicScanner: batchGapResults ? false : useDynamicScanner,
+              gapScanConfig: batchGapResults ? undefined : userGapScanConfig,
             },
           );
+          if (preBatchScanStats) {
+            (result as any).dynamicScannerStats = preBatchScanStats;
+          }
           results.push({ date, ...(result as any) });
         } catch (err: any) {
           results.push({ date, error: err?.message ?? String(err), trades: 0, tradeRs: [] });
@@ -1514,9 +1587,10 @@ export async function registerRoutes(
 
       res.json({
         strategy: "Small-Cap Momentum: First Pullback After HOD Break",
+        scannerMode: useDynamicScanner ? "dynamic" : "static",
         config: { smallCap: { ...DEFAULT_SMALLCAP_CONFIG, ...scConfig }, pullback: { ...DEFAULT_PULLBACK_CONFIG, ...pbConfig } },
         dateRange: { start: dates[0], end: dates[dates.length - 1], totalDays: dates.length },
-        tickerCount: tickerList.length,
+        tickerCount: useDynamicScanner ? (agg as any).dynamicScanner?.avgLongPerDay ?? "dynamic" : tickerList.length,
         ...agg,
         verdict,
         perDay: results.map(r => ({

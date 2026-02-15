@@ -268,6 +268,14 @@ export interface DryRunResult {
   bySession: Record<string, BreakdownBucket>;
   byTier: Record<string, BreakdownBucket>;
   qualifications?: SmallCapQualification[];
+  spreadRejects?: number;
+  dynamicScannerStats?: {
+    scannedCount: number;
+    dataReturnedCount: number;
+    qualifiedCount: number;
+    longCount: number;
+    scanTimeMs: number;
+  };
 }
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -5713,6 +5721,8 @@ export async function runSmallCapMomentumSimulation(
     pullbackConfig?: Partial<PullbackConfig>;
     floatData?: Record<string, number>;
     premarketVolData?: Record<string, number>;
+    useDynamicScanner?: boolean;
+    gapScanConfig?: Partial<import("./strategy/dynamicGapScanner").GapScanConfig>;
   },
 ): Promise<DryRunResult | void> {
   const isDryRun = options?.dryRun ?? false;
@@ -5721,6 +5731,7 @@ export async function runSmallCapMomentumSimulation(
   const pbConfig: PullbackConfig = { ...DEFAULT_PULLBACK_CONFIG, ...(options?.pullbackConfig ?? {}) };
   const floatData = options?.floatData ?? {};
   const premarketVolData = options?.premarketVolData ?? {};
+  const useDynamicScanner = options?.useDynamicScanner ?? false;
 
   const control = { cancel: false };
   if (!isDryRun) {
@@ -5739,7 +5750,63 @@ export async function runSmallCapMomentumSimulation(
       return;
     }
 
-    const allSymbols = Array.from(new Set([...tickerList, "SPY"]));
+    let effectiveTickerList = tickerList;
+    let dynamicScanStats: DryRunResult["dynamicScannerStats"] | undefined;
+
+    if (useDynamicScanner) {
+      const { scanForGappersOnDate } = await import("./strategy/dynamicGapScanner");
+      const gapScanCfg = options?.gapScanConfig ?? {};
+      if (scConfig.minPrice) gapScanCfg.minPrice = gapScanCfg.minPrice ?? scConfig.minPrice;
+      if (scConfig.maxPrice) gapScanCfg.maxPrice = gapScanCfg.maxPrice ?? scConfig.maxPrice;
+      if (scConfig.minGapPct) gapScanCfg.minGapPct = gapScanCfg.minGapPct ?? scConfig.minGapPct;
+
+      const scanResult = await scanForGappersOnDate(simulationDate, gapScanCfg);
+      effectiveTickerList = scanResult.qualifiers
+        .filter(q => q.gapDirection === "LONG")
+        .map(q => q.ticker);
+
+      dynamicScanStats = {
+        scannedCount: scanResult.scannedCount,
+        dataReturnedCount: scanResult.dataReturnedCount,
+        qualifiedCount: scanResult.qualifiedCount,
+        longCount: effectiveTickerList.length,
+        scanTimeMs: scanResult.scanTimeMs,
+      };
+
+      log(`[SmallCapSim] ${simulationDate}: dynamic scanner found ${scanResult.qualifiedCount} gappers, ${effectiveTickerList.length} LONG qualifiers`, "historical");
+
+      if (effectiveTickerList.length === 0) {
+        log(`[SmallCapSim] ${simulationDate}: no LONG gappers found, skipping day`, "historical");
+        if (isDryRun) {
+          return {
+            trades: 0,
+            wins: 0,
+            losses: 0,
+            grossPnl: 0,
+            netPnl: 0,
+            totalCommissions: 0,
+            totalSlippageCosts: 0,
+            tradeRs: [],
+            maxDrawdown: 0,
+            byRegime: {},
+            bySession: {},
+            byTier: {},
+            qualifications: [],
+            spreadRejects: 0,
+            dynamicScannerStats: {
+              scannedCount: scanResult.scannedCount,
+              dataReturnedCount: scanResult.dataReturnedCount,
+              qualifiedCount: scanResult.qualifiedCount,
+              longCount: 0,
+              scanTimeMs: scanResult.scanTimeMs,
+            },
+          };
+        }
+        return;
+      }
+    }
+
+    const allSymbols = Array.from(new Set([...effectiveTickerList, "SPY"]));
     const CHUNK_SIZE = 30;
     const bars5mMap = new Map<string, Candle[]>();
     const multiDayBars = new Map<string, any[]>();
@@ -5754,8 +5821,8 @@ export async function runSmallCapMomentumSimulation(
             fetchBarsForDate(chunk, simulationDate, "5Min"),
             fetchMultiDayDailyBars(chunk, simulationDate, 20),
           ]);
-          for (const [sym, bars] of chunkBars) bars5mMap.set(sym, bars);
-          for (const [sym, bars] of chunkDaily) multiDayBars.set(sym, bars);
+          chunkBars.forEach((bars, sym) => bars5mMap.set(sym, bars));
+          chunkDaily.forEach((bars, sym) => multiDayBars.set(sym, bars));
           break;
         } catch (e: any) {
           log(`[SmallCapSim] Chunk fetch failed (attempt ${attempt + 1}): ${e.message}`, "historical");
@@ -5886,7 +5953,7 @@ export async function runSmallCapMomentumSimulation(
       log(`[SmallCapSim] ${ticker} CLOSED: ${exitReason} | R=${compositeR.toFixed(2)} MFE=${trade.mfeR.toFixed(2)}R PnL=$${pnl.toFixed(2)}${trade.partialFilled ? " (partial filled)" : ""}`, "historical");
     };
 
-    for (const ticker of tickerList) {
+    for (const ticker of effectiveTickerList) {
       if (control.cancel) break;
 
       const tickerBars5m = bars5mMap.get(ticker) ?? [];
@@ -6177,6 +6244,7 @@ export async function runSmallCapMomentumSimulation(
       byTier: tradesByTier,
       qualifications: qualifications,
       spreadRejects,
+      dynamicScannerStats: dynamicScanStats,
     };
 
     if (isDryRun) {
