@@ -5708,6 +5708,8 @@ export interface SmallCapGapperEvent {
   catalyst?: string;
 }
 
+export type BarsCache = Map<string, { bars5m: Map<string, Candle[]>; multiDay: Map<string, any[]> }>;
+
 export async function runSmallCapMomentumSimulation(
   runId: string,
   simulationDate: string,
@@ -5723,6 +5725,7 @@ export async function runSmallCapMomentumSimulation(
     premarketVolData?: Record<string, number>;
     useDynamicScanner?: boolean;
     gapScanConfig?: Partial<import("./strategy/dynamicGapScanner").GapScanConfig>;
+    barsCache?: BarsCache;
   },
 ): Promise<DryRunResult | void> {
   const isDryRun = options?.dryRun ?? false;
@@ -5807,31 +5810,59 @@ export async function runSmallCapMomentumSimulation(
     }
 
     const allSymbols = Array.from(new Set([...effectiveTickerList, "SPY"]));
-    const CHUNK_SIZE = 30;
+    const barsCache = options?.barsCache;
     const bars5mMap = new Map<string, Candle[]>();
     const multiDayBars = new Map<string, any[]>();
-    const chunks: string[][] = [];
-    for (let i = 0; i < allSymbols.length; i += CHUNK_SIZE) {
-      chunks.push(allSymbols.slice(i, i + CHUNK_SIZE));
-    }
-    for (const chunk of chunks) {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          const [chunkBars, chunkDaily] = await Promise.all([
-            fetchBarsForDate(chunk, simulationDate, "5Min"),
-            fetchMultiDayDailyBars(chunk, simulationDate, 20),
-          ]);
-          chunkBars.forEach((bars, sym) => bars5mMap.set(sym, bars));
-          chunkDaily.forEach((bars, sym) => multiDayBars.set(sym, bars));
-          break;
-        } catch (e: any) {
-          log(`[SmallCapSim] Chunk fetch failed (attempt ${attempt + 1}): ${e.message}`, "historical");
-          if (attempt === 1) log(`[SmallCapSim] Skipping chunk: ${chunk.join(",")}`, "historical");
-        }
-      }
+
+    const cached = barsCache?.get(simulationDate);
+    const missingSymbols: string[] = [];
+    if (cached) {
+      allSymbols.forEach(sym => {
+        const b5 = cached.bars5m.get(sym);
+        if (b5) bars5mMap.set(sym, b5);
+        const md = cached.multiDay.get(sym);
+        if (md) multiDayBars.set(sym, md);
+        if (!b5 && !md) missingSymbols.push(sym);
+      });
     }
 
-    log(`[SmallCapSim] ${simulationDate}: fetched 5m data for ${bars5mMap.size}/${allSymbols.length} symbols, daily for ${multiDayBars.size}`, "historical");
+    if (!cached || missingSymbols.length > 0) {
+      const symbolsToFetch = cached ? missingSymbols : allSymbols;
+      if (symbolsToFetch.length > 0) {
+        const CHUNK_SIZE = 30;
+        const chunks: string[][] = [];
+        for (let i = 0; i < symbolsToFetch.length; i += CHUNK_SIZE) {
+          chunks.push(symbolsToFetch.slice(i, i + CHUNK_SIZE));
+        }
+        for (const chunk of chunks) {
+          for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+              const [chunkBars, chunkDaily] = await Promise.all([
+                fetchBarsForDate(chunk, simulationDate, "5Min"),
+                fetchMultiDayDailyBars(chunk, simulationDate, 20),
+              ]);
+              chunkBars.forEach((bars, sym) => bars5mMap.set(sym, bars));
+              chunkDaily.forEach((bars, sym) => multiDayBars.set(sym, bars));
+              break;
+            } catch (e: any) {
+              log(`[SmallCapSim] Chunk fetch failed (attempt ${attempt + 1}): ${e.message}`, "historical");
+              if (attempt === 1) log(`[SmallCapSim] Skipping chunk: ${chunk.join(",")}`, "historical");
+            }
+          }
+        }
+        if (barsCache) {
+          if (!cached) {
+            barsCache.set(simulationDate, { bars5m: new Map(bars5mMap), multiDay: new Map(multiDayBars) });
+          } else {
+            bars5mMap.forEach((bars, sym) => cached.bars5m.set(sym, bars));
+            multiDayBars.forEach((bars, sym) => cached.multiDay.set(sym, bars));
+          }
+        }
+        log(`[SmallCapSim] ${simulationDate}: fetched ${symbolsToFetch.length} symbols (${cached ? 'incremental' : 'full'}), total 5m: ${bars5mMap.size}/${allSymbols.length}`, "historical");
+      } else {
+        log(`[SmallCapSim] ${simulationDate}: all ${allSymbols.length} symbols from cache`, "historical");
+      }
+    }
 
     const spyBars5m = bars5mMap.get("SPY") ?? [];
     if (spyBars5m.length === 0) {

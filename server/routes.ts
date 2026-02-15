@@ -9,7 +9,7 @@ import type { User } from "@shared/schema";
 import { startSimulatedDataFeed, registerUser, unregisterUser, getScannerData, getDataSource, isLiveConnected, getSharedUserId } from "./simulator";
 import { seedDemoData } from "./seed";
 import { generateAdaptiveInsights } from "./strategy/learning";
-import { runHistoricalSimulation, runReversionSimulation, runORFSimulation, runRSContinuationSimulation, runGapContinuationSimulation, runSmallCapMomentumSimulation, getActiveSimulations, cancelSimulation, startAutoRun, getAutoRunStatus, cancelAutoRun, runCostSensitivity, runWalkForwardEvaluation, getWalkForwardStatus, cancelWalkForward } from "./historicalSimulator";
+import { runHistoricalSimulation, runReversionSimulation, runORFSimulation, runRSContinuationSimulation, runGapContinuationSimulation, runSmallCapMomentumSimulation, getActiveSimulations, cancelSimulation, startAutoRun, getAutoRunStatus, cancelAutoRun, runCostSensitivity, runWalkForwardEvaluation, getWalkForwardStatus, cancelWalkForward, type BarsCache } from "./historicalSimulator";
 import { DEFAULT_RS_CONFIG, type RSConfig } from "./strategy/rsDetector";
 import { DEFAULT_GAP_CONFIG, type GapConfig } from "./strategy/gapDetector";
 import { DEFAULT_SMALLCAP_CONFIG } from "./strategy/smallCapScanner";
@@ -1732,6 +1732,8 @@ export async function registerRoutes(
         }
       }
 
+      const sharedBarsCache: BarsCache = new Map();
+
       const runWindowForCombo = async (
         combo: typeof combos[0],
         windowDates: string[],
@@ -1780,6 +1782,7 @@ export async function registerRoutes(
                 dryRun: true,
                 smallCapConfig: scConfig,
                 pullbackConfig: basePbConfig,
+                barsCache: sharedBarsCache,
               },
             );
             if (scanStats) (result as any).dynamicScannerStats = scanStats;
