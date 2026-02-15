@@ -9,8 +9,10 @@ import type { User } from "@shared/schema";
 import { startSimulatedDataFeed, registerUser, unregisterUser, getScannerData, getDataSource, isLiveConnected, getSharedUserId } from "./simulator";
 import { seedDemoData } from "./seed";
 import { generateAdaptiveInsights } from "./strategy/learning";
-import { runHistoricalSimulation, runReversionSimulation, runORFSimulation, runRSContinuationSimulation, getActiveSimulations, cancelSimulation, startAutoRun, getAutoRunStatus, cancelAutoRun, runCostSensitivity, runWalkForwardEvaluation, getWalkForwardStatus, cancelWalkForward } from "./historicalSimulator";
+import { runHistoricalSimulation, runReversionSimulation, runORFSimulation, runRSContinuationSimulation, runGapContinuationSimulation, getActiveSimulations, cancelSimulation, startAutoRun, getAutoRunStatus, cancelAutoRun, runCostSensitivity, runWalkForwardEvaluation, getWalkForwardStatus, cancelWalkForward } from "./historicalSimulator";
 import { DEFAULT_RS_CONFIG, type RSConfig } from "./strategy/rsDetector";
+import { DEFAULT_GAP_CONFIG, type GapConfig } from "./strategy/gapDetector";
+import { fetchMultiDayDailyBars } from "./alpaca";
 
 declare global {
   namespace Express {
@@ -920,6 +922,155 @@ export async function registerRoutes(
       bySymbol: symbolSummary,
       byRegime: regimeSummary,
       results,
+    });
+  });
+
+  app.post("/api/internal/gap-phase-a", async (req, res) => {
+    const { tickers, gapConfig: userGapConfig } = req.body;
+    const dates = [
+      "2026-02-03", "2026-02-04", "2026-02-05", "2026-02-06", "2026-02-09",
+      "2026-02-10", "2026-02-11", "2026-02-12", "2026-02-13"
+    ];
+    const tickerList = tickers ?? [
+      "AAPL","MSFT","NVDA","TSLA","META","AMZN","GOOGL","AMD","NFLX","AVGO",
+      "JPM","COST","QQQ","CRM","ORCL",
+    ];
+    const userId = "1a70fbad-ee1b-46ea-96a3-36749e24f3ba";
+    const gapCfg: Partial<GapConfig> = userGapConfig ?? {};
+
+    const aggregate = (results: any[]) => {
+      let trades = 0, wins = 0, totalR = 0;
+      const allRs: number[] = [];
+      const allMFEs: number[] = [];
+      const allMAEs: number[] = [];
+      const lossBuckets: Record<string, number> = {
+        "stopped_before_0.3R": 0,
+        "reversed_after_0.3R": 0,
+        "partial_then_scratch": 0,
+        "other": 0
+      };
+      let mfe1R = 0, mfe15R = 0, mfe2R = 0;
+      const bySymbol: Record<string, { trades: number; rs: number[]; wins: number }> = {};
+      const byDirection: Record<string, { trades: number; totalR: number; wins: number }> = {};
+
+      for (const day of results) {
+        if (day.error || !day.tradeRs) continue;
+        trades += day.trades ?? 0;
+        wins += day.wins ?? 0;
+        totalR += (day.tradeRs as number[]).reduce((a: number, b: number) => a + b, 0);
+        allRs.push(...day.tradeRs);
+        if (day.tradeMFEs) {
+          allMFEs.push(...day.tradeMFEs);
+          for (const mfe of day.tradeMFEs) {
+            if (mfe >= 1.0) mfe1R++;
+            if (mfe >= 1.5) mfe15R++;
+            if (mfe >= 2.0) mfe2R++;
+          }
+        }
+        if (day.tradeMAEs) allMAEs.push(...day.tradeMAEs);
+        if (day.tradeLossBuckets) {
+          for (const bucket of day.tradeLossBuckets) {
+            if (lossBuckets[bucket] !== undefined) lossBuckets[bucket]++;
+            else lossBuckets.other++;
+          }
+        }
+        if (day.tradeTickers && day.tradeRs) {
+          for (let i = 0; i < day.tradeTickers.length; i++) {
+            const sym = day.tradeTickers[i];
+            const r = day.tradeRs[i] ?? 0;
+            if (!bySymbol[sym]) bySymbol[sym] = { trades: 0, rs: [], wins: 0 };
+            bySymbol[sym].trades++;
+            bySymbol[sym].rs.push(r);
+            if (r > 0) bySymbol[sym].wins++;
+          }
+        }
+        if (day.byTier) {
+          for (const [tier, data] of Object.entries(day.byTier as Record<string, any>)) {
+            const dir = tier.includes("long") ? "LONG" : "SHORT";
+            if (!byDirection[dir]) byDirection[dir] = { trades: 0, totalR: 0, wins: 0 };
+            byDirection[dir].trades += data.wins + data.losses;
+            byDirection[dir].totalR += data.pnl;
+            byDirection[dir].wins += data.wins;
+          }
+        }
+      }
+
+      const sortedMFE = [...allMFEs].sort((a, b) => a - b);
+      const medianMFE = sortedMFE.length > 0 ? sortedMFE[Math.floor(sortedMFE.length / 2)] : 0;
+      const sortedMAE = [...allMAEs].sort((a, b) => a - b);
+      const medianMAE = sortedMAE.length > 0 ? sortedMAE[Math.floor(sortedMAE.length / 2)] : 0;
+
+      const symbolSummary: Record<string, any> = {};
+      for (const [sym, data] of Object.entries(bySymbol)) {
+        const symAvgR = data.rs.length > 0 ? data.rs.reduce((a, b) => a + b, 0) / data.rs.length : 0;
+        symbolSummary[sym] = { trades: data.trades, avgR: Number(symAvgR.toFixed(3)), winRate: Number((data.wins / data.trades).toFixed(3)) };
+      }
+
+      return {
+        trades,
+        winRate: trades > 0 ? (wins / trades * 100).toFixed(1) + "%" : "0%",
+        avgR: trades > 0 ? (totalR / trades).toFixed(3) : "0",
+        medianMFE: medianMFE.toFixed(3),
+        medianMAE: medianMAE.toFixed(3),
+        mfeDist: {
+          ge1R: trades > 0 ? (mfe1R / trades * 100).toFixed(1) + "%" : "0%",
+          ge15R: trades > 0 ? (mfe15R / trades * 100).toFixed(1) + "%" : "0%",
+          ge2R: trades > 0 ? (mfe2R / trades * 100).toFixed(1) + "%" : "0%"
+        },
+        lossDecomp: lossBuckets,
+        bySymbol: symbolSummary,
+        byDirection
+      };
+    };
+
+    const runVariantOnDates = async (variantB: boolean, variantDates: string[]) => {
+      const results: any[] = [];
+      for (const date of variantDates) {
+        try {
+          let forwardDailyBars: Map<string, any[]> | undefined;
+          if (variantB) {
+            const fwdDate = new Date(date + "T12:00:00Z");
+            fwdDate.setDate(fwdDate.getDate() + 10);
+            const fwdDateStr = fwdDate.toISOString().split("T")[0];
+            const allDailyBars = await fetchMultiDayDailyBars(
+              Array.from(new Set([...tickerList, "SPY"])),
+              fwdDateStr,
+              10
+            );
+            forwardDailyBars = new Map();
+            for (const [sym, bars] of allDailyBars.entries()) {
+              const simDate = new Date(date + "T00:00:00Z").getTime();
+              const forwardBars = bars.filter((b: any) => b.timestamp > simDate);
+              if (forwardBars.length > 0) forwardDailyBars.set(sym, forwardBars);
+            }
+          }
+          const result = await runGapContinuationSimulation(
+            `gap-phase-a-${date}-${Date.now()}`,
+            date,
+            userId,
+            storage,
+            tickerList,
+            { dryRun: true, gapConfig: gapCfg, variantB, forwardDailyBars },
+          );
+          results.push({ date, ...(result as any) });
+        } catch (err: any) {
+          results.push({ date, error: err.message });
+        }
+      }
+      return results;
+    };
+
+    const variantAResults = await runVariantOnDates(false, dates);
+    const variantBResults = await runVariantOnDates(true, dates);
+
+    res.json({
+      strategy: "GAP_CONTINUATION",
+      config: { ...DEFAULT_GAP_CONFIG, ...gapCfg },
+      variantA: aggregate(variantAResults),
+      variantB: aggregate(variantBResults),
+      dates,
+      rawA: variantAResults,
+      rawB: variantBResults,
     });
   });
 
