@@ -49,6 +49,25 @@ The backend features a modular strategy engine with pure TypeScript modules. A s
   - **Verdict: NOT_READY for paper trading**
 - **Key files**: `server/strategy/batchGapScanner.ts`, `server/strategy/dynamicGapScanner.ts`, `server/strategy/smallCapScanner.ts`, `server/strategy/pullbackDetector.ts`, `server/historicalSimulator.ts`
 
+### Volatility Cluster Activation Layer — TESTED, INSUFFICIENT
+- **Module**: `server/strategy/volatilityClusterFilter.ts`
+- **Endpoint**: `/api/internal/volatility-cluster-test`
+- **Design**: Gap density (stocks with gap ≥4%, RVOL ≥1.5, open > prior high) + expansion test (daily max move ≥1.5x ATR or ≥2% with vol confirm) + optional SPY veto
+- **Default Config**: gapCountThreshold=6, expansionCountThreshold=4, minPrice=$10, minAvgDollarVol=$50M
+- **Optimization**: Switched from 5m intraday bars to daily data approximation for expansion test (eliminated API timeout issues on 66+ day windows)
+- **Results (3 OOS windows)**:
+  - Jun-Jul 2025: 44 days, 19 ON (43%), 25 OFF — ON: 3T/-2.21R, OFF: 5T/-2.74R
+  - Aug-Oct 2025: 66 days, 36 ON (55%), 30 OFF — ON: 13T/-6.05R, OFF: 7T/-2.48R
+  - Feb 3-14 2026: 9 days, 9 ON (100%), 0 OFF — ON: 23T/+10.23R
+- **Combined pre-dev OOS (Jun-Oct)**: 110 days, 55 ON/55 OFF — ON trades NEGATIVE (-8.26R/16T), OFF also negative (-5.22R/12T)
+- **If filter removed OFF trades**: 39T, +1.97R total, 0.050 avgR — marginal improvement, still below 0.15 threshold
+- **Critical Findings**:
+  - Expansion test adds ZERO discrimination with daily data (counts 57-889 vs threshold of 4)
+  - Gap density alone creates ON/OFF split but ON group is negative in cold regimes
+  - Filter correctly identifies Feb as hot (100% activation) but cannot rescue Jun-Oct performance
+  - **Verdict: Cluster filter alone cannot make strategy paper-trading ready**
+  - Edge is strategy-level (entry/exit mechanics), not candidate-discovery-level
+
 ## External Dependencies
 -   **Alpaca API**: Live bars, snapshots, WebSocket data streams, market clock, and historical bar data.
 -   **PostgreSQL**: Relational database.
