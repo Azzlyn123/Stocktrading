@@ -1911,7 +1911,9 @@ export async function registerRoutes(
         date: string;
         regimeActive: boolean;
         gapCount: number;
-        expansionCount: number;
+        percentAboveVWAP: number;
+        percentMakingHOD: number;
+        breadthUniverseSize: number;
         trades: number;
         tradeRs: number[];
         dayR: number;
@@ -1925,7 +1927,9 @@ export async function registerRoutes(
         const cluster = clusterResult.dailyResults.get(date);
         const regimeActive = cluster?.regimeActive ?? false;
         const gapCount = cluster?.gapCount ?? 0;
-        const expansionCount = cluster?.expansionCount ?? 0;
+        const percentAboveVWAP = cluster?.percentAboveVWAP ?? 0;
+        const percentMakingHOD = cluster?.percentMakingHOD ?? 0;
+        const breadthUniverseSize = cluster?.breadthUniverseSize ?? 0;
 
         try {
           const dayGap = batchGapResults.get(date);
@@ -1937,7 +1941,7 @@ export async function registerRoutes(
           }
 
           if (tickersForDay.length === 0) {
-            dayResults.push({ date, regimeActive, gapCount, expansionCount, trades: 0, tradeRs: [], dayR: 0, tradeTickers: [], tradeMFEs: [], tradeMAEs: [], tradeGapPcts: [] });
+            dayResults.push({ date, regimeActive, gapCount, percentAboveVWAP, percentMakingHOD, breadthUniverseSize, trades: 0, tradeRs: [], dayR: 0, tradeTickers: [], tradeMFEs: [], tradeMAEs: [], tradeGapPcts: [] });
             continue;
           }
 
@@ -1951,7 +1955,7 @@ export async function registerRoutes(
           const dayR = tradeRs.reduce((a: number, b: number) => a + b, 0);
 
           dayResults.push({
-            date, regimeActive, gapCount, expansionCount,
+            date, regimeActive, gapCount, percentAboveVWAP, percentMakingHOD, breadthUniverseSize,
             trades: tradeRs.length, tradeRs, dayR,
             tradeTickers: r.tradeTickers ?? [],
             tradeMFEs: r.tradeMFEs ?? [],
@@ -1959,7 +1963,7 @@ export async function registerRoutes(
             tradeGapPcts: r.tradeGapPcts ?? [],
           });
         } catch (err: any) {
-          dayResults.push({ date, regimeActive, gapCount, expansionCount, trades: 0, tradeRs: [], dayR: 0, tradeTickers: [], tradeMFEs: [], tradeMAEs: [], tradeGapPcts: [] });
+          dayResults.push({ date, regimeActive, gapCount, percentAboveVWAP, percentMakingHOD, breadthUniverseSize, trades: 0, tradeRs: [], dayR: 0, tradeTickers: [], tradeMFEs: [], tradeMAEs: [], tradeGapPcts: [] });
         }
       }
 
@@ -2041,7 +2045,9 @@ export async function registerRoutes(
         date: d.date,
         regimeActive: d.regimeActive,
         gapCount: d.gapCount,
-        expansionCount: d.expansionCount,
+        vwapPct: Number((d.percentAboveVWAP * 100).toFixed(1)),
+        hodPct: Number((d.percentMakingHOD * 100).toFixed(1)),
+        breadthN: d.breadthUniverseSize,
         trades: d.trades,
         dayR: Number(d.dayR.toFixed(3)),
       }));

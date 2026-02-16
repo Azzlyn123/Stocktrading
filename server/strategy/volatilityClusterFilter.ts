@@ -1,6 +1,7 @@
-import { fetchBulkDailyBars, type DailyBar } from "../alpaca";
+import { fetchBulkDailyBars, fetchBarsForDate, type DailyBar } from "../alpaca";
 import { fetchAllActiveEquitySymbols } from "../alpaca";
 import { getBroadUniverse } from "./broadUniverse";
+import type { Candle } from "./types";
 import { log } from "../index";
 
 export interface ClusterConfig {
@@ -10,9 +11,8 @@ export interface ClusterConfig {
   minGapPct: number;
   minRvol: number;
   gapCountThreshold: number;
-  expansionCountThreshold: number;
-  expansionAtrMultiple: number;
-  expansionPctThreshold: number;
+  minPercentAboveVWAP: number;
+  minPercentMakingHOD: number;
   spyVetoEnabled: boolean;
   spyAtrVetoMultiple: number;
   useFullMarket: boolean;
@@ -25,9 +25,8 @@ export const DEFAULT_CLUSTER_CONFIG: ClusterConfig = {
   minGapPct: 0.04,
   minRvol: 1.5,
   gapCountThreshold: 6,
-  expansionCountThreshold: 4,
-  expansionAtrMultiple: 1.5,
-  expansionPctThreshold: 0.02,
+  minPercentAboveVWAP: 0.65,
+  minPercentMakingHOD: 0.40,
   spyVetoEnabled: false,
   spyAtrVetoMultiple: 0.8,
   useFullMarket: true,
@@ -37,11 +36,12 @@ export interface DailyClusterResult {
   date: string;
   regimeActive: boolean;
   gapCount: number;
-  expansionCount: number;
+  percentAboveVWAP: number;
+  percentMakingHOD: number;
+  breadthUniverseSize: number;
   spyVeto: boolean;
   universeSize: number;
   gapQualifiers: string[];
-  expansionQualifiers: string[];
 }
 
 export interface BatchClusterOutput {
@@ -123,6 +123,7 @@ export async function batchComputeClusterActivation(
   for (const date of sortedDates) {
     const gapQualifiers: string[] = [];
     let universeSize = 0;
+    const breadthUniverse: string[] = [];
 
     allBars.forEach((bars, ticker) => {
       const dateIdx = bars.findIndex((b) => b.date === date);
@@ -131,10 +132,15 @@ export async function batchComputeClusterActivation(
       const today = bars[dateIdx];
       const prior = bars[dateIdx - 1];
 
-      if (prior.close < cfg.minPrice) return;
       if (prior.close <= 0 || today.open <= 0) return;
 
       const avgDolVol = computeAvgDollarVolume(bars, dateIdx, 20);
+
+      if (prior.close >= 5 && avgDolVol >= 1_000_000) {
+        breadthUniverse.push(ticker);
+      }
+
+      if (prior.close < cfg.minPrice) return;
       if (avgDolVol < cfg.minAvgDollarVol) return;
 
       if (today.volume < cfg.minDayVolume) return;
@@ -154,16 +160,16 @@ export async function batchComputeClusterActivation(
     });
 
     const gapCount = gapQualifiers.length;
-    let expansionCount = 0;
-    const expansionQualifiers: string[] = [];
+    let percentAboveVWAP = 0;
+    let percentMakingHOD = 0;
+    let breadthUniverseSize = 0;
     let spyVeto = false;
 
     if (gapCount >= cfg.gapCountThreshold) {
-      const expansionResult = computeExpansionFromDailyBars(
-        date, allBars, cfg
-      );
-      expansionCount = expansionResult.count;
-      expansionQualifiers.push(...expansionResult.qualifiers);
+      const breadthResult = await computeFirstHourBreadth(date, breadthUniverse);
+      percentAboveVWAP = breadthResult.percentAboveVWAP;
+      percentMakingHOD = breadthResult.percentMakingHOD;
+      breadthUniverseSize = breadthResult.universeSize;
 
       if (cfg.spyVetoEnabled) {
         spyVeto = checkSpyVeto(date, allBars, cfg);
@@ -171,21 +177,23 @@ export async function batchComputeClusterActivation(
     }
 
     const regimeActive = gapCount >= cfg.gapCountThreshold
-      && expansionCount >= cfg.expansionCountThreshold
+      && percentAboveVWAP >= cfg.minPercentAboveVWAP
+      && percentMakingHOD >= cfg.minPercentMakingHOD
       && !spyVeto;
 
     dailyResults.set(date, {
       date,
       regimeActive,
       gapCount,
-      expansionCount,
+      percentAboveVWAP,
+      percentMakingHOD,
+      breadthUniverseSize,
       spyVeto,
       universeSize,
       gapQualifiers,
-      expansionQualifiers,
     });
 
-    log(`[ClusterFilter] ${date}: universe=${universeSize} gapCount=${gapCount} expansion=${expansionCount} regime=${regimeActive ? "ON" : "OFF"}`, "historical");
+    log(`[ClusterFilter] ${date}: universe=${universeSize} gapCount=${gapCount} vwap%=${(percentAboveVWAP * 100).toFixed(1)} hod%=${(percentMakingHOD * 100).toFixed(1)} regime=${regimeActive ? "ON" : "OFF"}`, "historical");
   }
 
   const computeTimeMs = Date.now() - computeStart;
@@ -239,44 +247,108 @@ function computeAvgATR(bars: DailyBar[], currentIdx: number, lookback: number): 
   return count > 0 ? sum / count : 0;
 }
 
-function computeExpansionFromDailyBars(
+async function computeFirstHourBreadth(
   date: string,
-  allBars: Map<string, DailyBar[]>,
-  cfg: ClusterConfig,
-): { count: number; qualifiers: string[] } {
-  const qualifiers: string[] = [];
+  liquidUniverse: string[],
+): Promise<{ percentAboveVWAP: number; percentMakingHOD: number; universeSize: number }> {
+  if (liquidUniverse.length === 0) {
+    return { percentAboveVWAP: 0, percentMakingHOD: 0, universeSize: 0 };
+  }
 
-  allBars.forEach((bars, ticker) => {
-    const dateIdx = bars.findIndex((b) => b.date === date);
-    if (dateIdx < 1) return;
-    const today = bars[dateIdx];
-    const prior = bars[dateIdx - 1];
-    if (prior.close < cfg.minPrice || prior.close <= 0) return;
-    if (today.open <= 0) return;
+  const sampleSize = Math.min(liquidUniverse.length, 200);
+  const shuffled = [...liquidUniverse].sort(() => Math.random() - 0.5);
+  const sampled = shuffled.slice(0, sampleSize);
 
-    const avgDolVol = computeAvgDollarVolume(bars, dateIdx, 20);
-    if (avgDolVol < cfg.minAvgDollarVol) return;
+  log(`[ClusterFilter] Breadth ${date}: sampling ${sampled.length} of ${liquidUniverse.length} candidates for 5m bars`, "historical");
 
-    const avgATR = computeAvgATR(bars, dateIdx - 1, 20);
+  const CHUNK = 50;
+  const allIntraday = new Map<string, Candle[]>();
 
-    const moveUp = Math.abs(today.high - today.open);
-    const moveDown = Math.abs(today.open - today.low);
-    const maxMove = Math.max(moveUp, moveDown);
-    const movePct = maxMove / today.open;
-
-    const passATR = avgATR > 0 && maxMove >= cfg.expansionAtrMultiple * avgATR;
-    const passPct = movePct >= cfg.expansionPctThreshold;
-
-    const avgVol = computeAvgVolume(bars, dateIdx, 20);
-    const rvol = avgVol > 0 ? today.volume / avgVol : 0;
-    const hasVolConfirm = rvol >= 1.2;
-
-    if (passATR || (passPct && hasVolConfirm)) {
-      qualifiers.push(ticker);
+  for (let i = 0; i < sampled.length; i += CHUNK) {
+    const batch = sampled.slice(i, i + CHUNK);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const barsMap = await fetchBarsForDate(batch, date, "5Min");
+        barsMap.forEach((bars, sym) => allIntraday.set(sym, bars));
+        log(`[ClusterFilter] Breadth ${date}: fetched ${allIntraday.size}/${sampled.length} 5m symbols`, "historical");
+        break;
+      } catch (e: any) {
+        if (attempt === 1) {
+          log(`[ClusterFilter] Breadth 5m fetch failed for batch on ${date}: ${e.message}`, "historical");
+        }
+      }
     }
-  });
+  }
 
-  return { count: qualifiers.length, qualifiers };
+  let aboveVWAPCount = 0;
+  let makingHODCount = 0;
+  let validCount = 0;
+
+  for (const ticker of sampled) {
+    const bars = allIntraday.get(ticker);
+    if (!bars || bars.length < 2) continue;
+
+    const firstHourBars = bars.filter((b) => {
+      const barTime = new Date(b.timestamp);
+      const totalMinUTC = barTime.getUTCHours() * 60 + barTime.getUTCMinutes();
+      return totalMinUTC >= 14 * 60 + 30 && totalMinUTC <= 15 * 60 + 30;
+    });
+
+    if (firstHourBars.length < 2) continue;
+    validCount++;
+
+    let cumVolPrice = 0;
+    let cumVol = 0;
+    let hodSoFar = -Infinity;
+    let priceAt1000 = 0;
+    let vwapAt1000 = 0;
+    let madeNewHODBy1030 = false;
+
+    for (const bar of firstHourBars) {
+      const barTime = new Date(bar.timestamp);
+      const totalMinUTC = barTime.getUTCHours() * 60 + barTime.getUTCMinutes();
+
+      const typicalPrice = (bar.high + bar.low + bar.close) / 3;
+      cumVolPrice += typicalPrice * bar.volume;
+      cumVol += bar.volume;
+
+      if (bar.high > hodSoFar) {
+        hodSoFar = bar.high;
+      }
+
+      if (totalMinUTC >= 14 * 60 + 30 + 30 && priceAt1000 === 0) {
+        priceAt1000 = bar.close;
+        vwapAt1000 = cumVol > 0 ? cumVolPrice / cumVol : 0;
+      }
+
+      if (totalMinUTC >= 14 * 60 + 30 + 30) {
+        if (bar.high >= hodSoFar) {
+          madeNewHODBy1030 = true;
+        }
+      }
+    }
+
+    if (priceAt1000 === 0 && firstHourBars.length > 0) {
+      const lastBar = firstHourBars[firstHourBars.length - 1];
+      priceAt1000 = lastBar.close;
+      vwapAt1000 = cumVol > 0 ? cumVolPrice / cumVol : 0;
+    }
+
+    if (priceAt1000 > 0 && vwapAt1000 > 0 && priceAt1000 > vwapAt1000) {
+      aboveVWAPCount++;
+    }
+
+    if (madeNewHODBy1030) {
+      makingHODCount++;
+    }
+  }
+
+  const percentAboveVWAP = validCount > 0 ? aboveVWAPCount / validCount : 0;
+  const percentMakingHOD = validCount > 0 ? makingHODCount / validCount : 0;
+
+  log(`[ClusterFilter] Breadth ${date}: ${validCount} valid stocks, aboveVWAP=${aboveVWAPCount}/${validCount} (${(percentAboveVWAP * 100).toFixed(1)}%), makingHOD=${makingHODCount}/${validCount} (${(percentMakingHOD * 100).toFixed(1)}%)`, "historical");
+
+  return { percentAboveVWAP, percentMakingHOD, universeSize: validCount };
 }
 
 function checkSpyVeto(
