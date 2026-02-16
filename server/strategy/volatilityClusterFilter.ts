@@ -78,6 +78,9 @@ export async function batchComputeClusterActivation(
   } else {
     universe = getBroadUniverse();
   }
+  if (!universe.includes("SPY")) {
+    universe.push("SPY");
+  }
 
   log(`[ClusterFilter] Fetching daily bars for ${universe.length} symbols, ${startDate} to ${endDate}`, "historical");
 
@@ -85,7 +88,9 @@ export async function batchComputeClusterActivation(
   paddedStart.setDate(paddedStart.getDate() - 30);
   const paddedStartStr = paddedStart.toISOString().split("T")[0];
 
-  const CHUNK_SIZE = 200;
+  const daySpan = Math.ceil((new Date(endDate).getTime() - new Date(paddedStartStr).getTime()) / (1000 * 60 * 60 * 24));
+  const CHUNK_SIZE = Math.min(200, Math.max(20, Math.floor(9500 / Math.max(daySpan, 30))));
+  log(`[ClusterFilter] Using chunk size ${CHUNK_SIZE} for ${daySpan} day span`, "historical");
   const allBars = new Map<string, DailyBar[]>();
 
   const chunks: string[][] = [];
@@ -114,7 +119,7 @@ export async function batchComputeClusterActivation(
   }
 
   const fetchTimeMs = Date.now() - startTime;
-  log(`[ClusterFilter] Fetch complete: ${allBars.size} symbols in ${(fetchTimeMs / 1000).toFixed(1)}s`, "historical");
+  log(`[ClusterFilter] Fetch complete: ${allBars.size} symbols in ${(fetchTimeMs / 1000).toFixed(1)}s. SPY: ${allBars.has("SPY") ? allBars.get("SPY")!.length + ' bars' : 'MISSING'}`, "historical");
 
   const computeStart = Date.now();
 
@@ -175,6 +180,18 @@ export async function batchComputeClusterActivation(
     let spyVeto = false;
     let spyRangeRatio = 0;
 
+    const spyBars = allBars.get("SPY");
+    if (spyBars && spyBars.length > 0) {
+      const spyIdx = spyBars.findIndex(b => b.date === date);
+      if (spyIdx >= 1) {
+        const spyToday = spyBars[spyIdx];
+        const spyAtr = computeAvgATR(spyBars, spyIdx - 1, 20);
+        if (spyAtr > 0) {
+          spyRangeRatio = (spyToday.high - spyToday.low) / spyAtr;
+        }
+      }
+    }
+
     if (gapCount >= cfg.gapCountThreshold) {
       const breadthResult = await computeFirstHourBreadth(date, breadthUniverse, allBars);
       percentAboveVWAP = breadthResult.percentAboveVWAP;
@@ -184,18 +201,6 @@ export async function batchComputeClusterActivation(
 
       if (cfg.spyVetoEnabled) {
         spyVeto = checkSpyVeto(date, allBars, cfg);
-      }
-      
-      const spyBars = allBars.get("SPY");
-      if (spyBars) {
-        const spyIdx = spyBars.findIndex(b => b.date === date);
-        if (spyIdx >= 0) {
-          const spyToday = spyBars[spyIdx];
-          const spyAtr = computeAvgATR(spyBars, spyIdx - 1, 20);
-          if (spyAtr > 0) {
-            spyRangeRatio = (spyToday.high - spyToday.low) / spyAtr;
-          }
-        }
       }
     }
 
@@ -348,10 +353,10 @@ async function computeFirstHourBreadth(
     let cumVolPrice = 0;
     let cumVol = 0;
     let hodSoFar = -Infinity;
+    let lodSoFar = Infinity;
     let priceAt1000 = 0;
     let vwapAt1000 = 0;
     let madeNewHODBy1030 = false;
-    let maxMove = 0;
 
     for (const bar of firstHourBars) {
       const barTime = new Date(bar.timestamp);
@@ -361,12 +366,8 @@ async function computeFirstHourBreadth(
       cumVolPrice += typicalPrice * bar.volume;
       cumVol += bar.volume;
 
-      if (bar.high > hodSoFar) {
-        hodSoFar = bar.high;
-      }
-      
-      const move = bar.high - openPrice;
-      if (move > maxMove) maxMove = move;
+      if (bar.high > hodSoFar) hodSoFar = bar.high;
+      if (bar.low < lodSoFar) lodSoFar = bar.low;
 
       if (totalMinUTC >= 14 * 60 + 30 + 30 && priceAt1000 === 0) {
         priceAt1000 = bar.close;
@@ -394,7 +395,8 @@ async function computeFirstHourBreadth(
       makingHODCount++;
     }
     
-    if (atr > 0 && maxMove > 1.5 * atr) {
+    const firstHourRange = hodSoFar - lodSoFar;
+    if (atr > 0 && firstHourRange > 0.75 * atr) {
       expandedCount++;
     }
   }

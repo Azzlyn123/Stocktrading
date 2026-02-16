@@ -1914,6 +1914,12 @@ export async function registerRoutes(
         percentAboveVWAP: number;
         percentMakingHOD: number;
         breadthUniverseSize: number;
+        vcs: number;
+        gapDensityScore: number;
+        breadthScore: number;
+        expansionScore: number;
+        spyRangeRatio: number;
+        percentExpanded: number;
         trades: number;
         tradeRs: number[];
         dayR: number;

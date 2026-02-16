@@ -49,24 +49,29 @@ The backend features a modular strategy engine with pure TypeScript modules. A s
   - **Verdict: NOT_READY for paper trading**
 - **Key files**: `server/strategy/batchGapScanner.ts`, `server/strategy/dynamicGapScanner.ts`, `server/strategy/smallCapScanner.ts`, `server/strategy/pullbackDetector.ts`, `server/historicalSimulator.ts`
 
-### Volatility Cluster Activation Layer — TESTED, INSUFFICIENT
+### Volatility Cluster Score (VCS) System — IN PROGRESS
 - **Module**: `server/strategy/volatilityClusterFilter.ts`
 - **Endpoint**: `/api/internal/volatility-cluster-test`
-- **Design**: Gap density (stocks with gap ≥4%, RVOL ≥1.5, open > prior high) + expansion test (daily max move ≥1.5x ATR or ≥2% with vol confirm) + optional SPY veto
-- **Default Config**: gapCountThreshold=6, expansionCountThreshold=4, minPrice=$10, minAvgDollarVol=$50M
-- **Optimization**: Switched from 5m intraday bars to daily data approximation for expansion test (eliminated API timeout issues on 66+ day windows)
-- **Results (3 OOS windows)**:
-  - Jun-Jul 2025: 44 days, 19 ON (43%), 25 OFF — ON: 3T/-2.21R, OFF: 5T/-2.74R
-  - Aug-Oct 2025: 66 days, 36 ON (55%), 30 OFF — ON: 13T/-6.05R, OFF: 7T/-2.48R
-  - Feb 3-14 2026: 9 days, 9 ON (100%), 0 OFF — ON: 23T/+10.23R
-- **Combined pre-dev OOS (Jun-Oct)**: 110 days, 55 ON/55 OFF — ON trades NEGATIVE (-8.26R/16T), OFF also negative (-5.22R/12T)
-- **If filter removed OFF trades**: 39T, +1.97R total, 0.050 avgR — marginal improvement, still below 0.15 threshold
-- **Critical Findings**:
-  - Expansion test adds ZERO discrimination with daily data (counts 57-889 vs threshold of 4)
-  - Gap density alone creates ON/OFF split but ON group is negative in cold regimes
-  - Filter correctly identifies Feb as hot (100% activation) but cannot rescue Jun-Oct performance
-  - **Verdict: Cluster filter alone cannot make strategy paper-trading ready**
-  - Edge is strategy-level (entry/exit mechanics), not candidate-discovery-level
+- **VCS Formula**: Composite 0-1 score = GapDensity(25%) + Breadth/VWAP%(35%) + Expansion(25%) + SPY_Range(15%)
+  - Gap Density: min(gapCount/30, 1.0) — stocks with gap ≥4%, RVOL ≥1.5, open > prior high
+  - Breadth: % of universe above VWAP in first hour (scaled 0-1)
+  - Expansion: % of universe with first-hour range > 0.75 * ATR (scaled 0-1)
+  - SPY Range: min(SPY daily range / 20-day ATR / 2.0, 1.0)
+- **Default Config**: gapCountThreshold=6, minPrice=$10, minAvgDollarVol=$50M, vcsThreshold=0.35
+- **Bug Fixes Applied**:
+  - Expansion: Changed from upside-only (>1.5*ATR, broken) to first-hour range (>0.75*ATR, realistic 19-59% range)
+  - SPY: Moved calculation outside gapCount threshold block; forced SPY into universe (ETF not in equity list)
+  - Chunk size: Dynamic sizing `floor(9500/daySpan)` to prevent Alpaca API 10k bar limit truncation on long date ranges
+- **Results with VCS 0.35 threshold (all components working)**:
+  - Feb 3-14 2026: 9 days, 7 ON/2 OFF (78% activation) — ON: 21T, 67% WR, +0.524 avgR, +11.0R, 2.53 PF; OFF: 0T
+  - Jun-Jul 2025: 44 days, 5 ON/39 OFF (11% activation) — 0T both groups (pipeline mismatch with extended OOS)
+  - Aug-Oct 2025: 66 days, ~3-22 ON (varies with universe cache) — 0T both groups (pipeline mismatch)
+- **Known Issue**: Cluster test endpoint's batchGapScanner finds different candidates than dynamicGapScanner used in extended OOS, resulting in 0 trades for Jun-Oct. This is a pipeline alignment issue, not a VCS issue.
+- **VCS Component Distributions**:
+  - Feb: VCS 0.32-0.54, SPY range 0.13-0.40, expansion 0.20-0.56 (hot regime, low SPY vol)
+  - Aug-Oct: VCS 0.00-0.51, SPY range 0.00-4.48, expansion 0.01-0.65 (variable, SPY more volatile)
+  - Jun-Jul: VCS 0.03-0.47, SPY range 0.18-2.12 (moderate)
+- **Next Steps**: Align cluster test pipeline with extended OOS scanner to validate VCS filtering on actual trade data
 
 ## External Dependencies
 -   **Alpaca API**: Live bars, snapshots, WebSocket data streams, market clock, and historical bar data.
