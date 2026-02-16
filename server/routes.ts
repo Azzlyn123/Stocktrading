@@ -1930,6 +1930,12 @@ export async function registerRoutes(
         const percentAboveVWAP = cluster?.percentAboveVWAP ?? 0;
         const percentMakingHOD = cluster?.percentMakingHOD ?? 0;
         const breadthUniverseSize = cluster?.breadthUniverseSize ?? 0;
+        const vcs = cluster?.vcs ?? 0;
+        const gapDensityScore = cluster?.gapDensityScore ?? 0;
+        const breadthScore = cluster?.breadthScore ?? 0;
+        const expansionScore = cluster?.expansionScore ?? 0;
+        const spyRangeRatio = cluster?.spyRangeRatio ?? 0;
+        const percentExpanded = cluster?.percentExpanded ?? 0;
 
         try {
           const dayGap = batchGapResults.get(date);
@@ -1941,7 +1947,11 @@ export async function registerRoutes(
           }
 
           if (tickersForDay.length === 0) {
-            dayResults.push({ date, regimeActive, gapCount, percentAboveVWAP, percentMakingHOD, breadthUniverseSize, trades: 0, tradeRs: [], dayR: 0, tradeTickers: [], tradeMFEs: [], tradeMAEs: [], tradeGapPcts: [] });
+            dayResults.push({ 
+              date, regimeActive, gapCount, percentAboveVWAP, percentMakingHOD, breadthUniverseSize, 
+              vcs, gapDensityScore, breadthScore, expansionScore, spyRangeRatio, percentExpanded,
+              trades: 0, tradeRs: [], dayR: 0, tradeTickers: [], tradeMFEs: [], tradeMAEs: [], tradeGapPcts: [] 
+            });
             continue;
           }
 
@@ -1951,121 +1961,129 @@ export async function registerRoutes(
             { dryRun: true, smallCapConfig: frozenConfig, pullbackConfig: basePbConfig, barsCache: sharedBarsCache },
           );
           const r = result as any;
-          const tradeRs = r.tradeRs as number[] ?? [];
-          const dayR = tradeRs.reduce((a: number, b: number) => a + b, 0);
+          const tRs = r.tradeRs as number[] ?? [];
+          const dR = tRs.reduce((a: number, b: number) => a + b, 0);
 
           dayResults.push({
             date, regimeActive, gapCount, percentAboveVWAP, percentMakingHOD, breadthUniverseSize,
-            trades: tradeRs.length, tradeRs, dayR,
+            vcs, gapDensityScore, breadthScore, expansionScore, spyRangeRatio, percentExpanded,
+            trades: tRs.length, tradeRs: tRs, dayR: dR,
             tradeTickers: r.tradeTickers ?? [],
             tradeMFEs: r.tradeMFEs ?? [],
             tradeMAEs: r.tradeMAEs ?? [],
             tradeGapPcts: r.tradeGapPcts ?? [],
           });
         } catch (err: any) {
-          dayResults.push({ date, regimeActive, gapCount, percentAboveVWAP, percentMakingHOD, breadthUniverseSize, trades: 0, tradeRs: [], dayR: 0, tradeTickers: [], tradeMFEs: [], tradeMAEs: [], tradeGapPcts: [] });
+          dayResults.push({ 
+            date, regimeActive, gapCount, percentAboveVWAP, percentMakingHOD, breadthUniverseSize, 
+            vcs, gapDensityScore, breadthScore, expansionScore, spyRangeRatio, percentExpanded,
+            trades: 0, tradeRs: [], dayR: 0, tradeTickers: [], tradeMFEs: [], tradeMAEs: [], tradeGapPcts: [] 
+          });
         }
       }
 
-      const computeGroupMetrics = (days: typeof dayResults) => {
-        const allTrades: Array<{ r: number; mfe: number; mae: number; gapPct: number; ticker: string; date: string }> = [];
-        for (const d of days) {
-          for (let i = 0; i < d.tradeRs.length; i++) {
-            allTrades.push({
-              r: d.tradeRs[i], mfe: d.tradeMFEs[i] ?? 0, mae: d.tradeMAEs[i] ?? 0,
-              gapPct: d.tradeGapPcts[i] ?? 0, ticker: d.tradeTickers[i] ?? "UNK", date: d.date,
+      const calculateStats = (logs: any[]) => {
+        const trades = logs.reduce((sum, d) => sum + d.trades, 0);
+        const totalR = logs.reduce((sum, d) => sum + d.dayR, 0);
+        
+        const allRs: number[] = [];
+        const allDetails: any[] = [];
+        logs.forEach(d => {
+          for (let i = 0; i < d.trades; i++) {
+            allRs.push(d.tradeRs[i]);
+            allDetails.push({
+              ticker: d.tradeTickers[i],
+              date: d.date,
+              r: d.tradeRs[i],
+              mfe: d.tradeMFEs[i],
+              gapPct: d.tradeGapPcts[i]
             });
           }
-        }
-        const allRs = allTrades.map(t => t.r);
-        const trades = allRs.length;
+        });
+
         const wins = allRs.filter(r => r > 0).length;
-        const totalR = allRs.reduce((a, b) => a + b, 0);
-        const avgR = trades > 0 ? totalR / trades : 0;
+        const losses = allRs.filter(r => r <= 0).length;
         const grossWinR = allRs.filter(r => r > 0).reduce((a, b) => a + b, 0);
         const grossLossR = allRs.filter(r => r < 0).reduce((a, b) => a + Math.abs(b), 0);
-        const profitFactor = grossLossR > 0 ? grossWinR / grossLossR : grossWinR > 0 ? Infinity : 0;
-        const sortedRs = [...allRs].sort((a, b) => a - b);
-        const medianR = sortedRs.length > 0 ? sortedRs[Math.floor(sortedRs.length / 2)] : 0;
-        const mfe2R = allTrades.filter(t => t.mfe >= 2.0).length;
+        const profitFactor = grossLossR > 0 ? grossWinR / grossLossR : Infinity;
+        const avgR = trades > 0 ? totalR / trades : 0;
+        
+        const sortedRs = [...allRs].sort((a,b) => a-b);
+        const medianR = sortedRs.length > 0 ? sortedRs[Math.floor(sortedRs.length/2)] : 0;
+        const mfe2RPct = trades > 0 ? (allDetails.filter(t => t.mfe >= 2.0).length / trades) * 100 : 0;
 
-        const rDist: Record<string, number> = {
+        const rDistribution: Record<string, number> = {
           "< -2R": 0, "-2R to -1.5R": 0, "-1.5R to -1R": 0, "-1R to -0.5R": 0,
           "-0.5R to 0": 0, "0 to 0.5R": 0, "0.5R to 1R": 0, "1R to 1.5R": 0,
           "1.5R to 2R": 0, "2R to 3R": 0, "> 3R": 0,
         };
-        for (const r of allRs) {
-          if (r < -2) rDist["< -2R"]++;
-          else if (r < -1.5) rDist["-2R to -1.5R"]++;
-          else if (r < -1) rDist["-1.5R to -1R"]++;
-          else if (r < -0.5) rDist["-1R to -0.5R"]++;
-          else if (r < 0) rDist["-0.5R to 0"]++;
-          else if (r < 0.5) rDist["0 to 0.5R"]++;
-          else if (r < 1) rDist["0.5R to 1R"]++;
-          else if (r < 1.5) rDist["1R to 1.5R"]++;
-          else if (r < 2) rDist["1.5R to 2R"]++;
-          else if (r < 3) rDist["2R to 3R"]++;
-          else rDist["> 3R"]++;
-        }
+        allRs.forEach(r => {
+          if (r < -2) rDistribution["< -2R"]++;
+          else if (r < -1.5) rDistribution["-2R to -1.5R"]++;
+          else if (r < -1) rDistribution["-1.5R to -1R"]++;
+          else if (r < -0.5) rDistribution["-1R to -0.5R"]++;
+          else if (r < 0) rDistribution["-0.5R to 0"]++;
+          else if (r < 0.5) rDistribution["0 to 0.5R"]++;
+          else if (r < 1) rDistribution["0.5R to 1R"]++;
+          else if (r < 1.5) rDistribution["1R to 1.5R"]++;
+          else if (r < 2) rDistribution["1.5R to 2R"]++;
+          else if (r < 3) rDistribution["2R to 3R"]++;
+          else rDistribution["> 3R"]++;
+        });
 
-        const dailyRs = days.map(d => d.dayR);
-        const daysWithTrades = days.filter(d => d.trades > 0).length;
+        const topWinners = [...allDetails].sort((a,b) => b.r - a.r).slice(0, 5);
+        const topLosers = [...allDetails].sort((a,b) => a.r - b.r).slice(0, 5);
 
         return {
-          tradingDays: days.length,
-          daysWithTrades,
-          trades, wins, losses: trades - wins,
-          winRate: trades > 0 ? Number((wins / trades * 100).toFixed(1)) : 0,
-          avgR: Number(avgR.toFixed(3)),
-          medianR: Number(medianR.toFixed(3)),
-          totalR: Number(totalR.toFixed(3)),
-          profitFactor: Number(profitFactor.toFixed(3)),
-          tradesPerDay: days.length > 0 ? Number((trades / days.length).toFixed(2)) : 0,
-          mfe2RPct: trades > 0 ? Number((mfe2R / trades * 100).toFixed(1)) : 0,
-          rDistribution: rDist,
-          topWinners: [...allTrades].sort((a, b) => b.r - a.r).slice(0, 5).map(t => ({
-            ticker: t.ticker, date: t.date, r: Number(t.r.toFixed(3)),
-            mfe: Number(t.mfe.toFixed(3)), gapPct: Number((t.gapPct * 100).toFixed(1)),
-          })),
-          topLosers: [...allTrades].sort((a, b) => a.r - b.r).slice(0, 5).map(t => ({
-            ticker: t.ticker, date: t.date, r: Number(t.r.toFixed(3)),
-            mfe: Number(t.mfe.toFixed(3)), gapPct: Number((t.gapPct * 100).toFixed(1)),
-          })),
+          tradingDays: logs.length,
+          daysWithTrades: logs.filter(d => d.trades > 0).length,
+          trades,
+          wins,
+          losses,
+          winRate: trades > 0 ? (wins / trades) * 100 : 0,
+          avgR,
+          medianR,
+          totalR,
+          profitFactor,
+          tradesPerDay: logs.length > 0 ? trades / logs.length : 0,
+          mfe2RPct,
+          rDistribution,
+          topWinners,
+          topLosers
         };
       };
 
-      const activeDays = dayResults.filter(d => d.regimeActive);
-      const offDays = dayResults.filter(d => !d.regimeActive);
+      const activeLogs = dayResults.filter(d => d.regimeActive);
+      const offLogs = dayResults.filter(d => !d.regimeActive);
 
-      const activeMetrics = computeGroupMetrics(activeDays);
-      const offMetrics = computeGroupMetrics(offDays);
-      const allMetrics = computeGroupMetrics(dayResults);
-
-      const dailyClusterLog = dayResults.map(d => ({
-        date: d.date,
-        regimeActive: d.regimeActive,
-        gapCount: d.gapCount,
-        vwapPct: Number((d.percentAboveVWAP * 100).toFixed(1)),
-        hodPct: Number((d.percentMakingHOD * 100).toFixed(1)),
-        breadthN: d.breadthUniverseSize,
-        trades: d.trades,
-        dayR: Number(d.dayR.toFixed(3)),
+      const dailyClusterLog = dayResults.map(res => ({
+        date: res.date,
+        regimeActive: res.regimeActive,
+        vcs: res.vcs,
+        gapDensityScore: res.gapDensityScore,
+        breadthScore: res.breadthScore,
+        expansionScore: res.expansionScore,
+        spyRangeRatio: res.spyRangeRatio,
+        gapCount: res.gapCount,
+        vwapPct: Number((res.percentAboveVWAP * 100).toFixed(1)),
+        hodPct: Number((res.percentMakingHOD * 100).toFixed(1)),
+        percentExpanded: Number((res.percentExpanded * 100).toFixed(1)),
+        breadthN: res.breadthUniverseSize,
+        trades: res.trades,
+        dayR: Number(res.dayR.toFixed(3))
       }));
 
-      const passActivation = activeMetrics.avgR >= 0.25 && activeMetrics.winRate >= 50;
-
       res.json({
-        strategy: "Volatility Cluster Activation Test",
+        strategy: "Volatility Cluster Activation Test (VCS)",
         window: { start: startDate, end: endDate, tradingDays: scanDates.length },
         clusterSummary: {
-          activeDays: activeDays.length,
-          offDays: offDays.length,
-          activationRate: Number((activeDays.length / scanDates.length * 100).toFixed(1)),
+          activeDays: activeLogs.length,
+          offDays: offLogs.length,
+          activationRate: activeLogs.length / scanDates.length,
         },
-        regimeActiveMetrics: activeMetrics,
-        regimeOffMetrics: offMetrics,
-        allDaysMetrics: allMetrics,
-        activationVerdict: passActivation ? "CLUSTER_VALID" : "CLUSTER_INSUFFICIENT",
+        regimeActiveMetrics: calculateStats(activeLogs),
+        regimeOffMetrics: calculateStats(offLogs),
+        unfilteredMetrics: calculateStats(dayResults),
         dailyLog: dailyClusterLog,
       });
     } catch (err: any) {

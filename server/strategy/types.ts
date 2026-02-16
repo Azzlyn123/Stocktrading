@@ -9,7 +9,7 @@ export interface Candle {
 
 export type TradeTier = "A" | "B" | "C";
 export type TradeDirection = "LONG" | "SHORT";
-export type SignalState = "IDLE" | "BREAKOUT_DETECTED" | "RETESTING" | "ENTRY_READY" | "IN_TRADE" | "DONE";
+export type SignalState = "IDLE" | "BREAKOUT" | "RETEST" | "TRIGGERED" | "MANAGED" | "CLOSED" | "ENTRY_READY";
 
 export interface TierConfig {
   volumeRatioMin: number;

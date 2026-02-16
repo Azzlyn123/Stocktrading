@@ -13,6 +13,7 @@ export interface ClusterConfig {
   gapCountThreshold: number;
   minPercentAboveVWAP: number;
   minPercentMakingHOD: number;
+  vcsThreshold: number;
   spyVetoEnabled: boolean;
   spyAtrVetoMultiple: number;
   useFullMarket: boolean;
@@ -27,6 +28,7 @@ export const DEFAULT_CLUSTER_CONFIG: ClusterConfig = {
   gapCountThreshold: 6,
   minPercentAboveVWAP: 0.65,
   minPercentMakingHOD: 0.40,
+  vcsThreshold: 0.7,
   spyVetoEnabled: false,
   spyAtrVetoMultiple: 0.8,
   useFullMarket: true,
@@ -35,9 +37,15 @@ export const DEFAULT_CLUSTER_CONFIG: ClusterConfig = {
 export interface DailyClusterResult {
   date: string;
   regimeActive: boolean;
+  vcs: number;
+  gapDensityScore: number;
+  breadthScore: number;
+  expansionScore: number;
+  spyRangeRatio: number;
   gapCount: number;
   percentAboveVWAP: number;
   percentMakingHOD: number;
+  percentExpanded: number;
   breadthUniverseSize: number;
   spyVeto: boolean;
   universeSize: number;
@@ -162,38 +170,63 @@ export async function batchComputeClusterActivation(
     const gapCount = gapQualifiers.length;
     let percentAboveVWAP = 0;
     let percentMakingHOD = 0;
+    let percentExpanded = 0;
     let breadthUniverseSize = 0;
     let spyVeto = false;
+    let spyRangeRatio = 0;
 
     if (gapCount >= cfg.gapCountThreshold) {
-      const breadthResult = await computeFirstHourBreadth(date, breadthUniverse);
+      const breadthResult = await computeFirstHourBreadth(date, breadthUniverse, allBars);
       percentAboveVWAP = breadthResult.percentAboveVWAP;
       percentMakingHOD = breadthResult.percentMakingHOD;
+      percentExpanded = breadthResult.percentExpanded;
       breadthUniverseSize = breadthResult.universeSize;
 
       if (cfg.spyVetoEnabled) {
         spyVeto = checkSpyVeto(date, allBars, cfg);
       }
+      
+      const spyBars = allBars.get("SPY");
+      if (spyBars) {
+        const spyIdx = spyBars.findIndex(b => b.date === date);
+        if (spyIdx >= 0) {
+          const spyToday = spyBars[spyIdx];
+          const spyAtr = computeAvgATR(spyBars, spyIdx - 1, 20);
+          if (spyAtr > 0) {
+            spyRangeRatio = (spyToday.high - spyToday.low) / spyAtr;
+          }
+        }
+      }
     }
 
-    const regimeActive = gapCount >= cfg.gapCountThreshold
-      && percentAboveVWAP >= cfg.minPercentAboveVWAP
-      && percentMakingHOD >= cfg.minPercentMakingHOD
-      && !spyVeto;
+    // VCS Calculation
+    const gapDensityScore = Math.min(gapCount / 30, 1.0);
+    const breadthScore = percentAboveVWAP; // VWAP% scaled 0-1
+    const expansionScore = percentExpanded; // % > 1.5 ATR scaled 0-1
+    const spyScore = Math.min(spyRangeRatio / 2.0, 1.0); // 1.0 at 2x ATR
+
+    const vcs = (gapDensityScore * 0.25) + (breadthScore * 0.35) + (expansionScore * 0.25) + (spyScore * 0.15);
+    const regimeActive = vcs >= cfg.vcsThreshold;
 
     dailyResults.set(date, {
       date,
       regimeActive,
+      vcs: Number(vcs.toFixed(3)),
+      gapDensityScore: Number(gapDensityScore.toFixed(3)),
+      breadthScore: Number(breadthScore.toFixed(3)),
+      expansionScore: Number(expansionScore.toFixed(3)),
+      spyRangeRatio: Number(spyRangeRatio.toFixed(3)),
       gapCount,
       percentAboveVWAP,
       percentMakingHOD,
+      percentExpanded,
       breadthUniverseSize,
       spyVeto,
       universeSize,
       gapQualifiers,
     });
 
-    log(`[ClusterFilter] ${date}: universe=${universeSize} gapCount=${gapCount} vwap%=${(percentAboveVWAP * 100).toFixed(1)} hod%=${(percentMakingHOD * 100).toFixed(1)} regime=${regimeActive ? "ON" : "OFF"}`, "historical");
+    log(`[ClusterFilter] ${date}: VCS=${vcs.toFixed(2)} [GD:${gapDensityScore.toFixed(2)} BR:${breadthScore.toFixed(2)} EX:${expansionScore.toFixed(2)} SPY:${spyScore.toFixed(2)}] regime=${regimeActive ? "ON" : "OFF"}`, "historical");
   }
 
   const computeTimeMs = Date.now() - computeStart;
@@ -250,14 +283,27 @@ function computeAvgATR(bars: DailyBar[], currentIdx: number, lookback: number): 
 async function computeFirstHourBreadth(
   date: string,
   liquidUniverse: string[],
-): Promise<{ percentAboveVWAP: number; percentMakingHOD: number; universeSize: number }> {
+  allDailyBars: Map<string, DailyBar[]>,
+): Promise<{ percentAboveVWAP: number; percentMakingHOD: number; percentExpanded: number; universeSize: number }> {
   if (liquidUniverse.length === 0) {
-    return { percentAboveVWAP: 0, percentMakingHOD: 0, universeSize: 0 };
+    return { percentAboveVWAP: 0, percentMakingHOD: 0, percentExpanded: 0, universeSize: 0 };
   }
 
   const sampleSize = Math.min(liquidUniverse.length, 200);
   const shuffled = [...liquidUniverse].sort(() => Math.random() - 0.5);
   const sampled = shuffled.slice(0, sampleSize);
+
+  // Pre-calculate ATRs for the sample to avoid repeated calculations in the loop
+  const atrMap = new Map<string, number>();
+  for (const ticker of sampled) {
+    const bars = allDailyBars.get(ticker);
+    if (bars) {
+      const idx = bars.findIndex(b => b.date === date);
+      if (idx >= 0) {
+        atrMap.set(ticker, computeAvgATR(bars, idx - 1, 20));
+      }
+    }
+  }
 
   log(`[ClusterFilter] Breadth ${date}: sampling ${sampled.length} of ${liquidUniverse.length} candidates for 5m bars`, "historical");
 
@@ -270,7 +316,6 @@ async function computeFirstHourBreadth(
       try {
         const barsMap = await fetchBarsForDate(batch, date, "5Min");
         barsMap.forEach((bars, sym) => allIntraday.set(sym, bars));
-        log(`[ClusterFilter] Breadth ${date}: fetched ${allIntraday.size}/${sampled.length} 5m symbols`, "historical");
         break;
       } catch (e: any) {
         if (attempt === 1) {
@@ -282,6 +327,7 @@ async function computeFirstHourBreadth(
 
   let aboveVWAPCount = 0;
   let makingHODCount = 0;
+  let expandedCount = 0;
   let validCount = 0;
 
   for (const ticker of sampled) {
@@ -297,12 +343,15 @@ async function computeFirstHourBreadth(
     if (firstHourBars.length < 2) continue;
     validCount++;
 
+    const atr = atrMap.get(ticker) || 0;
+    const openPrice = firstHourBars[0].open;
     let cumVolPrice = 0;
     let cumVol = 0;
     let hodSoFar = -Infinity;
     let priceAt1000 = 0;
     let vwapAt1000 = 0;
     let madeNewHODBy1030 = false;
+    let maxMove = 0;
 
     for (const bar of firstHourBars) {
       const barTime = new Date(bar.timestamp);
@@ -315,6 +364,9 @@ async function computeFirstHourBreadth(
       if (bar.high > hodSoFar) {
         hodSoFar = bar.high;
       }
+      
+      const move = bar.high - openPrice;
+      if (move > maxMove) maxMove = move;
 
       if (totalMinUTC >= 14 * 60 + 30 + 30 && priceAt1000 === 0) {
         priceAt1000 = bar.close;
@@ -341,14 +393,17 @@ async function computeFirstHourBreadth(
     if (madeNewHODBy1030) {
       makingHODCount++;
     }
+    
+    if (atr > 0 && maxMove > 1.5 * atr) {
+      expandedCount++;
+    }
   }
 
   const percentAboveVWAP = validCount > 0 ? aboveVWAPCount / validCount : 0;
   const percentMakingHOD = validCount > 0 ? makingHODCount / validCount : 0;
+  const percentExpanded = validCount > 0 ? expandedCount / validCount : 0;
 
-  log(`[ClusterFilter] Breadth ${date}: ${validCount} valid stocks, aboveVWAP=${aboveVWAPCount}/${validCount} (${(percentAboveVWAP * 100).toFixed(1)}%), makingHOD=${makingHODCount}/${validCount} (${(percentMakingHOD * 100).toFixed(1)}%)`, "historical");
-
-  return { percentAboveVWAP, percentMakingHOD, universeSize: validCount };
+  return { percentAboveVWAP, percentMakingHOD, percentExpanded, universeSize: validCount };
 }
 
 function checkSpyVeto(

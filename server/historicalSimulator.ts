@@ -1,4 +1,6 @@
-import type { IStorage } from "./storage";
+import { batchComputeClusterActivation } from "./strategy/volatilityClusterFilter";
+import { type IStorage } from "./storage";
+import { type SignalState } from "./strategy/types";
 import { log } from "./index";
 import {
   buildTieredConfigFromUser,
@@ -398,7 +400,7 @@ interface HistoricalTickerState {
   volume: number;
   bars5m: Candle[];
   bars15m: Candle[];
-  signalState: "IDLE" | "BREAKOUT" | "RETEST" | "TRIGGERED";
+  signalState: SignalState | null | undefined;
   resistanceLevel: number | null;
   breakoutCandle: Candle | null;
   retestBars: Candle[];
@@ -772,8 +774,21 @@ export async function runHistoricalSimulation(
     }> = [];
     const tradeTraces: TraceStep[] = [];
     const invariantViolations: InvariantViolation[] = [];
+    
+    // FETCH BARS FOR BREADTH UNIVERSE SAMPLING (for cluster result trades)
+    // SmallCap gapper universe normally uses backtest-specific logic, 
+    // but the cluster filter needs a pool of candidates to simulate trades on.
+    // For internal validation, we will scan the small-cap pool.
+    
+    const { dailyResults } = await batchComputeClusterActivation(simulationDate, simulationDate, { useFullMarket: false });
+    const clusterRes = dailyResults.get(simulationDate);
+    // Filter tickers to only those that pass the basic gap criteria in ClusterFilter
+    // but if none found, we use the provided list to avoid 0-trade days
+    const candidateTickers = clusterRes?.gapQualifiers && clusterRes.gapQualifiers.length > 0 
+      ? clusterRes.gapQualifiers 
+      : tickers;
 
-    for (const ticker of tickers) {
+    for (const ticker of candidateTickers) {
       if (control.cancel) {
         if (!isDryRun) {
           await storage.updateSimulationRun(runId, {
