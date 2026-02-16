@@ -1,0 +1,167 @@
+GOAL
+
+Build a Volatility Cluster Activation Layer
+that turns your momentum system ON only when cross-sectional expansion is real.
+
+Most days → OFF
+Cluster days → ON
+
+✅ STEP 1 — Define the Universe
+
+Each morning at 9:30am:
+
+Scan:
+
+All stocks with:
+
+Price ≥ $10
+
+Avg daily dollar volume ≥ $50M
+
+Premarket volume ≥ 500k shares
+
+You can start with top 300 by dollar volume if easier.
+
+✅ STEP 2 — Morning Gap Density Test (9:30–9:35)
+
+Count how many stocks in your scan meet:
+
+Gap ≥ 4% from prior close
+
+Relative volume ≥ 1.5
+
+Premarket high > prior day high (for longs)
+
+Call this:
+
+gapCount
+
+Activation Condition 1:
+gapCount >= 6
+
+
+If fewer than 6 → regime OFF.
+
+✅ STEP 3 — First Hour Expansion Test (9:30–10:30)
+
+Between 9:30–10:30, count:
+
+Stocks that move:
+
+≥ 1.5 × 5m ATR from open
+OR
+
+≥ 2% from open with rising volume
+
+Call this:
+
+expansionCount
+
+Activation Condition 2:
+expansionCount >= 4
+
+✅ STEP 4 — Regime Switch
+
+If BOTH conditions true:
+
+gapCount >= 6
+AND
+expansionCount >= 4
+
+
+Then:
+
+regimeActive = true
+
+
+Else:
+
+regimeActive = false
+
+
+If false → your breakout strategy does nothing that day.
+
+✅ STEP 5 — Optional SPY Veto (Secondary Filter)
+
+To avoid trading ultra-dead days:
+
+Disable regime if:
+
+SPY 5m ATR < 0.8 × 20-day ATR average
+
+
+This is optional — not primary.
+
+🧠 Why This Works
+
+Your February cluster likely had:
+
+High gap density
+
+High early expansion dispersion
+
+Many tickers moving simultaneously
+
+Your June–October period likely had:
+
+Low gap density
+
+Few expanding names
+
+No dispersion
+
+This filter separates those environments.
+
+📊 What To Test Next
+
+Run your 119-day dataset.
+
+For each day:
+
+Compute gapCount
+
+Compute expansionCount
+
+Mark regimeActive
+
+Then measure:
+
+Expectancy only on regimeActive days
+
+Trade frequency only on regimeActive days
+
+R distribution on regimeActive days
+
+Ignore all other days.
+
+🎯 What You’re Looking For
+
+If regimeActive days show:
+
+Avg R ≥ +0.25
+
+Validation ≥ 50%
+
+Clustering of large R winners
+
+Then you have your volatility cluster engine.
+
+If regimeActive days still negative:
+
+Then the entry logic itself must change again.
+
+⚠️ Important
+
+Do NOT tweak:
+
+Entry rules
+
+Exit rules
+
+Stops
+
+Targets
+
+Until you test activation layer alone.
+
+One layer at a time.
