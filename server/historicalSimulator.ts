@@ -458,6 +458,35 @@ interface HistoricalTickerState {
   } | null;
 }
 
+interface SizingResult {
+  shares: number;
+  dollarRisk: number;
+  isCapLimited: boolean;
+}
+
+function calculatePositionSize(
+  accountSize: number,
+  riskPct: number,
+  maxPositionPct: number,
+  entryPrice: number,
+  riskPerShare: number,
+): SizingResult {
+  const dollarRisk = accountSize * riskPct;
+  const sharesByRisk = Math.floor(dollarRisk / riskPerShare);
+  const maxPositionValue = accountSize * (maxPositionPct / 100);
+  const sharesByCap = Math.floor(maxPositionValue / entryPrice);
+
+  const finalShares = Math.max(0, Math.min(sharesByRisk, sharesByCap));
+  const isCapLimited = finalShares > 0 && sharesByCap < sharesByRisk;
+  const actualDollarRisk = finalShares * riskPerShare;
+
+  return {
+    shares: finalShares,
+    dollarRisk: actualDollarRisk,
+    isCapLimited,
+  };
+}
+
 const activeSimulations = new Map<string, { cancel: boolean }>();
 let autoRunState: {
   active: boolean;
@@ -6207,8 +6236,24 @@ export async function runSmallCapMomentumSimulation(
               continue;
             }
 
-            const dollarRisk = accountSize * scConfig.riskPct;
-            const shares = Math.max(1, Math.floor(dollarRisk / riskPerShare));
+            const sizing = calculatePositionSize(
+              accountSize,
+              scConfig.riskPct,
+              20, // Default for small cap or pull from config if available
+              entryPrice,
+              riskPerShare
+            );
+            const shares = sizing.shares;
+            const dollarRisk = sizing.dollarRisk;
+
+            if (shares <= 0) {
+              tickerTradeCount--;
+              continue;
+            }
+
+            if (sizing.isCapLimited) {
+              log(`[SmallCapSim] ${ticker} ENTRY CAP-LIMITED: reduced to ${shares}sh to respect 20% max position size`, "historical");
+            }
 
             activeTrade = {
               direction: "LONG",
