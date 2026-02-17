@@ -1897,12 +1897,30 @@ export async function runHistoricalSimulation(
               }
 
               if (riskPerShare > 0) {
-                const dollarRisk =
-                  accountSize * tieredConfig.tiers[state.selectedTier].riskPct;
-                const shares = Math.max(
-                  1,
-                  Math.floor(dollarRisk / riskPerShare),
+                const sizing = calculatePositionSize(
+                  accountSize,
+                  tieredConfig.tiers[state.selectedTier].riskPct,
+                  tieredConfig.risk.maxPositionPct,
+                  entryPrice,
+                  riskPerShare
                 );
+                const shares = sizing.shares;
+                const dollarRisk = sizing.dollarRisk;
+
+                if (shares <= 0) {
+                  log(`[HistSim] ${ticker} ENTRY CANCELLED: sizing resulted in 0 shares (cap limited or invalid risk)`, "historical");
+                  state.signalState = "IDLE";
+                  state.selectedTier = null;
+                  state.breakoutCandle = null;
+                  state.retestBars = [];
+                  processedBars++;
+                  continue;
+                }
+
+                if (sizing.isCapLimited) {
+                  log(`[HistSim] ${ticker} ENTRY CAP-LIMITED: reduced to ${shares}sh to respect ${tieredConfig.risk.maxPositionPct}% max position size`, "historical");
+                }
+
                 const target1 =
                   entryPrice +
                   riskPerShare * (tieredConfig.exits.partialAtR ?? 1.5);
@@ -3614,7 +3632,7 @@ export async function runReversionSimulation(
                 await storage.createSignal({
                   userId,
                   ticker,
-                  state: "ENTRY_READY",
+                  state: "TRIGGERED",
                   resistanceLevel: Number(overextResult.vwap.toFixed(2)),
                   currentPrice: Number(entryPrice.toFixed(2)),
                   breakoutPrice: Number(entryPrice.toFixed(2)),
