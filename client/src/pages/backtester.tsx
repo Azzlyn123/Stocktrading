@@ -1590,9 +1590,9 @@ export default function Backtester() {
                 id="auto-run-duration"
                 type="number"
                 min={1}
-                max={15}
+                max={60}
                 value={autoRunMinutes}
-                onChange={(e) => setAutoRunMinutes(Math.min(15, Math.max(1, Number(e.target.value) || 5)))}
+                onChange={(e) => setAutoRunMinutes(Math.min(60, Math.max(1, Number(e.target.value) || 5)))}
                 className="w-24"
                 disabled={isAutoRunActive}
                 data-testid="input-auto-run-duration"
@@ -1634,6 +1634,19 @@ export default function Backtester() {
                     <Play className="w-4 h-4 mr-2" />
                   )}
                   Run Last 5 Days
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => startAutoRun.mutate({ minutes: 60, exactDays: 100 })}
+                  disabled={startAutoRun.isPending || hasRunning}
+                  data-testid="button-run-100-days"
+                >
+                  {startAutoRun.isPending ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Target className="w-4 h-4 mr-2" />
+                  )}
+                  Run 100 Days
                 </Button>
               </>
             )}
