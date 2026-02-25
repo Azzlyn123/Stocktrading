@@ -753,9 +753,9 @@ function WalkForwardPanel() {
               id="wf-train-days"
               type="number"
               min={5}
-              max={200}
+              max={500}
               value={trainDays}
-              onChange={(e) => setTrainDays(Math.min(200, Math.max(5, Number(e.target.value) || 60)))}
+              onChange={(e) => setTrainDays(Number(e.target.value))}
               className="w-20"
               disabled={isActive}
               data-testid="input-wf-train-days"
@@ -767,9 +767,9 @@ function WalkForwardPanel() {
               id="wf-test-days"
               type="number"
               min={3}
-              max={60}
+              max={100}
               value={testDays}
-              onChange={(e) => setTestDays(Math.min(60, Math.max(3, Number(e.target.value) || 10)))}
+              onChange={(e) => setTestDays(Number(e.target.value))}
               className="w-20"
               disabled={isActive}
               data-testid="input-wf-test-days"
@@ -781,9 +781,9 @@ function WalkForwardPanel() {
               id="wf-windows"
               type="number"
               min={1}
-              max={10}
+              max={50}
               value={totalWindows}
-              onChange={(e) => setTotalWindows(Math.min(10, Math.max(1, Number(e.target.value) || 3)))}
+              onChange={(e) => setTotalWindows(Number(e.target.value))}
               className="w-20"
               disabled={isActive}
               data-testid="input-wf-windows"
