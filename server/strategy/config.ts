@@ -28,8 +28,8 @@ export const DEFAULT_TIERED_CONFIG: TieredStrategyConfig = {
   },
   tiers: {
     A: {
-      volumeRatioMin: 1.5,
-      atrRatioMin: 0.8,
+      volumeRatioMin: 1.8,
+      atrRatioMin: 1.2,
       tolerancePct: 0.002,
       maxClosesAgainstLevel: 2,
       retestTimeoutCandles: 10,
@@ -37,8 +37,8 @@ export const DEFAULT_TIERED_CONFIG: TieredStrategyConfig = {
       stopBufferPct: 0.002,
     },
     B: {
-      volumeRatioMin: 1.0,
-      atrRatioMin: 0.5,
+      volumeRatioMin: 1.5,
+      atrRatioMin: 0.8,
       tolerancePct: 0.002,
       maxClosesAgainstLevel: 3,
       retestTimeoutCandles: 14,
@@ -112,8 +112,8 @@ export const DEFAULT_STRATEGY_CONFIG: StrategyConfig = {
   scoring: {
     rvolThreshold: 2.0,
     breakoutVolumeThreshold: 2.0,
-    fullSizeMin: 80,
-    halfSizeMin: 65,
+    fullSizeMin: 85,
+    halfSizeMin: 70,
   },
   exits: {
     partialAtR: 1.0,

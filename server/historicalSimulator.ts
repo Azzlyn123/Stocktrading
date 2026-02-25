@@ -2039,7 +2039,7 @@ export async function runHistoricalSimulation(
                   );
                 }
 
-                const minScore = DEFAULT_STRATEGY_CONFIG.scoring.halfSizeMin;
+                const minScore = 70;
                 if (score < minScore) {
                   log(
                     `[HistSim] ${ticker} SKIPPED entry - score ${score} below threshold ${minScore} after learning penalty`,
