@@ -31,6 +31,9 @@ import {
   Activity,
   Layers,
   Trash2,
+  Download,
+  Tag,
+  Gauge,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -1105,10 +1108,184 @@ function LoadingSkeleton() {
   );
 }
 
-function ResetSimulationButton() {
+interface CoreMetrics {
+  totalTrades: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  avgWinR: number;
+  avgLossR: number;
+  expectancyR: number;
+  maxDrawdownR: number;
+  tradesPerDay: number;
+  distinctDays: number;
+}
+
+function CoreMetricsPanel({ strategyVersion }: { strategyVersion: string }) {
+  const { data: metrics } = useQuery<CoreMetrics>({
+    queryKey: ["/api/simulations/core-metrics", strategyVersion],
+    queryFn: async () => {
+      const res = await fetch(`/api/simulations/core-metrics?version=${encodeURIComponent(strategyVersion)}`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to fetch metrics");
+      return res.json();
+    },
+    refetchInterval: 10000,
+  });
+
+  if (!metrics || metrics.totalTrades === 0) {
+    return (
+      <Card className="border-primary/20" data-testid="card-core-metrics">
+        <CardContent className="p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <Gauge className="w-4 h-4 text-primary" />
+            <h3 className="text-sm font-medium">Strategy Scorecard</h3>
+            <Badge variant="outline" className="text-[10px] px-1.5 min-h-5 ml-auto">
+              <Tag className="w-3 h-3 mr-1" />
+              {strategyVersion}
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            No trades recorded for this strategy version yet. Run simulations to start tracking metrics.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const minTarget = 50;
+  const fullTarget = 100;
+  const samplePct = Math.min((metrics.totalTrades / minTarget) * 100, 100);
+  const fullPct = Math.min((metrics.totalTrades / fullTarget) * 100, 100);
+  const expectancyOk = metrics.expectancyR >= 0.15;
+  const winRateOk = metrics.winRate >= 40;
+
+  return (
+    <Card className="border-primary/20" data-testid="card-core-metrics">
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Gauge className="w-4 h-4 text-primary" />
+          <h3 className="text-sm font-medium">Strategy Scorecard</h3>
+          <Badge variant="outline" className="text-[10px] px-1.5 min-h-5 ml-auto">
+            <Tag className="w-3 h-3 mr-1" />
+            {strategyVersion}
+          </Badge>
+        </div>
+
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+          <div className="text-center" data-testid="metric-win-rate">
+            <p className="text-[10px] text-muted-foreground">Win Rate</p>
+            <p className={`text-sm font-semibold ${winRateOk ? "text-emerald-500" : "text-red-500"}`}>
+              {metrics.winRate.toFixed(1)}%
+            </p>
+          </div>
+          <div className="text-center" data-testid="metric-avg-win">
+            <p className="text-[10px] text-muted-foreground">Avg Win</p>
+            <p className="text-sm font-semibold text-emerald-500">
+              +{metrics.avgWinR.toFixed(2)}R
+            </p>
+          </div>
+          <div className="text-center" data-testid="metric-avg-loss">
+            <p className="text-[10px] text-muted-foreground">Avg Loss</p>
+            <p className="text-sm font-semibold text-red-500">
+              {metrics.avgLossR.toFixed(2)}R
+            </p>
+          </div>
+          <div className="text-center" data-testid="metric-expectancy">
+            <p className="text-[10px] text-muted-foreground">Expectancy</p>
+            <p className={`text-sm font-semibold ${expectancyOk ? "text-emerald-500" : "text-red-500"}`}>
+              {metrics.expectancyR > 0 ? "+" : ""}{metrics.expectancyR.toFixed(3)}R
+            </p>
+          </div>
+          <div className="text-center" data-testid="metric-max-dd">
+            <p className="text-[10px] text-muted-foreground">Max DD</p>
+            <p className="text-sm font-semibold text-red-500">
+              -{metrics.maxDrawdownR.toFixed(2)}R
+            </p>
+          </div>
+          <div className="text-center" data-testid="metric-trades-per-day">
+            <p className="text-[10px] text-muted-foreground">Trades/Day</p>
+            <p className="text-sm font-semibold">
+              {metrics.tradesPerDay.toFixed(1)}
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-[10px]">
+            <span className="text-muted-foreground">
+              Sample: {metrics.totalTrades}/{minTarget} trades
+              {metrics.totalTrades < minTarget && ` (need ${minTarget - metrics.totalTrades} more)`}
+            </span>
+            <span className={`font-medium ${metrics.totalTrades >= minTarget ? "text-emerald-500" : "text-amber-500"}`}>
+              {metrics.totalTrades >= minTarget ? "Minimum met" : "Building sample"}
+            </span>
+          </div>
+          <div className="w-full h-1.5 bg-accent rounded-full overflow-hidden">
+            <div
+              className={`h-full transition-all duration-300 rounded-full ${metrics.totalTrades >= minTarget ? "bg-emerald-500" : "bg-amber-500"}`}
+              style={{ width: `${samplePct}%` }}
+            />
+          </div>
+          {metrics.totalTrades >= minTarget && (
+            <div className="flex items-center justify-between text-[10px]">
+              <span className="text-muted-foreground">
+                Full confidence: {metrics.totalTrades}/{fullTarget}
+              </span>
+              <span className={`font-medium ${metrics.totalTrades >= fullTarget ? "text-emerald-500" : "text-muted-foreground"}`}>
+                {Math.round(fullPct)}%
+              </span>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+          <span>{metrics.distinctDays} days simulated</span>
+          <span>|</span>
+          <span>{metrics.wins}W / {metrics.losses}L</span>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ResetSimulationButton({ currentVersion, onVersionChange }: { currentVersion: string; onVersionChange: (v: string) => void }) {
+  const [archiveLabel, setArchiveLabel] = useState(currentVersion);
+  const [newVersion, setNewVersion] = useState("");
+  const [step, setStep] = useState<"confirm" | "archiving" | "archived">("confirm");
+
   const { toast } = useToast();
+
+  const archiveMutation = useMutation({
+    mutationFn: async (label: string) => {
+      const res = await apiRequest("POST", "/api/simulations/archive", { label });
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `breakoutiq-archive-${archiveLabel}-${new Date().toISOString().split("T")[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setStep("archived");
+      toast({
+        title: "Archive downloaded",
+        description: `Exported ${data.counts.simulationRuns} runs, ${data.counts.paperTrades} trades, ${data.counts.tradeLessons} lessons.`,
+      });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Archive failed", description: err.message, variant: "destructive" });
+    },
+  });
+
   const resetMutation = useMutation({
     mutationFn: async () => {
+      if (newVersion) {
+        await apiRequest("PATCH", "/api/user/settings", { currentStrategyVersion: newVersion });
+      }
       const res = await apiRequest("POST", "/api/simulations/reset");
       return res.json();
     },
@@ -1121,11 +1298,16 @@ function ResetSimulationButton() {
       queryClient.invalidateQueries({ queryKey: ["/api/lessons"] });
       queryClient.invalidateQueries({ queryKey: ["/api/lessons/insights"] });
       queryClient.invalidateQueries({ queryKey: ["/api/walk-forward/results"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/simulations/core-metrics"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/user"] });
+      if (newVersion) onVersionChange(newVersion);
       const d = data.deleted;
       toast({
-        title: "Simulation Data Reset",
-        description: `Cleared ${d.simulationRuns} runs, ${d.trades} trades, ${d.lessons} lessons, ${d.signals} signals, ${d.alerts} alerts, ${d.summaries} summaries.`,
+        title: "Reset Complete",
+        description: `Cleared ${d.simulationRuns} runs, ${d.trades} trades. ${newVersion ? `Now tracking as ${newVersion}.` : ""}`,
       });
+      setStep("confirm");
+      setNewVersion("");
     },
     onError: (err: Error) => {
       toast({ title: "Reset failed", description: err.message, variant: "destructive" });
@@ -1133,35 +1315,94 @@ function ResetSimulationButton() {
   });
 
   return (
-    <AlertDialog>
+    <AlertDialog onOpenChange={(open) => { if (!open) { setStep("confirm"); setNewVersion(""); } }}>
       <AlertDialogTrigger asChild>
         <Button variant="outline" size="sm" data-testid="button-reset-simulation">
           <Trash2 className="w-4 h-4 mr-2" />
-          Reset All Data
+          Archive & Reset
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Reset all simulation data?</AlertDialogTitle>
+          <AlertDialogTitle>
+            {step === "confirm" && "Archive & Reset Simulation Data"}
+            {step === "archiving" && "Downloading Archive..."}
+            {step === "archived" && "Archive Complete — Ready to Reset"}
+          </AlertDialogTitle>
           <AlertDialogDescription>
-            This will permanently delete all simulation runs, paper trades, trade lessons, signals, alerts, and daily summaries. Your account settings and watchlist will be preserved. This action cannot be undone.
+            {step === "confirm" && "First, download an archive of all existing data. Then reset and optionally start a new strategy version."}
+            {step === "archiving" && "Your archive is being prepared for download."}
+            {step === "archived" && "Your data has been archived. Set a new version label and confirm the reset."}
           </AlertDialogDescription>
         </AlertDialogHeader>
+
+        {step === "confirm" && (
+          <div className="space-y-3 py-2">
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">Archive label</label>
+              <Input
+                value={archiveLabel}
+                onChange={(e) => setArchiveLabel(e.target.value)}
+                placeholder="e.g. v1-old-rules"
+                data-testid="input-archive-label"
+              />
+            </div>
+          </div>
+        )}
+
+        {step === "archived" && (
+          <div className="space-y-3 py-2">
+            <div className="flex items-center gap-2 text-xs text-emerald-500 bg-emerald-500/10 rounded-md px-3 py-2">
+              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+              <span>Archive downloaded successfully</span>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">New strategy version label</label>
+              <Input
+                value={newVersion}
+                onChange={(e) => setNewVersion(e.target.value)}
+                placeholder="e.g. v2"
+                data-testid="input-new-version"
+              />
+              <p className="text-[10px] text-muted-foreground">Leave empty to keep the current version ({currentVersion})</p>
+            </div>
+          </div>
+        )}
+
         <AlertDialogFooter>
           <AlertDialogCancel data-testid="button-cancel-reset">Cancel</AlertDialogCancel>
-          <AlertDialogAction
-            onClick={() => resetMutation.mutate()}
-            className="bg-destructive text-destructive-foreground"
-            disabled={resetMutation.isPending}
-            data-testid="button-confirm-reset"
-          >
-            {resetMutation.isPending ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <Trash2 className="w-4 h-4 mr-2" />
-            )}
-            Reset Everything
-          </AlertDialogAction>
+          {step === "confirm" && (
+            <Button
+              onClick={() => {
+                setStep("archiving");
+                archiveMutation.mutate(archiveLabel);
+              }}
+              disabled={archiveMutation.isPending}
+              data-testid="button-download-archive"
+            >
+              {archiveMutation.isPending ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Download className="w-4 h-4 mr-2" />
+              )}
+              Download Archive
+            </Button>
+          )}
+          {step === "archived" && (
+            <AlertDialogAction
+              onClick={() => resetMutation.mutate()}
+              className="bg-destructive text-destructive-foreground"
+              disabled={resetMutation.isPending}
+              data-testid="button-confirm-reset"
+            >
+              {resetMutation.isPending ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Trash2 className="w-4 h-4 mr-2" />
+              )}
+              Reset & Start {newVersion || currentVersion}
+            </AlertDialogAction>
+          )}
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -1179,8 +1420,15 @@ export default function Backtester() {
   });
 
   const [autoRunMinutes, setAutoRunMinutes] = useState(5);
+  const [strategyVersion, setStrategyVersion] = useState("v1");
 
   const { toast } = useToast();
+
+  const { data: userData } = useQuery<any>({
+    queryKey: ["/api/user"],
+  });
+
+  const currentVersion = userData?.currentStrategyVersion ?? strategyVersion;
 
   const { data: runs, isLoading } = useQuery<SimulationRun[]>({
     queryKey: ["/api/simulations"],
@@ -1287,8 +1535,13 @@ export default function Backtester() {
             Replay past trading days to train the AI learning system
           </p>
         </div>
-        <ResetSimulationButton />
+        <ResetSimulationButton
+          currentVersion={currentVersion}
+          onVersionChange={(v) => setStrategyVersion(v)}
+        />
       </div>
+
+      <CoreMetricsPanel strategyVersion={currentVersion} />
 
       <Card data-testid="card-auto-run-controls" className="border-primary/20">
         <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2 p-4">

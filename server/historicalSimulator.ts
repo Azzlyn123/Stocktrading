@@ -613,11 +613,13 @@ async function runAutoRunLoop(userId: string, storage: IStorage) {
       "historical",
     );
 
+    const user = await storage.getUser(userId);
     const run = await storage.createSimulationRun({
       userId,
       simulationDate: date,
       status: "pending",
       tickers: null,
+      strategyVersion: user?.currentStrategyVersion ?? "v1",
     });
 
     await runHistoricalSimulation(run.id, date, userId, storage);

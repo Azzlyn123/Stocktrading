@@ -73,6 +73,7 @@ export const users = pgTable("users", {
   scoreHalfSizeMin: integer("score_half_size_min").default(65),
   riskMode: text("risk_mode").default("balanced"), 
   powerSetupEnabled: boolean("power_setup_enabled").default(true),
+  currentStrategyVersion: text("current_strategy_version").default("v1"),
 });
 
 export const watchlistItems = pgTable("watchlist_items", {
@@ -247,6 +248,7 @@ export const simulationRuns = pgTable("simulation_runs", {
   breakdown: jsonb("breakdown").default({}),
   skippedSetups: jsonb("skipped_setups").default([]),
   errorMessage: text("error_message"),
+  strategyVersion: text("strategy_version"),
   startedAt: timestamp("started_at").defaultNow(),
   completedAt: timestamp("completed_at"),
 });
@@ -344,6 +346,7 @@ export const settingsUpdateSchema = z.object({
   scoreHalfSizeMin: z.number().min(30).max(90).optional(),
   riskMode: z.enum(["conservative", "balanced", "aggressive"]).optional(),
   powerSetupEnabled: z.boolean().optional(),
+  currentStrategyVersion: z.string().min(1).max(50).optional(),
 });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;

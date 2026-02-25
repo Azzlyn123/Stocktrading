@@ -274,7 +274,8 @@ export async function registerRoutes(
   });
 
   app.post("/api/simulations", requireAuth, async (req, res) => {
-    const userId = (req.user as User).id;
+    const user = req.user as User;
+    const userId = user.id;
     const { simulationDate, tickers } = req.body;
 
     if (!simulationDate || typeof simulationDate !== "string") {
@@ -297,6 +298,7 @@ export async function registerRoutes(
       simulationDate,
       status: "pending",
       tickers: tickers ?? null,
+      strategyVersion: user.currentStrategyVersion ?? "v1",
     });
 
     runHistoricalSimulation(
@@ -313,7 +315,8 @@ export async function registerRoutes(
   });
 
   app.post("/api/simulations/reversion", requireAuth, async (req, res) => {
-    const userId = (req.user as User).id;
+    const user = req.user as User;
+    const userId = user.id;
     const { simulationDate, tickers, reversionConfig } = req.body;
 
     if (!simulationDate || typeof simulationDate !== "string") {
@@ -336,6 +339,7 @@ export async function registerRoutes(
       simulationDate,
       status: "pending",
       tickers: tickers ?? null,
+      strategyVersion: user.currentStrategyVersion ?? "v1",
     });
 
     runReversionSimulation(
@@ -445,6 +449,36 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/simulations/archive", requireAuth, async (req, res) => {
+    try {
+      const { label } = req.body;
+      const data = await storage.getArchiveData();
+      res.json({
+        label: label || "unlabeled",
+        exportedAt: new Date().toISOString(),
+        counts: {
+          simulationRuns: data.simulationRuns.length,
+          paperTrades: data.paperTrades.length,
+          dailySummaries: data.dailySummaries.length,
+          tradeLessons: data.tradeLessons.length,
+        },
+        ...data,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to export archive" });
+    }
+  });
+
+  app.get("/api/simulations/core-metrics", requireAuth, async (req, res) => {
+    try {
+      const version = req.query.version as string | undefined;
+      const metrics = await storage.getCoreMetrics(version || undefined);
+      res.json(metrics);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to compute metrics" });
+    }
+  });
+
   // Data source status
   app.get("/api/data-source", requireAuth, (_req, res) => {
     res.json({
@@ -509,7 +543,8 @@ export async function registerRoutes(
   });
 
   app.post("/api/simulations/orf", requireAuth, async (req, res) => {
-    const userId = (req.user as User).id;
+    const user = req.user as User;
+    const userId = user.id;
     const { simulationDate, tickers, orfConfig } = req.body;
 
     if (!simulationDate || typeof simulationDate !== "string") {
@@ -532,6 +567,7 @@ export async function registerRoutes(
       simulationDate,
       status: "pending",
       tickers: tickers ?? null,
+      strategyVersion: user.currentStrategyVersion ?? "v1",
     });
 
     runORFSimulation(

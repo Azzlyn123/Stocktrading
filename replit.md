@@ -26,6 +26,8 @@ The backend features a modular strategy engine with pure TypeScript modules. A s
 -   **Strategy Modules**: Includes a VWAP Reversion Strategy Module and infrastructure for developing additional strategies.
 -   **Dynamic Market Scanning Infrastructure**: Efficiently scans entire equity markets (e.g., 11,210 symbols) using batch API calls and local gap computation for full-market backtesting.
 -   **Trade Logging System**: Comprehensive per-trade audit trail capturing entry/exit timestamps, prices, stop-loss, targets, sizing, R-multiples, PnL, MFE/MAE, exit reasons, and strategy context. Integrated into breakout/retest and small-cap simulators.
+-   **Strategy Versioning & Archive System**: Each simulation run is tagged with a `strategyVersion` (stored in `simulation_runs.strategy_version`). Users set their active version via `users.current_strategy_version` (default "v1"). Before resetting data, the Archive & Reset flow exports all runs/trades/lessons/summaries as a downloadable JSON bundle with a version label. The Core 6 Metrics Scorecard (`CoreMetricsPanel`) aggregates win rate, avg win R, avg loss R, expectancy R/trade, max drawdown R, and trades/day from DB trades filtered by version, with sample size progress bars (50 minimum, 100 full confidence).
+-   **Key endpoints**: `POST /api/simulations/archive` (export data with label), `GET /api/simulations/core-metrics?version=v2` (compute 6 metrics), `GET /api/internal/trade-log` and `/trade-log/csv` (in-memory session trade log).
 -   **UI/UX**: Dashboard, scanner, watchlist, signals feed, trades log, and settings with a default dark theme.
 
 ## Strategy Validation Results

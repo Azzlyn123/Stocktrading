@@ -82,6 +82,20 @@ export interface IStorage {
   createSimulationRun(run: InsertSimulationRun): Promise<SimulationRun>;
   updateSimulationRun(id: string, updates: Partial<SimulationRun>): Promise<SimulationRun | undefined>;
   resetAllSimulationData(): Promise<{ simulationRuns: number; trades: number; lessons: number; signals: number; alerts: number; summaries: number }>;
+  getArchiveData(): Promise<{ simulationRuns: SimulationRun[]; paperTrades: PaperTrade[]; dailySummaries: DailySummary[]; tradeLessons: TradeLesson[] }>;
+  getCoreMetrics(version?: string): Promise<{
+    totalTrades: number;
+    wins: number;
+    losses: number;
+    winRate: number;
+    avgWinR: number;
+    avgLossR: number;
+    expectancyR: number;
+    maxDrawdownR: number;
+    tradesPerDay: number;
+    distinctDays: number;
+    rValues: number[];
+  }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -368,6 +382,88 @@ export class DatabaseStorage implements IStorage {
       signals: signalRows.length,
       alerts: alertRows.length,
       summaries: summaryRows.length,
+    };
+  }
+
+  async getArchiveData(): Promise<{ simulationRuns: SimulationRun[]; paperTrades: PaperTrade[]; dailySummaries: DailySummary[]; tradeLessons: TradeLesson[] }> {
+    const allRuns = await db.select().from(simulationRuns).orderBy(desc(simulationRuns.startedAt));
+    const allTrades = await db.select().from(paperTrades).orderBy(desc(paperTrades.enteredAt));
+    const allSummaries = await db.select().from(dailySummaries).orderBy(desc(dailySummaries.date));
+    const allLessons = await db.select().from(tradeLessons).orderBy(desc(tradeLessons.createdAt));
+    return { simulationRuns: allRuns, paperTrades: allTrades, dailySummaries: allSummaries, tradeLessons: allLessons };
+  }
+
+  async getCoreMetrics(version?: string): Promise<{
+    totalTrades: number;
+    wins: number;
+    losses: number;
+    winRate: number;
+    avgWinR: number;
+    avgLossR: number;
+    expectancyR: number;
+    maxDrawdownR: number;
+    tradesPerDay: number;
+    distinctDays: number;
+    rValues: number[];
+  }> {
+    let runs: SimulationRun[];
+    if (version) {
+      runs = await db.select().from(simulationRuns)
+        .where(and(eq(simulationRuns.status, "completed"), eq(simulationRuns.strategyVersion, version)));
+    } else {
+      runs = await db.select().from(simulationRuns)
+        .where(eq(simulationRuns.status, "completed"));
+    }
+
+    const runIds = new Set(runs.map(r => r.id));
+    const allTrades = await db.select().from(paperTrades)
+      .where(eq(paperTrades.status, "closed"));
+
+    const trades = allTrades.filter(t => t.simulationRunId && runIds.has(t.simulationRunId));
+
+    const totalTrades = trades.length;
+    if (totalTrades === 0) {
+      return { totalTrades: 0, wins: 0, losses: 0, winRate: 0, avgWinR: 0, avgLossR: 0, expectancyR: 0, maxDrawdownR: 0, tradesPerDay: 0, distinctDays: 0, rValues: [] };
+    }
+
+    const rValues = trades.map(t => t.realizedR ?? t.rMultiple ?? 0);
+    const winTrades = trades.filter(t => (t.pnl ?? 0) > 0);
+    const lossTrades = trades.filter(t => (t.pnl ?? 0) <= 0);
+    const wins = winTrades.length;
+    const losses = lossTrades.length;
+    const winRate = (wins / totalTrades) * 100;
+
+    const winRs = winTrades.map(t => t.realizedR ?? t.rMultiple ?? 0);
+    const lossRs = lossTrades.map(t => t.realizedR ?? t.rMultiple ?? 0);
+    const avgWinR = winRs.length > 0 ? winRs.reduce((a, b) => a + b, 0) / winRs.length : 0;
+    const avgLossR = lossRs.length > 0 ? lossRs.reduce((a, b) => a + b, 0) / lossRs.length : 0;
+    const expectancyR = rValues.reduce((a, b) => a + b, 0) / totalTrades;
+
+    let peak = 0;
+    let cumR = 0;
+    let maxDD = 0;
+    for (const r of rValues) {
+      cumR += r;
+      if (cumR > peak) peak = cumR;
+      const dd = peak - cumR;
+      if (dd > maxDD) maxDD = dd;
+    }
+
+    const distinctDays = new Set(runs.map(r => r.simulationDate)).size;
+    const tradesPerDay = distinctDays > 0 ? totalTrades / distinctDays : 0;
+
+    return {
+      totalTrades,
+      wins,
+      losses,
+      winRate: Math.round(winRate * 10) / 10,
+      avgWinR: Math.round(avgWinR * 1000) / 1000,
+      avgLossR: Math.round(avgLossR * 1000) / 1000,
+      expectancyR: Math.round(expectancyR * 1000) / 1000,
+      maxDrawdownR: Math.round(maxDD * 1000) / 1000,
+      tradesPerDay: Math.round(tradesPerDay * 10) / 10,
+      distinctDays,
+      rValues,
     };
   }
 }
