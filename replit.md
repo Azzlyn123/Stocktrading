@@ -25,6 +25,7 @@ The backend features a modular strategy engine with pure TypeScript modules. A s
 -   **Historical Simulation Engine**: Replays past trading days for backtesting.
 -   **Strategy Modules**: Includes a VWAP Reversion Strategy Module and infrastructure for developing additional strategies.
 -   **Dynamic Market Scanning Infrastructure**: Efficiently scans entire equity markets (e.g., 11,210 symbols) using batch API calls and local gap computation for full-market backtesting.
+-   **Trade Logging System**: Comprehensive per-trade audit trail capturing entry/exit timestamps, prices, stop-loss, targets, sizing, R-multiples, PnL, MFE/MAE, exit reasons, and strategy context. Integrated into breakout/retest and small-cap simulators.
 -   **UI/UX**: Dashboard, scanner, watchlist, signals feed, trades log, and settings with a default dark theme.
 
 ## Strategy Validation Results

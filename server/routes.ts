@@ -16,6 +16,7 @@ import { DEFAULT_SMALLCAP_CONFIG } from "./strategy/smallCapScanner";
 import { DEFAULT_PULLBACK_CONFIG } from "./strategy/pullbackDetector";
 import { SMALLCAP_SCAN_TICKERS, buildScanDatesRange } from "./strategy/smallCapUniverse";
 import { fetchMultiDayDailyBars, fetchForwardDailyBars } from "./alpaca";
+import { getTradeLog, getTradeLogCSV } from "./analytics/tradeLogger";
 
 declare global {
   namespace Express {
@@ -2364,6 +2365,24 @@ export async function registerRoutes(
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  app.get("/api/internal/trade-log", (_req, res) => {
+    const strategy = _req.query.strategy as string | undefined;
+    const entries = getTradeLog(strategy);
+    res.json({
+      count: entries.length,
+      strategy: strategy || "all",
+      entries,
+    });
+  });
+
+  app.get("/api/internal/trade-log/csv", (_req, res) => {
+    const strategy = _req.query.strategy as string | undefined;
+    const csv = getTradeLogCSV(strategy);
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", "attachment; filename=trade_log.csv");
+    res.send(csv);
   });
 
   // Start simulated market data feed

@@ -30,6 +30,7 @@ import {
 } from "./alpaca";
 import type { TradeRecord, ExitReasonType } from "./analytics/tradeAnalytics";
 import { addTrade } from "./analytics/tradeStore";
+import { logTradeEntry, logTradeExit, resetTradeLog, flushOpenEntries } from "./analytics/tradeLogger";
 import {
   type SmallCapConfig,
   type SmallCapQualification,
@@ -685,6 +686,8 @@ export async function runHistoricalSimulation(
   }
 
   try {
+    resetTradeLog();
+
     if (!isDryRun) {
       await storage.updateSimulationRun(runId, { status: "running", tickers });
     }
@@ -1182,6 +1185,21 @@ export async function runHistoricalSimulation(
               },
             ));
 
+            logTradeExit({
+              id: `${ticker}-${simulationDate}-${trade.entryBarIndex}`,
+              symbol: ticker,
+              exitTimestamp: bar.timestamp,
+              exitPrice,
+              exitReason,
+              rMultiple: totalR,
+              pnlDollars: pnl,
+              mfeR: trade.mfeR,
+              maeR: trade.maeR,
+              isPartiallyExited: trade.isPartiallyExited,
+              partialExitPrice: trade.partialExitPrice ?? undefined,
+              partialShares: trade.partialExitShares ?? undefined,
+            });
+
             if (!isDryRun) {
               const tradeRecord = await storage.createTrade({
                 userId,
@@ -1610,6 +1628,21 @@ export async function runHistoricalSimulation(
                 isPowerSetup: false,
               },
             ));
+
+            logTradeExit({
+              id: `${ticker}-${simulationDate}-${trade.entryBarIndex}`,
+              symbol: ticker,
+              exitTimestamp: bar.timestamp,
+              exitPrice,
+              exitReason,
+              rMultiple: totalR,
+              pnlDollars: pnl,
+              mfeR: trade.mfeR,
+              maeR: trade.maeR,
+              isPartiallyExited: trade.isPartiallyExited,
+              partialExitPrice: trade.partialExitPrice ?? undefined,
+              partialShares: trade.partialExitShares ?? undefined,
+            });
 
             if (!isDryRun) {
               const tradeRecord = await storage.createTrade({
@@ -2072,6 +2105,27 @@ export async function runHistoricalSimulation(
                   "historical",
                 );
 
+                logTradeEntry({
+                  id: `${ticker}-${simulationDate}-${i}`,
+                  strategy: "breakout_retest",
+                  symbol: ticker,
+                  direction: "LONG",
+                  entryTimestamp: bar.timestamp,
+                  entryPrice,
+                  stopLoss: stopPrice,
+                  target1,
+                  target2,
+                  shares,
+                  dollarRisk,
+                  riskPerShare,
+                  isCapLimited: sizing.isCapLimited,
+                  entryReason: `Tier ${state.selectedTier} breakout retest | score=${score}`,
+                  tier: state.selectedTier,
+                  score,
+                  marketRegime: regimeResult.chopping ? "choppy" : regimeResult.aligned ? "aligned" : "misaligned",
+                  session: state.minutesSinceOpen <= 90 ? "open" : state.minutesSinceOpen <= 240 ? "mid" : "power",
+                });
+
                 if (tradeTraces.length < 200) {
                   const entryCommission = calculateCommission(
                     shares,
@@ -2219,13 +2273,28 @@ export async function runHistoricalSimulation(
           totalR, pnl,
           {
             marketRegime: lastRegimeResult?.chopping ? "choppy" : lastRegimeResult?.aligned ? "aligned" : "misaligned",
-            session: state.minutesSinceOpen <= 90 ? "open" : state.minutesSinceOpen <= 240 ? "mid" : "power",
+            session: "power",
             spyAligned: lastRegimeResult?.aligned ?? false,
             volatilityGatePassed: true,
             entryMode: "conservative",
             isPowerSetup: false,
           },
         ));
+
+        logTradeExit({
+          id: `${ticker}-${simulationDate}-${trade.entryBarIndex}`,
+          symbol: ticker,
+          exitTimestamp: lastBar.timestamp,
+          exitPrice,
+          exitReason: eodExitReason,
+          rMultiple: totalR,
+          pnlDollars: pnl,
+          mfeR: trade.mfeR,
+          maeR: trade.maeR,
+          isPartiallyExited: trade.isPartiallyExited,
+          partialExitPrice: trade.partialExitPrice ?? undefined,
+          partialShares: trade.partialExitShares ?? undefined,
+        });
 
         if (!isDryRun) {
           const tradeRecord = await storage.createTrade({
@@ -2376,6 +2445,8 @@ export async function runHistoricalSimulation(
       const dd = peak - equity;
       if (dd > maxDD) maxDD = dd;
     }
+
+    flushOpenEntries();
 
     if (isDryRun) {
       return {
@@ -5799,6 +5870,8 @@ export async function runSmallCapMomentumSimulation(
   const premarketVolData = options?.premarketVolData ?? {};
   const useDynamicScanner = options?.useDynamicScanner ?? false;
 
+  resetTradeLog();
+
   const control = { cancel: false };
   if (!isDryRun) {
     activeSimulations.set(runId, control);
@@ -6048,6 +6121,21 @@ export async function runSmallCapMomentumSimulation(
 
       tradesGenerated++;
       log(`[SmallCapSim] ${ticker} CLOSED: ${exitReason} | R=${compositeR.toFixed(2)} MFE=${trade.mfeR.toFixed(2)}R PnL=$${pnl.toFixed(2)}${trade.partialFilled ? " (partial filled)" : ""}`, "historical");
+
+      logTradeExit({
+        id: `${ticker}-${simulationDate}-sc-${trade.entryBarIndex}`,
+        symbol: ticker,
+        exitTimestamp: barTimestamp,
+        exitPrice,
+        exitReason,
+        rMultiple: compositeR,
+        pnlDollars: pnl,
+        mfeR: trade.mfeR,
+        maeR: trade.maeR,
+        isPartiallyExited: trade.partialFilled,
+        partialExitPrice: trade.partialFilled ? trade.entryPrice + trade.partialR * trade.riskPerShare : undefined,
+        partialShares: trade.partialFilled ? trade.partialShares : undefined,
+      });
     };
 
     for (const ticker of effectiveTickerList) {
@@ -6303,6 +6391,25 @@ export async function runSmallCapMomentumSimulation(
               `[SmallCapSim] ${ticker} ENTRY LONG at $${entryPrice.toFixed(2)} | stop=$${signal.stopPrice.toFixed(2)} | ${shares}sh | HOD=$${signal.hodPrice.toFixed(2)} pullback=${signal.pullbackBars}bars depth=${(signal.pullbackDepthPct * 100).toFixed(1)}%`,
               "historical",
             );
+
+            logTradeEntry({
+              id: `${ticker}-${simulationDate}-sc-${i}`,
+              strategy: "smallcap_pullback",
+              symbol: ticker,
+              direction: "LONG",
+              entryTimestamp: bar.timestamp,
+              entryPrice,
+              stopLoss: signal.stopPrice,
+              target1: entryPrice + riskPerShare * scConfig.partialExitR,
+              shares,
+              dollarRisk,
+              riskPerShare,
+              isCapLimited: sizing.isCapLimited,
+              entryReason: `HOD break pullback | HOD=$${signal.hodPrice.toFixed(2)} depth=${(signal.pullbackDepthPct * 100).toFixed(1)}%`,
+              tier: "pullback_long",
+              gapPct: signal.gapPct,
+              pullbackDepth: signal.pullbackDepthPct,
+            });
           }
         }
       }
@@ -6332,6 +6439,8 @@ export async function runSmallCapMomentumSimulation(
       const dd = peak - equity;
       if (dd > maxDD) maxDD = dd;
     }
+
+    flushOpenEntries();
 
     const result: DryRunResult = {
       trades: tradesGenerated,
