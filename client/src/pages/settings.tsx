@@ -1,10 +1,11 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import {
   Form,
   FormControl,
@@ -37,11 +38,26 @@ import {
   Clock,
   Target,
   Zap,
+  Lock,
 } from "lucide-react";
 
 export default function Settings() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const currentVersion = user?.currentStrategyVersion ?? "v1";
+
+  const { data: coreMetrics } = useQuery<{ totalTrades: number }>({
+    queryKey: ["/api/simulations/core-metrics", currentVersion],
+    queryFn: async () => {
+      const res = await fetch(`/api/simulations/core-metrics?version=${encodeURIComponent(currentVersion)}`, {
+        credentials: "include",
+      });
+      if (!res.ok) return { totalTrades: 0 };
+      return res.json();
+    },
+  });
+
+  const isFrozen = (coreMetrics?.totalTrades ?? 0) > 0;
 
   const form = useForm<SettingsUpdate>({
     resolver: zodResolver(settingsUpdateSchema),
@@ -95,27 +111,75 @@ export default function Settings() {
 
   const saveMutation = useMutation({
     mutationFn: async (data: SettingsUpdate) => {
-      await apiRequest("PATCH", "/api/settings", data);
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+        credentials: "include",
+      });
+      if (res.status === 409) {
+        const body = await res.json();
+        throw { frozen: true, message: body.message, tradeCount: body.tradeCount, version: body.version };
+      }
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || res.statusText);
+      }
+      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/user"] });
       toast({ title: "Settings saved" });
     },
     onError: (err: any) => {
-      toast({
-        title: "Error saving settings",
-        description: err.message,
-        variant: "destructive",
-      });
+      if (err.frozen) {
+        toast({
+          title: "Strategy rules are frozen",
+          description: err.message || `This version has recorded trades. Use Archive & Reset on the Backtester page to start a new version before changing parameters.`,
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Error saving settings",
+          description: err.message || "Unknown error",
+          variant: "destructive",
+        });
+      }
     },
   });
 
   return (
     <div className="p-4 md:p-6 space-y-6 max-w-3xl mx-auto overflow-y-auto h-full">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
+          <Badge variant="outline" className="text-[10px] px-1.5 min-h-5" data-testid="badge-strategy-version">
+            {currentVersion}
+          </Badge>
+          {isFrozen && (
+            <Badge variant="secondary" className="text-[10px] px-1.5 min-h-5 bg-amber-500/10 text-amber-500 border-amber-500/20" data-testid="badge-rules-frozen">
+              <Lock className="w-3 h-3 mr-1" />
+              Frozen
+            </Badge>
+          )}
+        </div>
         <p className="text-xs text-muted-foreground mt-0.5">Configure strategy settings</p>
       </div>
+
+      {isFrozen && (
+        <Card className="border-amber-500/30 bg-amber-500/5" data-testid="card-rules-frozen-warning">
+          <CardContent className="p-3 flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-xs font-medium text-amber-500">Strategy rules are frozen for {currentVersion}</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                This version has {coreMetrics?.totalTrades} trade{(coreMetrics?.totalTrades ?? 0) !== 1 ? "s" : ""} recorded.
+                Use Archive & Reset on the Backtester page to start a new version before changing parameters.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Form {...form}>
         <form onSubmit={form.handleSubmit((data) => saveMutation.mutate(data))} className="space-y-4">
@@ -251,9 +315,18 @@ export default function Settings() {
             </CardContent>
           </Card>
 
-          <Button type="submit" className="w-full" disabled={saveMutation.isPending}>
-            <Save className="w-4 h-4 mr-2" />
-            {saveMutation.isPending ? "Saving..." : "Save Settings"}
+          <Button type="submit" className="w-full" disabled={saveMutation.isPending || isFrozen} data-testid="button-save-settings">
+            {isFrozen ? (
+              <>
+                <Lock className="w-4 h-4 mr-2" />
+                Rules Frozen — Archive & Reset First
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4 mr-2" />
+                {saveMutation.isPending ? "Saving..." : "Save Settings"}
+              </>
+            )}
           </Button>
         </form>
       </Form>

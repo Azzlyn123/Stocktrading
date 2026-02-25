@@ -1121,6 +1121,23 @@ interface CoreMetrics {
   distinctDays: number;
 }
 
+function getConfidenceTier(tradeCount: number): { label: string; color: string; bgClass: string; textClass: string } {
+  if (tradeCount >= 100) return { label: "Full", color: "emerald", bgClass: "bg-emerald-500/15 border-emerald-500/30", textClass: "text-emerald-500" };
+  if (tradeCount >= 50) return { label: "Minimum", color: "emerald", bgClass: "bg-emerald-500/10 border-emerald-500/20", textClass: "text-emerald-400" };
+  if (tradeCount >= 20) return { label: "Building", color: "amber", bgClass: "bg-amber-500/10 border-amber-500/20", textClass: "text-amber-500" };
+  return { label: "Low", color: "red", bgClass: "bg-red-500/10 border-red-500/20", textClass: "text-red-500" };
+}
+
+function ConfidenceBadge({ tradeCount }: { tradeCount: number }) {
+  const tier = getConfidenceTier(tradeCount);
+  return (
+    <Badge variant="outline" className={`text-[10px] px-1.5 min-h-5 ${tier.bgClass} ${tier.textClass}`} data-testid="badge-confidence">
+      <ShieldCheck className="w-3 h-3 mr-1" />
+      {tier.label}
+    </Badge>
+  );
+}
+
 function CoreMetricsPanel({ strategyVersion }: { strategyVersion: string }) {
   const { data: metrics } = useQuery<CoreMetrics>({
     queryKey: ["/api/simulations/core-metrics", strategyVersion],
@@ -1141,10 +1158,13 @@ function CoreMetricsPanel({ strategyVersion }: { strategyVersion: string }) {
           <div className="flex items-center gap-2 mb-2">
             <Gauge className="w-4 h-4 text-primary" />
             <h3 className="text-sm font-medium">Strategy Scorecard</h3>
-            <Badge variant="outline" className="text-[10px] px-1.5 min-h-5 ml-auto">
-              <Tag className="w-3 h-3 mr-1" />
-              {strategyVersion}
-            </Badge>
+            <div className="flex items-center gap-1.5 ml-auto">
+              <ConfidenceBadge tradeCount={0} />
+              <Badge variant="outline" className="text-[10px] px-1.5 min-h-5">
+                <Tag className="w-3 h-3 mr-1" />
+                {strategyVersion}
+              </Badge>
+            </div>
           </div>
           <p className="text-xs text-muted-foreground">
             No trades recorded for this strategy version yet. Run simulations to start tracking metrics.
@@ -1154,6 +1174,7 @@ function CoreMetricsPanel({ strategyVersion }: { strategyVersion: string }) {
     );
   }
 
+  const tier = getConfidenceTier(metrics.totalTrades);
   const minTarget = 50;
   const fullTarget = 100;
   const samplePct = Math.min((metrics.totalTrades / minTarget) * 100, 100);
@@ -1167,10 +1188,13 @@ function CoreMetricsPanel({ strategyVersion }: { strategyVersion: string }) {
         <div className="flex items-center gap-2">
           <Gauge className="w-4 h-4 text-primary" />
           <h3 className="text-sm font-medium">Strategy Scorecard</h3>
-          <Badge variant="outline" className="text-[10px] px-1.5 min-h-5 ml-auto">
-            <Tag className="w-3 h-3 mr-1" />
-            {strategyVersion}
-          </Badge>
+          <div className="flex items-center gap-1.5 ml-auto">
+            <ConfidenceBadge tradeCount={metrics.totalTrades} />
+            <Badge variant="outline" className="text-[10px] px-1.5 min-h-5">
+              <Tag className="w-3 h-3 mr-1" />
+              {strategyVersion}
+            </Badge>
+          </div>
         </div>
 
         <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
@@ -1215,29 +1239,28 @@ function CoreMetricsPanel({ strategyVersion }: { strategyVersion: string }) {
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-[10px]">
             <span className="text-muted-foreground">
-              Sample: {metrics.totalTrades}/{minTarget} trades
-              {metrics.totalTrades < minTarget && ` (need ${minTarget - metrics.totalTrades} more)`}
+              Sample: {metrics.totalTrades} trades
+              {metrics.totalTrades < 20 && ` — need ${20 - metrics.totalTrades} more for "Building"`}
+              {metrics.totalTrades >= 20 && metrics.totalTrades < 50 && ` — need ${50 - metrics.totalTrades} more for "Minimum"`}
+              {metrics.totalTrades >= 50 && metrics.totalTrades < 100 && ` — need ${100 - metrics.totalTrades} more for "Full"`}
             </span>
-            <span className={`font-medium ${metrics.totalTrades >= minTarget ? "text-emerald-500" : "text-amber-500"}`}>
-              {metrics.totalTrades >= minTarget ? "Minimum met" : "Building sample"}
+            <span className={`font-medium ${tier.textClass}`}>
+              {tier.label} confidence
             </span>
           </div>
           <div className="w-full h-1.5 bg-accent rounded-full overflow-hidden">
             <div
-              className={`h-full transition-all duration-300 rounded-full ${metrics.totalTrades >= minTarget ? "bg-emerald-500" : "bg-amber-500"}`}
-              style={{ width: `${samplePct}%` }}
+              className={`h-full transition-all duration-300 rounded-full ${
+                metrics.totalTrades >= 50 ? "bg-emerald-500" : metrics.totalTrades >= 20 ? "bg-amber-500" : "bg-red-500"
+              }`}
+              style={{ width: `${fullPct}%` }}
             />
           </div>
-          {metrics.totalTrades >= minTarget && (
-            <div className="flex items-center justify-between text-[10px]">
-              <span className="text-muted-foreground">
-                Full confidence: {metrics.totalTrades}/{fullTarget}
-              </span>
-              <span className={`font-medium ${metrics.totalTrades >= fullTarget ? "text-emerald-500" : "text-muted-foreground"}`}>
-                {Math.round(fullPct)}%
-              </span>
-            </div>
-          )}
+          <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+            <span className={metrics.totalTrades >= 20 ? "text-amber-500" : ""}>20: Building</span>
+            <span className={metrics.totalTrades >= 50 ? "text-emerald-400" : ""}>50: Minimum</span>
+            <span className={metrics.totalTrades >= 100 ? "text-emerald-500 font-medium" : ""}>100: Full</span>
+          </div>
         </div>
 
         <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
@@ -1284,7 +1307,7 @@ function ResetSimulationButton({ currentVersion, onVersionChange }: { currentVer
   const resetMutation = useMutation({
     mutationFn: async () => {
       if (newVersion) {
-        await apiRequest("PATCH", "/api/user/settings", { currentStrategyVersion: newVersion });
+        await apiRequest("PATCH", "/api/settings", { currentStrategyVersion: newVersion });
       }
       const res = await apiRequest("POST", "/api/simulations/reset");
       return res.json();

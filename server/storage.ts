@@ -82,6 +82,7 @@ export interface IStorage {
   createSimulationRun(run: InsertSimulationRun): Promise<SimulationRun>;
   updateSimulationRun(id: string, updates: Partial<SimulationRun>): Promise<SimulationRun | undefined>;
   resetAllSimulationData(): Promise<{ simulationRuns: number; trades: number; lessons: number; signals: number; alerts: number; summaries: number }>;
+  getTradeCountForVersion(version: string): Promise<number>;
   getArchiveData(): Promise<{ simulationRuns: SimulationRun[]; paperTrades: PaperTrade[]; dailySummaries: DailySummary[]; tradeLessons: TradeLesson[] }>;
   getCoreMetrics(version?: string): Promise<{
     totalTrades: number;
@@ -383,6 +384,16 @@ export class DatabaseStorage implements IStorage {
       alerts: alertRows.length,
       summaries: summaryRows.length,
     };
+  }
+
+  async getTradeCountForVersion(version: string): Promise<number> {
+    const runs = await db.select().from(simulationRuns)
+      .where(eq(simulationRuns.strategyVersion, version));
+    const runIds = new Set(runs.map(r => r.id));
+    if (runIds.size === 0) return 0;
+    const allTrades = await db.select().from(paperTrades)
+      .where(eq(paperTrades.status, "closed"));
+    return allTrades.filter(t => t.simulationRunId && runIds.has(t.simulationRunId)).length;
   }
 
   async getArchiveData(): Promise<{ simulationRuns: SimulationRun[]; paperTrades: PaperTrade[]; dailySummaries: DailySummary[]; tradeLessons: TradeLesson[] }> {

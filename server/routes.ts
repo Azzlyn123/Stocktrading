@@ -140,13 +140,43 @@ export async function registerRoutes(
     res.json(safeUser);
   });
 
-  // Settings
+  const STRATEGY_RULE_FIELDS = new Set([
+    "breakoutMinBodyPct", "breakoutMinRangeMultiplier", "retestMaxPullbackPct",
+    "entryMode", "maxVwapCrosses", "chopSizeReduction", "volGateFirstRangePct",
+    "volGateAtrMultiplier", "scoreFullSizeMin", "scoreHalfSizeMin", "riskMode",
+    "powerSetupEnabled", "minPrice", "minAvgVolume", "minDollarVolume",
+    "minDailyATRpct", "minRVOL", "rvolCutoffMinutes", "htfConfirmations",
+    "resistanceBars", "breakoutBuffer", "retestBuffer", "volumeMultiplier",
+    "atrPeriod", "trailingAtrMultiplier", "perTradeRiskPct", "maxPositionPct",
+    "maxDailyLossPct", "maxLosingTrades", "cooldownMinutes",
+    "partialExitPct", "partialExitR", "mainTargetRMin", "mainTargetRMax",
+    "maxSpreadPct", "timeStopEnabled", "timeStopMinutes", "timeStopR",
+    "avoidEarnings", "lunchChopFilter", "lunchChopStart", "lunchChopEnd",
+  ]);
+
   app.patch("/api/settings", requireAuth, async (req, res, next) => {
     try {
       const parsed = settingsUpdateSchema.safeParse(req.body);
       if (!parsed.success) {
         return res.status(400).json({ message: "Invalid settings" });
       }
+
+      const incomingKeys = Object.keys(parsed.data);
+      const hasRuleChange = incomingKeys.some(k => STRATEGY_RULE_FIELDS.has(k));
+
+      if (hasRuleChange) {
+        const version = req.user!.currentStrategyVersion ?? "v1";
+        const tradeCount = await storage.getTradeCountForVersion(version);
+        if (tradeCount > 0) {
+          return res.status(409).json({
+            message: `Version "${version}" has ${tradeCount} trade${tradeCount !== 1 ? "s" : ""} recorded. Archive & reset to a new version before changing strategy rules.`,
+            code: "RULES_FROZEN",
+            version,
+            tradeCount,
+          });
+        }
+      }
+
       const user = await storage.updateUserSettings(req.user!.id, parsed.data);
       if (!user) return res.status(404).json({ message: "User not found" });
       const { password, ...safeUser } = user;
