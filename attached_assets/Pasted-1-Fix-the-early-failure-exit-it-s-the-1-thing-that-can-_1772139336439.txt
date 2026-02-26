@@ -1,0 +1,141 @@
+1) Fix the early-failure exit (it’s the #1 thing that can silently kill win rate)
+Why
+
+Your current rule:
+
+if !partialExit && pnlR < 0 && price < EMA9 → exit
+
+On 5-minute mega-cap breakouts, it’s normal for price to dip under EMA9 briefly during a retest/rotation. That rule will cut a ton of trades that later hit +0.5R. That hurts both win rate and profit.
+
+Replace with “confirmed failure,” not “below EMA9”
+
+v6.1 Early Failure Exit (recommended): only exit if weakness is confirmed by at least 2 signals.
+
+Trigger early failure if ALL:
+
+!partialExit
+
+pnlR <= -0.15 (don’t exit on tiny noise)
+
+close < EMA9
+
+AND at least ONE of:
+
+close < breakoutLevel (true level failure)
+
+2 consecutive red candles (close < open twice)
+
+“bear push”: current candle range breaks prior candle low (momentum down)
+
+That turns early-failure into “this is actually failing,” not “it wiggled.”
+
+Expected effect: win rate rises (fewer premature exits), avg loss may rise slightly but expectancy typically improves because you preserve a lot of +0.5R winners.
+
+2) Tighten candle quality properly (your current gate is too easy)
+
+Right now:
+
+Close ≥ 75% of range
+
+Volume > prior bar
+
+That still lets in wick traps and average candles.
+
+v6.1 Candle Quality Gate (strong but fair)
+
+Require ALL:
+
+closePos >= 0.82 (close in top 18% of range)
+
+bodyPct >= 0.55 (body is at least 55% of candle range)
+
+volume >= 1.25 * priorVolume (not just “>”)
+
+Expected effect: fewer trades, higher follow-through, higher win rate.
+
+3) Make the SPY hard gate smarter (keep it hard, but don’t block obvious single-name momentum)
+
+Your universe is 14 names. If SPY is OFF for long stretches, you’ll get too few trades to learn and you’ll miss real single-name trend days (especially NVDA/TSLA/AMD).
+
+v6.1 “Bypass” (very strict, should not hurt win rate)
+
+Allow trades even if SPY not aligned only if ticker is screaming:
+
+Bypass if ALL:
+
+volumeRatio >= 2.5
+
+closePos >= 0.85
+
+HTF bias aligned (15m) AND ticker above VWAP
+
+This keeps regime discipline but captures rare high-quality outliers.
+
+Expected effect: slightly more trades, win rate stays high.
+
+4) Your +0.5R partial is correct — but tweak sizing for profit stability
+
+You’re doing:
+
+T1 at +0.5R
+
+Sell 70%
+
+Stop to BE + 0.05R
+
+That’s exactly how you chase 50%+.
+
+One tweak I’d make: set the BE bump to +0.10R only when spread/volatility is clean.
+
+Rule:
+
+If ATR ratio / volatility is high → BE+0.05R (avoid stopouts)
+
+If volatility is normal and trend strong → BE+0.10R
+
+This reduces “tagged out by noise” on runners and helps keep profits high even with base-hit style.
+
+5) The biggest hidden limiter: 14 symbols is small (this matters a lot)
+
+You can still hit 50%+ with 14, but sample size will be slow and regime OFF stretches will starve you.
+
+If you ever decide “more trades without lowering quality,” the cleanest move isn’t loosening gates — it’s expanding universe only to similar liquidity:
+
+add: COST, UNH, XOM, BRK.B (if supported), WMT, ORCL, QCOM, CSCO, BAC, GS, MA, HD
+(keep it mega-cap / ultra-liquid)
+
+That increases opportunity without changing the edge logic.
+
+What I want you to report at exactly 50 trades (so the next tweak is surgical)
+
+Don’t wait for 100. At 50 trades, tell me:
+
+Win rate overall
+
+Win rate of trades that reached +0.2R MFE (this measures “entry quality”)
+
+Count of exits by type + avg R by type
+
+How many trades were blocked by SPY gate
+
+Avg MAE (max adverse excursion) on winners vs losers
+
+With those, we’ll know whether the main problem is:
+
+still entry quality, or
+
+premature failure exits, or
+
+costs eating small wins.
+
+My opinion (straight)
+
+Your v6 framework is right for >50%. The only thing I’m worried about is that your current early-failure exit is too hair-trigger for 5-minute mega-caps and will bleed win rate. Fix that first, then tighten candle quality.
+
+Small summary
+
+Do now: change early-failure to require confirmed failure (not just below EMA9), tighten candle-quality (close top 18%, big body, volume ≥1.25x).
+
+Optional next: SPY gate bypass only for extreme ticker strength.
+
+If you need more trades without lowering standards: expand universe with more mega-caps, not looser filters.
