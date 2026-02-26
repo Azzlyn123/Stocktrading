@@ -1048,18 +1048,38 @@ export async function runHistoricalSimulation(
               trade.breakevenLocked = true;
             }
 
-            // v5 soft stop: at 45min, if MFE is 0.30–0.50R (validated but not BE-locked),
-            // tighten stop to entry + 0.10R instead of hard exit — limits downside while letting winners run
-            if (!trade.softStopTightened && trade.validated && !trade.breakevenLocked && minutesSinceEntry >= 45) {
-              const softStop = trade.entryPrice + riskPerShare * 0.10;
-              if (softStop > trade.stopPrice) {
+            // v5+ only: conditional soft stop at 45min for the 0.30–0.50R MFE zone.
+            // v4 time-stops these trades instead — do NOT apply soft stop for v4.
+            // STRONG structure (currentPnlR ≥ 0.25R): let it run free
+            // WEAKENING (currentPnlR 0.00–0.25R): tighten stop to entry+0.10R to cap downside
+            // Already-negative (<0R): skip — soft stop would fire instantly
+            const _softStopVersion = user?.currentStrategyVersion ?? "v1";
+            if (_softStopVersion >= "v5" && !trade.softStopTightened && trade.validated && !trade.breakevenLocked && minutesSinceEntry >= 45) {
+              trade.softStopTightened = true;
+              const currentPnlR = (bar.close - trade.entryPrice) / riskPerShare;
+              if (currentPnlR >= 0.25) {
+                // Strong — skip soft stop, let trend develop
                 log(
-                  `[HistSim] ${ticker} SOFT STOP: 45min, MFE ${trade.mfeR.toFixed(2)}R (0.30-0.50R zone), stop tightened $${trade.stopPrice.toFixed(2)} → $${softStop.toFixed(2)} (entry+0.10R)`,
+                  `[HistSim] ${ticker} SOFT STOP skipped: 45min, current ${currentPnlR.toFixed(2)}R≥0.25R — structure strong, letting trade run`,
                   "historical",
                 );
-                trade.stopPrice = softStop;
+              } else if (currentPnlR >= 0.0) {
+                // Weakening — trade gave back gains from MFE, apply soft stop floor
+                const softStop = trade.entryPrice + riskPerShare * 0.10;
+                if (softStop > trade.stopPrice) {
+                  log(
+                    `[HistSim] ${ticker} SOFT STOP: 45min, MFE ${trade.mfeR.toFixed(2)}R but faded to ${currentPnlR.toFixed(2)}R, stop tightened $${trade.stopPrice.toFixed(2)} → $${softStop.toFixed(2)} (entry+0.10R)`,
+                    "historical",
+                  );
+                  trade.stopPrice = softStop;
+                }
+              } else {
+                // Already underwater — stop at entry+0.10R would fire instantly, skip it
+                log(
+                  `[HistSim] ${ticker} SOFT STOP skipped: 45min, current ${currentPnlR.toFixed(2)}R<0 — already negative, natural exits take over`,
+                  "historical",
+                );
               }
-              trade.softStopTightened = true;
             }
 
           }
@@ -1318,9 +1338,14 @@ export async function runHistoricalSimulation(
             continue;
           }
 
-          // v5: time-stop exempt if MFE ever reached 0.30R (reverted from v4's 0.50R threshold)
-          // Soft-stop tighten (0.30–0.50R zone) is handled above in the MFE tracking block
-          const effectiveRisk = trade.validated
+          // v4+: time-stop exempt only if MFE ever reached 0.50R (breakevenLocked).
+          // Trades in the 0.30–0.50R zone get time-stopped at 45m (v4) or soft-stop tightened (v5+).
+          const strategyVersion = user?.currentStrategyVersion ?? "v1";
+          const timeStopExempt =
+            strategyVersion >= "v4"
+              ? trade.breakevenLocked   // v4+: 0.50R threshold
+              : trade.validated;        // v1-v3: 0.30R threshold
+          const effectiveRisk = timeStopExempt
             ? { ...tieredConfig.risk, timeStopMinutes: 0 }
             : tieredConfig.risk;
           const exitResult = checkTieredExitRules(
