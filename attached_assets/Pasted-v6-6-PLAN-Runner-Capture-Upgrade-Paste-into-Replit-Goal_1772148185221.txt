@@ -1,0 +1,55 @@
+v6.6 PLAN — Runner Capture Upgrade (Paste into Replit)
+
+Goal
+- Raise avg win without killing win rate.
+- Keep v6.5 entries + T1=0.40R + stall-tighten unchanged.
+- Change ONLY post-T1 runner management.
+
+Problem (from v6.5)
+- WR is strong (~40%) but avg win is too small (~0.49R).
+- Runner (remaining 30% after T1) is getting stopped too quickly (EMA9/prior-low trail is too tight).
+- Need runner to survive normal pullbacks and capture bigger moves.
+
+Changes (v6.6)
+
+1) Post-T1 “Breathing Window”
+- After T1 partial fills (70% sold at +0.40R), start a timer.
+- For the next 15 minutes (3 x 5m bars) AFTER T1:
+  - Do NOT trail with EMA9 or prior-low.
+  - Hold runner stop at: entryPrice + 0.05R
+  - If price hits stop → exit runner (normal stop_hit).
+  - If price hits final target (if any) → exit runner (normal target).
+
+2) Replace EMA9 Trail with 2-Bar Low Trail (Runner Only)
+- After the 15-minute breathing window ends:
+  - Set runner stop to the lowest LOW of the last 2 COMPLETED 5-minute bars.
+  - Update it each new bar (ratchet up only; never loosen).
+  - This trail applies ONLY to the remaining position AFTER T1.
+
+3) Remove EMA9 from Runner Trailing (After T1)
+- Disable EMA9-based trailing for runner management post-T1.
+- Keep prior-low trail disabled post-T1 as well (2-bar-low replaces it).
+
+Implementation Notes
+- Risk per share: riskPerShare = entryPrice - stopPrice (same as existing).
+- “0.05R” means: entryPrice + 0.05 * riskPerShare.
+- “15 minutes” means 3 completed 5-minute bars since the T1 fill.
+- Trail should use bar LOWS from completed candles, not intrabar ticks.
+- Stop should only move upward (toward profit), never downward.
+
+Acceptance Criteria (what to check after restart)
+- Win rate should stay ~37–42%.
+- Avg win should rise toward ≥ 0.60R.
+- Expectancy should improve from ~ -0.10R toward ~ -0.03R to +0.02R.
+- Fewer “runner stopped near entry” cases after T1.
+
+Reporting after 80–100 trades
+- Win rate, avg win R, avg loss R, expectancy.
+- Runner outcomes: avg runner R, % runner stopped at BE+0.05R, % runner trailed out > +0.30R.
+- Exit breakdown counts.
+
+Do not change
+- Entry filters, scoring threshold, SPY gate, VCS gate.
+- T1 level (0.40R) and partial size (70%).
+- Stall-tighten logic.
+- Time-stop logic.
