@@ -1366,6 +1366,7 @@ export async function runHistoricalSimulation(
             tieredConfig.exits,
             effectiveRisk,
             state.atr14,
+            state.resistanceLevel ?? undefined,
           );
 
           if (exitResult.shouldExit) {
@@ -1856,12 +1857,15 @@ export async function runHistoricalSimulation(
               let candidateBoQualified = breakoutResult.qualified;
               if (candidateBoQualified && _v6) {
                 const barRange = bar.high - bar.low;
-                const closeNearHighs = barRange > 0 && (bar.close - bar.low) / barRange >= 0.75;
+                const closePos = barRange > 0 ? (bar.close - bar.low) / barRange : 0;
+                const bodyPct = barRange > 0 ? Math.abs(bar.close - bar.open) / barRange : 0;
+                const closeNearHighs = closePos >= 0.82;
+                const bodyStrong = bodyPct >= 0.55;
                 const prevBar5m = state.bars5m.length >= 2 ? state.bars5m[state.bars5m.length - 2] : null;
-                const volExpanding = prevBar5m ? bar.volume > prevBar5m.volume : true;
-                if (!closeNearHighs || !volExpanding) {
+                const volExpanding = prevBar5m ? bar.volume >= 1.25 * prevBar5m.volume : true;
+                if (!closeNearHighs || !bodyStrong || !volExpanding) {
                   log(
-                    `[HistSim] ${ticker} breakout rejected (v6 quality gate): closeNearHighs=${closeNearHighs} volExpanding=${volExpanding}`,
+                    `[HistSim] ${ticker} breakout rejected (v6 quality gate): closePos=${closePos.toFixed(2)} bodyPct=${bodyPct.toFixed(2)} volExpanding=${volExpanding}`,
                     "historical",
                   );
                   candidateBoQualified = false;

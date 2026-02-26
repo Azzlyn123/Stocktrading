@@ -163,7 +163,8 @@ export function checkTieredExitRules(
   minutesSinceEntry: number,
   exitsConfig: TieredStrategyConfig["exits"],
   riskConfig: TieredStrategyConfig["risk"],
-  currentAtr: number
+  currentAtr: number,
+  breakoutLevel?: number
 ): ExitDecision {
   const currentPrice = currentCandle.close;
   const pnlR = riskPerShare > 0 ? (currentPrice - entryPrice) / riskPerShare : 0;
@@ -215,18 +216,30 @@ export function checkTieredExitRules(
     };
   }
 
-  if (exitsConfig.earlyFailureExit && !isPartiallyExited && pnlR < 0 && recentBars5m.length >= 9) {
+  if (exitsConfig.earlyFailureExit && !isPartiallyExited && pnlR <= -0.15 && recentBars5m.length >= 9) {
     const closes = recentBars5m.map((c) => c.close);
     const ema9 = lastEMA(closes, 9);
     if (ema9 > 0 && currentPrice < ema9) {
-      return {
-        shouldExit: true,
-        exitType: "hard_exit",
-        exitPrice: currentPrice,
-        reason: `Early failure: below EMA9 ($${ema9.toFixed(2)}), no T1 progress`,
-        partialShares: null,
-        newStopPrice: null,
-      };
+      const n = recentBars5m.length;
+      const prev = n >= 2 ? recentBars5m[n - 2] : null;
+      const prevPrev = n >= 3 ? recentBars5m[n - 3] : null;
+      const twoRedCandles =
+        prev && prevPrev
+          ? prev.close < prev.open && currentCandle.close < currentCandle.open
+          : false;
+      const bearPush = prev ? currentCandle.high < prev.low : false;
+      const levelFail = breakoutLevel != null && currentPrice < breakoutLevel;
+      if (twoRedCandles || bearPush || levelFail) {
+        const why = levelFail ? "level fail" : twoRedCandles ? "2 red candles" : "bear push";
+        return {
+          shouldExit: true,
+          exitType: "hard_exit",
+          exitPrice: currentPrice,
+          reason: `Early failure: ${why}, below EMA9 ($${ema9.toFixed(2)}), pnl ${pnlR.toFixed(2)}R`,
+          partialShares: null,
+          newStopPrice: null,
+        };
+      }
     }
   }
 
