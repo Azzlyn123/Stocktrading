@@ -225,6 +225,7 @@ export const tradeLessons = pgTable("trade_lessons", {
   scoreBreakdown: jsonb("score_breakdown_at_entry"),
   durationMinutes: integer("duration_minutes"),
   patternHash: text("pattern_hash"),
+  strategyVersion: text("strategy_version"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

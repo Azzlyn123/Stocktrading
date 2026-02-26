@@ -75,8 +75,10 @@ export interface IStorage {
 
   getLessons(): Promise<TradeLesson[]>;
   getRecentLessons(limit: number): Promise<TradeLesson[]>;
+  getRecentLessonsByVersion(limit: number, strategyVersion: string): Promise<TradeLesson[]>;
   createLesson(lesson: InsertTradeLesson): Promise<TradeLesson>;
 
+  getCompletedDatesByVersion(userId: string, strategyVersion: string): Promise<Set<string>>;
   getSimulationRuns(userId: string): Promise<SimulationRun[]>;
   getSimulationRun(id: string): Promise<SimulationRun | undefined>;
   createSimulationRun(run: InsertSimulationRun): Promise<SimulationRun>;
@@ -345,9 +347,27 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(tradeLessons).orderBy(desc(tradeLessons.createdAt)).limit(limit);
   }
 
+  async getRecentLessonsByVersion(limit: number, strategyVersion: string): Promise<TradeLesson[]> {
+    return db.select().from(tradeLessons)
+      .where(eq(tradeLessons.strategyVersion, strategyVersion))
+      .orderBy(desc(tradeLessons.createdAt))
+      .limit(limit);
+  }
+
   async createLesson(lesson: InsertTradeLesson): Promise<TradeLesson> {
     const [result] = await db.insert(tradeLessons).values(lesson).returning();
     return result;
+  }
+
+  async getCompletedDatesByVersion(userId: string, strategyVersion: string): Promise<Set<string>> {
+    const rows = await db.select({ simulationDate: simulationRuns.simulationDate })
+      .from(simulationRuns)
+      .where(and(
+        eq(simulationRuns.userId, userId),
+        eq(simulationRuns.strategyVersion, strategyVersion),
+        eq(simulationRuns.status, "completed")
+      ));
+    return new Set(rows.map(r => r.simulationDate).filter(Boolean) as string[]);
   }
 
   async getSimulationRuns(userId: string): Promise<SimulationRun[]> {

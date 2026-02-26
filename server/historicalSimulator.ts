@@ -603,6 +603,15 @@ async function runAutoRunLoop(userId: string, storage: IStorage) {
   let totalProcessedTrades = 0;
   const targetTrades = 120;
 
+  // Load already-completed dates for this version to skip on restart
+  const user0 = await storage.getUser(userId);
+  const currentVersion = user0?.currentStrategyVersion ?? "v1";
+  const alreadyDone = await storage.getCompletedDatesByVersion(userId, currentVersion);
+  if (alreadyDone.size > 0) {
+    log(`[AutoRun] Skipping ${alreadyDone.size} already-completed dates for ${currentVersion}`, "historical");
+    autoRunState.datesRemaining = autoRunState.datesRemaining.filter(d => !alreadyDone.has(d));
+  }
+
   while (
     (autoRunState.datesRemaining.length > 0 || totalProcessedTrades < targetTrades) &&
     Date.now() < deadline &&
@@ -611,7 +620,7 @@ async function runAutoRunLoop(userId: string, storage: IStorage) {
     if (autoRunState.datesRemaining.length === 0) {
       // If we ran out of dates but haven't hit trade target, look back further
       const lastDate = new Date(autoRunState.datesCompleted[autoRunState.datesCompleted.length - 1]);
-      const extraDates = getWeekdaysGoingBack(lastDate, 20);
+      const extraDates = getWeekdaysGoingBack(lastDate, 20).filter(d => !alreadyDone.has(d));
       autoRunState.datesRemaining.push(...extraDates);
     }
 
@@ -633,6 +642,9 @@ async function runAutoRunLoop(userId: string, storage: IStorage) {
     });
 
     await runHistoricalSimulation(run.id, date, userId, storage);
+    
+    // Yield to event loop after each simulation to keep Express responsive
+    await new Promise(resolve => setImmediate(resolve));
 
     const completedRun = await storage.getSimulationRun(run.id);
     if (completedRun) {
@@ -1278,6 +1290,7 @@ export async function runHistoricalSimulation(
                   simulationDate,
                 },
                 durationMinutes: minutesSinceEntry,
+                strategyVersion: user?.currentStrategyVersion ?? "v1",
               });
               lessonsGenerated++;
             } else {
@@ -1290,7 +1303,7 @@ export async function runHistoricalSimulation(
             continue;
           }
 
-          const effectiveRisk = trade.validated
+          const effectiveRisk = trade.breakevenLocked
             ? { ...tieredConfig.risk, timeStopMinutes: 0 }
             : tieredConfig.risk;
           const exitResult = checkTieredExitRules(
@@ -1722,6 +1735,7 @@ export async function runHistoricalSimulation(
                   simulationDate,
                 },
                 durationMinutes: minutesSinceEntry,
+                strategyVersion: user?.currentStrategyVersion ?? "v1",
               });
               lessonsGenerated++;
             } else {
@@ -1998,7 +2012,7 @@ export async function runHistoricalSimulation(
                 let appliedPenalty = 0;
                 try {
                   const recentLessons = (
-                    await storage.getRecentLessons(100)
+                    await storage.getRecentLessonsByVersion(100, user.currentStrategyVersion ?? "v1")
                   ).filter((l) => {
                     const ctx = l.marketContext as Record<string, any> | null;
                     if (ctx?.simulationDate) {
@@ -2372,6 +2386,7 @@ export async function runHistoricalSimulation(
               simulationDate,
             },
             durationMinutes: (tickerBars5m.length - trade.entryBarIndex) * 5,
+            strategyVersion: user?.currentStrategyVersion ?? "v1",
           });
           lessonsGenerated++;
         } else {

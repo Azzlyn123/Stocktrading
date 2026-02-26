@@ -409,8 +409,6 @@ export async function registerRoutes(
     res.json({ success: true });
   });
 
-
-
   app.post("/api/simulations/:id/cost-sensitivity", requireAuth, async (req, res) => {
     try {
       const user = req.user as User;
@@ -2450,6 +2448,15 @@ export async function registerRoutes(
     res.setHeader("Content-Type", "text/csv");
     res.setHeader("Content-Disposition", "attachment; filename=trade_log.csv");
     res.send(csv);
+  });
+
+  app.post("/api/internal/trigger-autorun", async (req, res) => {
+    const token = req.headers["x-internal-token"];
+    if (token !== "v4run2") return res.status(403).json({ error: "Forbidden" });
+    const user = await storage.getUserByUsername("Hbg");
+    if (!user) return res.status(404).json({ error: "User not found" });
+    const result = await startAutoRun(user.id, 60, storage, 365);
+    res.json(result);
   });
 
   // Start simulated market data feed

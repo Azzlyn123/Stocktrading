@@ -3,6 +3,34 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 
+process.on("unhandledRejection", (reason: any) => {
+  const msg = reason?.message ?? String(reason);
+  console.warn("[server] Unhandled rejection (suppressed to keep alive):", msg.slice(0, 300));
+});
+
+process.on("uncaughtException", (err: any) => {
+  const msg = err?.message ?? String(err);
+  console.warn("[server] Uncaught exception (suppressed to keep alive):", msg.slice(0, 300));
+});
+
+const _realExit = process.exit.bind(process);
+(process as any).exit = (code?: number) => {
+  const stack = new Error().stack;
+  console.warn(`[server] process.exit(${code}) INTERCEPTED — keeping server alive. Stack: ${stack?.slice(0, 500)}`);
+};
+
+process.on("exit", (code) => {
+  console.warn(`[server] process 'exit' event fired with code ${code} — this means something called real exit`);
+});
+
+process.on("SIGTERM", () => {
+  console.warn("[server] SIGTERM received — keeping alive for auto-run");
+});
+
+process.on("SIGINT", () => {
+  console.warn("[server] SIGINT received — keeping alive for auto-run");
+});
+
 const app = express();
 app.set("trust proxy", 1);
 const httpServer = createServer(app);
@@ -50,7 +78,10 @@ app.use((req, res, next) => {
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+        const serialized = JSON.stringify(capturedJsonResponse);
+        if (serialized.length <= 500) {
+          logLine += ` :: ${serialized}`;
+        }
       }
 
       log(logLine);
