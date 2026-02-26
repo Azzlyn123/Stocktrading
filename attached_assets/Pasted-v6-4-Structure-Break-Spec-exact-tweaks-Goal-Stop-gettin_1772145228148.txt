@@ -1,0 +1,152 @@
+v6.4 — Structure-Break Spec (exact tweaks)
+Goal
+
+Stop getting kicked out on 1–2 cent pivot breaks.
+
+Stop letting “never worked” trades bleed to -0.7R.
+
+Stop letting “worked then failed” trades give back everything.
+
+This is one patch in exits.ts with 3 rules.
+
+✅ Rule A — Add a buffer to swing-low breaks (kills noise sensitivity)
+
+Current trigger:
+
+price < swingLow && price < EMA9
+
+Replace with buffered break:
+
+Define:
+
+bufferR = 0.10 (10% of R)
+
+bufferPrice = bufferR * riskPerShare
+
+Trigger becomes:
+
+close < (swingLow - bufferPrice) (use CLOSE, not currentPrice/wick)
+
+AND close < EMA9
+
+Why:
+
+close confirmation avoids wick/noise
+
+0.10R buffer avoids 1-cent breaks
+
+still exits real breakdowns
+
+Expected effect: structure-break frequency drops, and it stops firing on tiny breaches.
+
+✅ Rule B — Require persistence (2-bar confirmation)
+
+Add:
+
+close below buffered swing low for 2 consecutive bars
+
+So you don’t exit on a single fast flush that reverses.
+
+Condition:
+
+close0 < swingLow - bufferPrice
+
+AND close1 < swingLow - bufferPrice
+
+AND close0 < EMA9
+
+This will eliminate a big chunk of false “structure breaks.”
+
+✅ Rule C — Add a giveback stop for trades that did work (protects MFE)
+
+This handles the 7/19 that hit 0.13–0.56R and gave it all back.
+
+If mfeR >= 0.35 and no partial yet, then:
+
+set a “giveback exit” at mfeR - 0.30R
+
+Implementation friendly version:
+
+If trade has reached +0.35R, you refuse to allow it to go below +0.05R without exiting.
+
+So:
+
+If:
+
+mfeR >= 0.35
+
+AND pnlR <= +0.05
+
+AND close < EMA9
+
+→ exit (call it GIVEBACK_EXIT)
+
+Why this works:
+
+It keeps “almost winners” from turning into structure-break losers
+
+It increases win rate without changing entries
+
+It turns some of those -0.6R/-0.7R structure breaks into small wins / scratches
+
+What about the “MFE=0 structure breaks”?
+
+Those are not exit failures. Those are entries that shouldn’t exist or should stop faster.
+
+But we do NOT jump to more entry filtering yet because:
+
+your acceleration filter already improved expectancy
+
+you’re close enough that the smarter move is to stop bleeding on structure-break logic first
+
+After v6.4, if MFE=0 structure breaks remain high, we tighten entry with one extra gate (I’ll list below).
+
+Optional v6.5 (only if needed after v6.4)
+
+If you still see lots of MFE=0 losers:
+
+Add one more entry velocity filter:
+
+Retest bar must reclaim EMA9
+
+At entry time, require close > EMA9 on the 5m bar that triggers entry.
+
+That will cut immediate failures massively in mega caps.
+
+But don’t do it yet—v6.4 might solve enough.
+
+Also: time-stops stuck at 0.2–0.5R MFE
+
+Don’t touch time yet. With v6.4 giveback protection, some stalled trades will convert into scratch/small wins instead of drifting, and the time-stop distribution may improve automatically.
+
+If time-stops still dominate after v6.4:
+
+we’ll consider changing the T1 from 0.5R → 0.4R or
+
+adding a “stall tighten” at 30–45 min
+
+But not before we fix structure-break.
+
+Acceptance Criteria (what I want after next 60 trades)
+
+After v6.4 is running, report:
+
+Structure-break % of exits (should drop)
+
+Avg structure-break R (should improve, ideally not worse than -0.45R)
+
+Count of GIVEBACK exits + avg R (should be near 0 to +0.2R)
+
+Expectancy (target: >-0.05R, ideally near 0)
+
+Win rate (target: 35–42%)
+
+Small straight summary
+
+You’re close: v6.3 expectancy -0.108R with WR 32.4%.
+
+Structure-break is noise-sensitive and late.
+
+v6.4 fix: buffered swing-low break (0.10R), 2-close confirmation, and a giveback exit when mfeR ≥ 0.35R.
+
+Run ~60 trades and send structure-break %/avgR + giveback stats + expectancy.
