@@ -324,6 +324,20 @@ export function checkTieredExitRules(
     }
   }
 
+  if (minutesSinceEntry >= 30 && mfeR >= 0.20 && pnlR < 0.20) {
+    const stalledStop = entryPrice - 0.10 * riskPerShare;
+    if (riskPerShare > 0 && stalledStop > stopPrice) {
+      return {
+        shouldExit: false,
+        exitType: null,
+        exitPrice: null,
+        reason: `Stall tighten at ${minutesSinceEntry}min: MFE +${mfeR.toFixed(2)}R, stop moved to entry-0.10R`,
+        partialShares: null,
+        newStopPrice: stalledStop,
+      };
+    }
+  }
+
   let newTrailingStop: number | null = null;
 
   if (isPartiallyExited) {
