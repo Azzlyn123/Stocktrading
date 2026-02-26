@@ -1624,7 +1624,7 @@ export default function Backtester() {
                 </Button>
                 <Button
                   variant="outline"
-                  onClick={() => startAutoRun.mutate({ minutes: 15, exactDays: 5 })}
+                  onClick={() => startAutoRun.mutate({ minutes: 60, exactDays: 100 })}
                   disabled={startAutoRun.isPending || hasRunning}
                   data-testid="button-run-last-5-days"
                 >
