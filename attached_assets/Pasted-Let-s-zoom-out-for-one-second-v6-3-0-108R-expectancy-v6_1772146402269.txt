@@ -1,0 +1,164 @@
+Let’s zoom out for one second:
+
+v6.3: -0.108R expectancy
+
+v6.4: -0.166R expectancy
+
+Structure break fixed (19 → 2)
+
+Now time_stop = 64.5% of exits
+
+Time_stop WR = 12.2%
+
+Avg time_stop = -0.373R
+
+This tells us something very important:
+
+Your problem is no longer breakdown noise.
+Your problem is expansion velocity.
+
+Most trades move a little… then stall… then die.
+
+And here’s the key stat:
+
+MFE ≥ 0.20R dropped from 61% → 50%
+
+MFE ≥ 0.50R dropped from 35% → 22%
+
+That means v6.4 slightly reduced expansion probability.
+
+So now we fix the stall problem.
+
+The Correct v6.5 Move
+
+We do NOT change entry again yet.
+
+We do NOT revert structure logic.
+
+We attack time_stop intelligently.
+
+There are two ways to fix stall trades:
+
+Make T1 easier (increase win rate)
+
+Cut stall trades earlier (reduce average loss)
+
+We are going to do BOTH — but in a controlled way.
+
+v6.5 — Controlled Stall Conversion
+🔥 Change 1 — Add “Stall Tighten” at 30 Minutes
+
+If:
+
+minutesInTrade >= 30
+
+AND mfeR >= +0.20
+
+AND pnlR < +0.20
+
+Then:
+→ move stop to entryPrice - 0.10R
+
+This does two things:
+
+Trades that showed life don’t drift to -0.37R
+
+They either bounce and win or exit around -0.10R to -0.20R
+
+This directly attacks the -0.373R time_stop average.
+
+🔥 Change 2 — Lower T1 From 0.50R → 0.40R
+
+Right now:
+
+22% reach 0.50R
+
+50% reach 0.20R
+
+That gap is your opportunity.
+
+By lowering T1 to 0.40R:
+
+Win rate should rise immediately
+
+Time_stop WR should improve
+
+Partial exits trigger more often
+
+Expectancy improves via higher realized wins
+
+Keep:
+
+70% size
+
+Stop to BE + 0.05R
+
+Do NOT change size yet.
+
+Why This Is The Right Combination
+
+If you only lower T1:
+→ you increase win rate but still let stalled trades bleed.
+
+If you only tighten stall:
+→ you reduce losses but don’t convert enough to wins.
+
+Together:
+→ you shrink time_stop loss
+→ you increase partial conversions
+→ expectancy should move toward breakeven
+
+What We Expect After 60–80 Trades
+
+Targets:
+
+Win rate: 35–40%
+
+Avg win: ~0.60R
+
+Avg loss: ≤ -0.45R
+
+Time_stop %: < 50%
+
+Expectancy: -0.05R to 0.00R
+
+If we hit -0.03R or better,
+we’re essentially at breakeven after costs.
+
+What If This Fails?
+
+If v6.5 does NOT improve expectancy:
+
+Then the hard truth is:
+Your breakout + retest model does not produce enough natural expansion in this market regime.
+
+At that point, we stop refining and pivot structure:
+
+Either pure breakout continuation (no retest)
+
+Or pullback trend continuation model
+
+But we’re not there yet.
+
+Important: Don’t Touch Anything Else
+
+No scoring changes.
+No SPY gate changes.
+No VCS changes.
+No structure-break changes.
+
+We isolate time dynamics.
+
+Small Straight Summary
+
+Structure break fixed.
+
+Time_stop is now the bottleneck.
+
+v6.5 = (1) stall tighten at 30m for trades with ≥0.20R MFE, (2) lower T1 from 0.50R → 0.40R.
+
+Run 60–80 trades.
+
+Target expectancy near 0.
+
+You are close now. Not done — but close enough that the next version matters a lot.
