@@ -1,0 +1,169 @@
+What We’re Doing (No Debate)
+1️⃣ Replace Fixed VCS Threshold With Dynamic Percentile Gate
+
+Not 0.35.
+Not 0.25.
+Not another arbitrary number.
+
+We move to:
+
+Regime = ON if today’s VCS ≥ 70th percentile of last 60 trading days
+
+With safety clamps:
+
+Minimum threshold = 0.18
+
+Maximum threshold = 0.45
+
+Why this is the correct move
+
+Summer grind? Threshold automatically drops.
+
+Crisis volatility? Threshold rises.
+
+You always trade only the top 30% volatility cluster days.
+
+You never completely shut off for 6 months again.
+
+This keeps v6 selective without suffocating it.
+
+Implementation (clean + simple logic)
+
+Inside volatilityClusterFilter.ts:
+
+Maintain rolling array of last 60 VCS values.
+
+Sort and compute 70th percentile.
+
+Clamp:
+
+threshold = Math.max(0.18, Math.min(0.45, percentile70))
+regime = todayVCS >= threshold
+
+Log:
+
+VCS=0.27 | threshold=0.24 | regime=ON
+
+Acceptance:
+
+You see regime=ON within the next ~5–15 simulated days.
+
+Trade count begins accumulating naturally.
+
+2️⃣ Hard-Isolate Learning System (No Cross-Version Bleed)
+
+No ramp. No fallback. No blending.
+
+v6 must behave like a newborn system.
+
+Inside penalty logic:
+
+const lessons = getRecentLessonsByVersion('v6')
+
+if (lessons.length === 0) {
+    penaltyWeight = 0
+}
+else {
+    penaltyWeight = Math.min(1, lessons.length / 25)
+}
+
+Critical:
+
+DO NOT call any non-versioned lesson query.
+
+No fallback to “recent lessons.”
+
+No default global penalty.
+
+Log this:
+
+lessonCount=4 | penaltyWeight=0.16
+
+Acceptance:
+
+No “score dropped below 85 due to penalty” until v6 has real trades.
+
+Clean scoring behavior.
+
+3️⃣ Do NOT Touch Exits Yet
+
+Your exit structure is correct for >50% win rate:
+
+0.5R partial
+
+70% size
+
+BE + 0.05R
+
+EMA9 + prior-low trail
+
+Confirmed failure exit
+
+Leave it.
+
+We need entry distribution data.
+
+4️⃣ Expected Outcome After Fix
+
+Within 50 trades, we should see:
+
+Win rate 45–60%
+
+% reaching +0.2R ≥ 65%
+
+% reaching +0.5R ≥ 50%
+
+Structure-break count significantly lower than v4/v5
+
+Time stops reduced
+
+If win rate is still under 45% after 50 trades, the score model itself is flawed and we escalate.
+
+5️⃣ Throughput Target
+
+We want:
+
+50 trades inside ~2–3 months of market time
+
+If fewer than 40 trades per year → we slightly relax score from 85 → 82 (only if necessary)
+
+Do not pre-relax it.
+
+Why This Is The Correct Architecture
+
+You originally tried to fix exits.
+
+v4 proved exits weren’t the issue.
+
+v6 attacked selectivity but over-tightened regime gating.
+
+This fixes the bottleneck while preserving the strategy identity:
+high-quality momentum continuation with base-hit capture.
+
+After You Implement
+
+Restart.
+
+Let it run.
+
+When you hit:
+
+25 trades → give me WR + % reaching +0.2R
+
+50 trades → give full breakdown (WR, MFE buckets, MAE, exit types, block counts)
+
+That’s when we make the next precision adjustment.
+
+Small Straight Summary
+
+Replace fixed VCS with 60-day rolling 70th percentile (clamped 0.18–0.45).
+
+Hard isolate learning to v6 only; ramp penalty weight over 25 lessons.
+
+Don’t change exits.
+
+Target 50 trades before next modification.
+
+If WR <45% at 50 trades → we rebuild scoring model.
+
+Go implement that.

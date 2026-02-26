@@ -1,0 +1,99 @@
+Here’s the blunt truth
+
+If your baseline system wins 10–15% of the time,
+you cannot engineer 50%+ win rate through exit mechanics.
+
+You must dramatically reduce how many trades you take.
+
+Why v6 Is the Correct Direction
+
+v6 does three critical things:
+
+• Raises score threshold
+• Hard regime block
+• Stronger candle quality
+• Base-hit partial at +0.5R
+
+That combination shifts the strategy type from:
+
+“Breakout expansion system”
+
+to:
+
+“Selective momentum continuation system”
+
+That’s how you move toward 50%+.
+
+But Here’s the Risk
+
+If v6 still shows <45% win rate after 75–100 trades,
+then the score model itself is flawed.
+
+Because the current score is still letting in fake strength.
+
+What I Want You Watching in v6 (Very Specific)
+
+When v6 hits 50 trades, pull this:
+
+% of trades that reach +0.2R MFE
+
+% that reach +0.5R
+
+Avg MAE on winners
+
+Avg MAE on losers
+
+Structure-break count
+
+If less than 60% of trades reach +0.2R,
+then your entry signal is not predictive at all.
+
+That’s the litmus test.
+
+If v6 Fails to Reach 50%+
+
+Here’s the next escalation path (no guessing):
+
+Escalation Step 1 — Remove Retest
+
+Instead of breakout → retest → entry
+
+Test breakout → immediate continuation entry.
+
+Retests are statistically weaker in chop regimes.
+
+Escalation Step 2 — Require HTF Expansion
+
+Only take trades when 15m bar range is expanding relative to prior 3 bars.
+
+This kills compression fakeouts.
+
+Escalation Step 3 — Add “First Pullback Only” Rule
+
+Only allow first breakout of day per ticker.
+
+Second and third breakouts are much lower win rate.
+
+My Direct Opinion
+
+You’re now past the “tweak stops” stage.
+
+The only path to 50%+ win rate is:
+
+Fewer trades
+Stronger momentum
+Clear institutional participation
+
+v4 proved exits weren’t the root issue.
+
+v6 is your first real attempt at fixing the root.
+
+Small Straight Summary
+
+• v4 confirms entries are weak, not exits.
+• 72% noise bucket means selection problem.
+• v6 is correctly attacking selection.
+• If v6 <45% WR after 75 trades, scoring model must be reworked.
+• Watch % reaching +0.2R — that’s the real truth metric.
+
+When v6 hits 50 trades, bring me that breakdown and we’ll know if we’re close — or if we need to rebuild the scoring model itself.
