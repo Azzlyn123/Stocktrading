@@ -410,6 +410,7 @@ export async function registerRoutes(
   });
 
 
+
   app.post("/api/simulations/:id/cost-sensitivity", requireAuth, async (req, res) => {
     try {
       const user = req.user as User;

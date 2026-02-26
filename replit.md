@@ -41,13 +41,36 @@ The backend features a modular strategy engine with pure TypeScript modules. A s
 - **Avg Winner**: +0.436R / **Avg Loser**: -0.453R
 - **Core Issues**: Negative edge (avg winner < avg loser), heavy bleed from premature 15m "stall" exits, high EOD decay on non-expansion days.
 
-### v2 Strategy Configuration (Tightened Confirmation)
+### v2 Strategy Configuration (Tightened Confirmation) — COMPLETE, NEGATIVE VERDICT
 - **Version Label**: `v2`
 - **Volume Contraction**: Tightened from 0.8x to 0.5x of breakout volume.
 - **Momentum Stall**: Extended from 15m to 45m to allow trades room to breathe.
 - **Default Time Stop**: Extended to 45m.
 - **Auto-Run Adaptation**: Modified `runAutoRunLoop` in `server/historicalSimulator.ts` to prioritize hitting 100+ trades rather than just completing a fixed day count. If the initial window doesn't yield 120 trades, it dynamically extends the lookback window until the target is met or the time limit (60 min) expires.
-- **Status**: v2 auto-run active with trade-target logic for user `Hbg`.
+- **Results (155 trades, May 2025 – Feb 2026)**: WR 5%, avg win +0.48R, avg loss -0.48R, expectancy -0.42R, total R -65.66
+- **R Distribution**: <-1R: 7 (4.5%), -1R–0R: 139 (89.7%), 0–1R: 8 (5.2%), 1–2R: 1 (0.6%), >2R: 0
+- **Dominant Exit**: 3-bar validation exit (77% of trades at -0.44R avg) — unchanged from v1
+- **Verdict**: Made things worse. Volume contraction tightening over-filtered entries. Right tail vanished entirely.
+- **Key Finding**: The 3-bar validation rule (not the stall window) is the actual dominant exit killer. v2's stall extension to 45m was a different code path. Cannot evaluate volume contraction while the 3-bar exit suffocates 77% of trades.
+
+### v3 Strategy Configuration (3-Bar Rule Removed) — ACTIVE
+- **Version Label**: `v3`
+- **Change from v2**: Removed the 3-bar validation exit block in `server/historicalSimulator.ts`. All other v2 parameters frozen (volume contraction 0.5x, time stop 45m, stall 45m).
+- **Removed Code**: Block that exited trades at bar 3+ if MFE had not touched +0.3R. Trades now live to time stop, structure break, or hard stop.
+- **`trade.validated` flag**: Retained for MFE tracking (set when MFE ≥ 0.3R); only the exit-triggering conditional was removed.
+- **Results (154 trades, ~Apr 2025 – Feb 2026)**: WR 18%, avg win +0.80R, avg loss -0.54R, expectancy -0.286R, total R -44.00, stddev 0.695
+- **R Distribution**: <-1R: 18 (11.7%), -1R–0R: 106 (68.8%), 0–1R: 16 (10.4%), 1–2R: 12 (7.8%), >2R: 2 (1.3%)
+- **Exit Breakdown**: Time stop 46 (30%) -0.446R, Structure break 43 (28%) -0.485R, Stop hit 41 (27%) -0.138R, EOD 13 (8%) +0.036R
+- **Key Observations**:
+  - Right tail restored: 14/154 trades ≥ 1R (vs 1/155 in v2); 2R+ trades reappeared
+  - Win rate recovered: 18% (vs v2 5%, v1 13%)
+  - Avg winner nearly doubled: 0.80R (vs v2 0.48R, v1 0.42R)
+  - Breakeven lock functioning: Stop hit avg -0.138R means BE locks activated frequently
+  - Compression in -1R–0R bucket broke: 89.7% → 68.8%
+  - Distribution clustering: Apr 9 2025 alone produced 7+ winners (tariff reversal day — regime risk)
+  - Learning system cross-contamination: v1+v2 lesson history penalizes v3 entries based on historically bad exits (TSLA 17/17 loss rate, etc.) — some valid setups skipped
+- **Remaining Issues**: Expectancy still negative (-0.286R). WR 18% requires avg win ≥ 2.45R to break even at avg loss -0.54R. Avg losers from time stop (-0.446R) and structure break (-0.485R) still bleeding. Next candidates: widen time stop or investigate learning penalty cross-contamination.
+- **Current Status**: Hbg on v3. Auto-run complete.
 
 ### Small-Cap Momentum: First Pullback After HOD Break — EXTENDED OOS COMPLETE
 - **Frozen Config**: gap ≥ 6%, premarket vol ≥ 1M, trail at 0.75R, activation at 1.25R, spread ≤ 1.5%, min dollar vol $2M
