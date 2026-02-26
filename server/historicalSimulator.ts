@@ -1367,6 +1367,7 @@ export async function runHistoricalSimulation(
             effectiveRisk,
             state.atr14,
             state.resistanceLevel ?? undefined,
+            trade.mfeR,
           );
 
           if (exitResult.shouldExit) {

@@ -164,7 +164,8 @@ export function checkTieredExitRules(
   exitsConfig: TieredStrategyConfig["exits"],
   riskConfig: TieredStrategyConfig["risk"],
   currentAtr: number,
-  breakoutLevel?: number
+  breakoutLevel?: number,
+  mfeR: number = 0
 ): ExitDecision {
   const currentPrice = currentCandle.close;
   const pnlR = riskPerShare > 0 ? (currentPrice - entryPrice) / riskPerShare : 0;
@@ -216,26 +217,44 @@ export function checkTieredExitRules(
     };
   }
 
-  if (exitsConfig.earlyFailureExit && !isPartiallyExited && pnlR <= -0.15 && recentBars5m.length >= 9) {
+  if (
+    exitsConfig.earlyFailureExit &&
+    !isPartiallyExited &&
+    minutesSinceEntry >= 15 &&
+    pnlR <= -0.15 &&
+    pnlR > -0.45 &&
+    recentBars5m.length >= 9
+  ) {
     const closes = recentBars5m.map((c) => c.close);
     const ema9 = lastEMA(closes, 9);
+    const n = recentBars5m.length;
+    const prev = n >= 2 ? recentBars5m[n - 2] : null;
+
     if (ema9 > 0 && currentPrice < ema9) {
-      const n = recentBars5m.length;
-      const prev = n >= 2 ? recentBars5m[n - 2] : null;
-      const prevPrev = n >= 3 ? recentBars5m[n - 3] : null;
-      const twoRedCandles =
-        prev && prevPrev
-          ? prev.close < prev.open && currentCandle.close < currentCandle.open
-          : false;
-      const bearPush = prev ? currentCandle.high < prev.low : false;
-      const levelFail = breakoutLevel != null && currentPrice < breakoutLevel;
-      if (twoRedCandles || bearPush || levelFail) {
-        const why = levelFail ? "level fail" : twoRedCandles ? "2 red candles" : "bear push";
+      const twoBelowEMA9 = prev != null && prev.close < ema9 && currentPrice < ema9;
+      const levelFail =
+        breakoutLevel != null &&
+        riskPerShare > 0 &&
+        currentPrice < breakoutLevel - 0.10 * riskPerShare;
+      const levelFail_strict =
+        breakoutLevel != null &&
+        riskPerShare > 0 &&
+        currentPrice < breakoutLevel - 0.15 * riskPerShare;
+
+      let confirmFail: boolean;
+      if (mfeR >= 0.20) {
+        confirmFail = twoBelowEMA9 && (breakoutLevel == null || levelFail_strict);
+      } else {
+        confirmFail = twoBelowEMA9 && (breakoutLevel == null || levelFail);
+      }
+
+      if (confirmFail) {
+        const levelNote = (mfeR >= 0.20 ? levelFail_strict : levelFail) ? ", level break" : "";
         return {
           shouldExit: true,
           exitType: "hard_exit",
           exitPrice: currentPrice,
-          reason: `Early failure: ${why}, below EMA9 ($${ema9.toFixed(2)}), pnl ${pnlR.toFixed(2)}R`,
+          reason: `Early failure: 2 closes below EMA9 ($${ema9.toFixed(2)})${levelNote}, MFE was +${mfeR.toFixed(2)}R, pnl ${pnlR.toFixed(2)}R`,
           partialShares: null,
           newStopPrice: null,
         };
