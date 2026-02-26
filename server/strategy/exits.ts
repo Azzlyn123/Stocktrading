@@ -187,7 +187,7 @@ export function checkTieredExitRules(
       exitPrice: currentPrice,
       reason: `Partial exit at +${pnlR.toFixed(1)}R`,
       partialShares,
-      newStopPrice: exitsConfig.moveStopToBE ? entryPrice : null,
+      newStopPrice: exitsConfig.moveStopToBE ? entryPrice + 0.05 * riskPerShare : null,
     };
   }
 
@@ -213,6 +213,21 @@ export function checkTieredExitRules(
       partialShares: null,
       newStopPrice: null,
     };
+  }
+
+  if (exitsConfig.earlyFailureExit && !isPartiallyExited && pnlR < 0 && recentBars5m.length >= 9) {
+    const closes = recentBars5m.map((c) => c.close);
+    const ema9 = lastEMA(closes, 9);
+    if (ema9 > 0 && currentPrice < ema9) {
+      return {
+        shouldExit: true,
+        exitType: "hard_exit",
+        exitPrice: currentPrice,
+        reason: `Early failure: below EMA9 ($${ema9.toFixed(2)}), no T1 progress`,
+        partialShares: null,
+        newStopPrice: null,
+      };
+    }
   }
 
   if (recentBars5m.length >= 5) {

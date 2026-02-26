@@ -60,6 +60,7 @@ export interface TieredStrategyConfig {
     useEMA9Trail: boolean;
     usePriorLowTrail: boolean;
     hardExitRedCandles: number;
+    earlyFailureExit: boolean;
   };
   daily: {
     maxLosingTrades: number;

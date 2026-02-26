@@ -135,7 +135,7 @@ app.use((req, res, next) => {
         try {
           const resp = await fetch(`http://localhost:${port}/api/internal/trigger-autorun`, {
             method: "POST",
-            headers: { "X-Internal-Token": "v4run2" },
+            headers: { "X-Internal-Token": "v6run" },
           });
           const data = await resp.json() as any;
           log(`[AutoStart] Self-trigger: ${data?.message ?? JSON.stringify(data)}`, "startup");

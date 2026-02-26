@@ -2452,7 +2452,7 @@ export async function registerRoutes(
 
   app.post("/api/internal/trigger-autorun", async (req, res) => {
     const token = req.headers["x-internal-token"];
-    if (token !== "v4run2") return res.status(403).json({ error: "Forbidden" });
+    if (token !== "v6run") return res.status(403).json({ error: "Forbidden" });
     const user = await storage.getUserByUsername("Hbg");
     if (!user) return res.status(404).json({ error: "User not found" });
     const result = await startAutoRun(user.id, 60, storage, 365);

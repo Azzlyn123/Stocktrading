@@ -8,6 +8,12 @@ BreakoutIQ is a full-stack trading alert application for US equities and ETFs, d
 - Inter font family
 - JetBrains Mono for monospace
 
+## Current Strategy Version
+**v6** (active) — High-conviction entry + win-rate-biased exits:
+- Entry: minScore=85, Tier A/B only (hard SPY alignment gate), breakout candle quality (close ≥75% of bar range + volume expansion vs prior bar)
+- Exit: T1 at +0.5R/70% sell, stop moves to BE+0.05R after T1, 30% runner trails EMA9 or prior candle low, early failure exit (below EMA9 with no T1 progress)
+- v5 baseline: 571 trades, -0.292R expectancy, 15.4% WR
+
 ## System Architecture
 BreakoutIQ is built with a React 18 frontend (TypeScript, Vite, TailwindCSS, Shadcn UI), an Express.js (Node.js) backend, and a PostgreSQL database with Drizzle ORM. Authentication uses Passport-local with session-based methods, and real-time data/notifications are handled via WebSockets. The frontend utilizes Wouter for routing, TanStack React Query for state management, and Recharts for charting.
 

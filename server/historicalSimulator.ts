@@ -796,6 +796,12 @@ export async function runHistoricalSimulation(
     }
 
     const tieredConfig = buildTieredConfigFromUser(user);
+    const _v6 = (user?.currentStrategyVersion ?? "v1") >= "v6";
+    if (_v6) {
+      tieredConfig.exits.partialAtR = 0.5;
+      tieredConfig.exits.partialPct = 70;
+      tieredConfig.exits.earlyFailureExit = true;
+    }
     let processedBars = 0;
     let tradesGenerated = 0;
     let lessonsGenerated = 0;
@@ -1847,7 +1853,22 @@ export async function runHistoricalSimulation(
                 tieredConfig.strategy,
               );
 
-              if (breakoutResult.qualified) {
+              let candidateBoQualified = breakoutResult.qualified;
+              if (candidateBoQualified && _v6) {
+                const barRange = bar.high - bar.low;
+                const closeNearHighs = barRange > 0 && (bar.close - bar.low) / barRange >= 0.75;
+                const prevBar5m = state.bars5m.length >= 2 ? state.bars5m[state.bars5m.length - 2] : null;
+                const volExpanding = prevBar5m ? bar.volume > prevBar5m.volume : true;
+                if (!closeNearHighs || !volExpanding) {
+                  log(
+                    `[HistSim] ${ticker} breakout rejected (v6 quality gate): closeNearHighs=${closeNearHighs} volExpanding=${volExpanding}`,
+                    "historical",
+                  );
+                  candidateBoQualified = false;
+                }
+              }
+
+              if (candidateBoQualified) {
                 diag.boQualified++;
                 state.signalState = "BREAKOUT";
                 state.breakoutCandle = bar;
@@ -1947,6 +1968,28 @@ export async function runHistoricalSimulation(
                   score: 0,
                   penalty: 0,
                   reason: `Index expansion gate: ${regimeResult.reasons.filter(r => !r.includes("expanding:")).join(", ")}`,
+                  barIndex: i,
+                  price: bar.close,
+                });
+                state.signalState = "IDLE";
+                state.selectedTier = null;
+                state.breakoutCandle = null;
+                state.retestBars = [];
+                processedBars++;
+                continue;
+              }
+
+              if (_v6 && !regimeResult.aligned) {
+                log(
+                  `[HistSim] ${ticker} BLOCKED by SPY alignment gate (v6): regime misaligned`,
+                  "historical",
+                );
+                incrementAutoRunSkipped();
+                skippedSetups.push({
+                  ticker,
+                  score: 0,
+                  penalty: 0,
+                  reason: "SPY not aligned (v6 gate)",
                   barIndex: i,
                   price: bar.close,
                 });
@@ -2094,7 +2137,7 @@ export async function runHistoricalSimulation(
                   );
                 }
 
-                const minScore = 70;
+                const minScore = _v6 ? 85 : 70;
                 if (score < minScore) {
                   log(
                     `[HistSim] ${ticker} SKIPPED entry - score ${score} below threshold ${minScore} after learning penalty`,

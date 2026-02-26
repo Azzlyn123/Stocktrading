@@ -63,6 +63,7 @@ export const DEFAULT_TIERED_CONFIG: TieredStrategyConfig = {
     useEMA9Trail: true,
     usePriorLowTrail: true,
     hardExitRedCandles: 0,
+    earlyFailureExit: false,
   },
   daily: {
     maxLosingTrades: 999999,
@@ -261,6 +262,7 @@ export function buildTieredConfigFromUser(user: any): TieredStrategyConfig {
       useEMA9Trail: user.useEMA9Trail ?? base.exits.useEMA9Trail,
       usePriorLowTrail: user.usePriorLowTrail ?? base.exits.usePriorLowTrail,
       hardExitRedCandles: user.hardExitRedCandles ?? base.exits.hardExitRedCandles,
+      earlyFailureExit: user.earlyFailureExit ?? base.exits.earlyFailureExit,
     },
     daily: {
       maxLosingTrades: user.maxLosingTrades ?? base.daily.maxLosingTrades,
