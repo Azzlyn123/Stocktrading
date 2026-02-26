@@ -34,6 +34,20 @@ The backend features a modular strategy engine with pure TypeScript modules. A s
 
 ## Strategy Validation Results
 
+### v1 Strategy Performance (Baseline)
+- **Total Trades**: 381 (Full Tier)
+- **Win Rate**: 12.3%
+- **Expectancy**: -0.34R
+- **Avg Winner**: +0.436R / **Avg Loser**: -0.453R
+- **Core Issues**: Negative edge (avg winner < avg loser), heavy bleed from premature 15m "stall" exits, high EOD decay on non-expansion days.
+
+### v2 Strategy Configuration (Tightened Confirmation)
+- **Version Label**: `v2`
+- **Volume Contraction**: Tightened from 0.8x to 0.5x of breakout volume.
+- **Momentum Stall**: Extended from 15m to 45m to allow trades room to breathe.
+- **Default Time Stop**: Extended to 45m.
+- **Status**: 100-day auto-run triggered for user `Hbg`.
+
 ### Small-Cap Momentum: First Pullback After HOD Break — EXTENDED OOS COMPLETE
 - **Frozen Config**: gap ≥ 6%, premarket vol ≥ 1M, trail at 0.75R, activation at 1.25R, spread ≤ 1.5%, min dollar vol $2M
 - **Phase B Walk-Forward**: PASSED (Feb 3-14: 13 trades, +0.553R, 69.2% WR, PF 2.53) — uses walk-forward sweep with combo-specific universe

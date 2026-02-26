@@ -84,7 +84,6 @@ export async function registerRoutes(
 ): Promise<Server> {
   setupAuth(app);
 
-  const walkForwardResults = new Map<string, any>();
 
   // Auth routes
   app.post("/api/register", async (req, res, next) => {

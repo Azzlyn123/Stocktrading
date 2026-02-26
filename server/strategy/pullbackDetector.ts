@@ -146,7 +146,7 @@ export function checkPullbackRebreak(
     const avgPullbackVol = state.pullbackVolumes.length > 0
       ? state.pullbackVolumes.reduce((s, v) => s + v, 0) / state.pullbackVolumes.length
       : 0;
-    volumeContraction = avgPullbackVol < state.avgBreakoutVolume * 0.8;
+    volumeContraction = avgPullbackVol < state.avgBreakoutVolume * 0.5;
   }
 
   if (config.volumeContractionRequired && !volumeContraction) return null;
