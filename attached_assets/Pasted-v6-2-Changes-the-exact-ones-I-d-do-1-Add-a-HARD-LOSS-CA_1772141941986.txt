@@ -1,0 +1,121 @@
+v6.2 Changes (the exact ones I’d do)
+1) Add a HARD LOSS CAP for early-failure
+
+Early-failure should never be worse than a normal stop.
+
+Rule: if pnlR <= -0.45, early-failure is disabled (let the actual stop logic handle it).
+This prevents panic exits at -0.7R.
+
+Why this works:
+If you’re already deep red, the best action is either:
+
+stop is close and will fire soon anyway, or
+
+structure hasn’t broken and you should allow rebound
+
+This one guard alone will immediately remove the “-0.71R” problem.
+
+2) Make early-failure require “time + proof”
+
+Right now it triggers too fast on normal oscillation.
+
+Replace your condition with this:
+
+Early-failure can only trigger if ALL:
+
+!partialExit
+
+minutesInTrade >= 15 (no early chop exits)
+
+pnlR between -0.15 and -0.45
+
+close < EMA9
+
+AND failure proof must be strong, not easy:
+
+close < breakoutLevel by buffer (ex: breakoutLevel - 0.10R), not just “below level”
+
+AND either
+
+2 consecutive 5m closes below EMA9, OR
+
+“bear push” + volume expansion (down volume > up volume)
+
+Key idea: you need 2 closes / confirmation, not one bar.
+
+3) Remove “2 red candles” as a trigger (it’s too noisy)
+
+Two red candles happens constantly on healthy pullbacks. It’s a false signal in 5m.
+
+If you want candle-based proof, use:
+
+2 consecutive closes below EMA9
+not “red candles.”
+
+Close location matters more than candle color.
+
+4) Add a “recovery grace” rule (this protects real momentum)
+
+If the trade has ever shown real promise, don’t early-fail it so easily.
+
+If MFE >= +0.20R at any point, then early-failure requires stricter proof:
+
+close < breakoutLevel - 0.15R AND 2 closes below EMA9
+
+This stops you from cutting good trades that temporarily dip.
+
+Expected outcome after v6.2
+
+Early-failure should drop from:
+
+36% of exits → ~10–20%
+and its avg loss should compress to:
+
+~ -0.20R to -0.35R (if it triggers)
+
+That alone should move expectancy from -0.304R toward -0.15R-ish even without improving win rate, because you’re removing the huge loss cluster.
+
+Your win rate will likely rise too, because you’ll stop cutting rebound winners.
+
+If you want 50%+ win rate, here’s the honest next layer
+
+Your win rate is 23.6% right now because:
+
+base-hit target is small, but
+
+your entries still don’t follow through enough.
+
+Once early-failure is fixed, the next win-rate lever is make T1 easier:
+
+Optional v6.3 (only after v6.2 prints 50 trades)
+
+Change T1 from +0.50R → +0.40R
+
+Sell 80% at T1
+
+Move stop to BE + 0.05R
+
+That’s the classic “win-rate conversion.”
+But don’t do it yet until early-failure is no longer poisoning the distribution.
+
+What I need from you after the change (so we iterate correctly)
+
+After the next 30 trades on v6.2, send:
+
+Early-failure count, avg R, win rate
+
+Stop-hit avg loss
+
+Time-stop avg and WR
+
+% reaching +0.2R and +0.5R
+
+That’s enough to decide whether to lower T1.
+
+Small straight summary
+
+Early-failure is firing too often and too late (avg -0.71R), worse than normal stops.
+
+Fix it by: loss-cap (-0.45R), time gate (≥15m), stronger confirmation (2 closes below EMA9 + buffered level break), remove “2 red candles,” and add MFE grace.
+
+Expect early-failure frequency to fall and avg loss to shrink to -0.2 to -0.35R, improving expectancy fast.

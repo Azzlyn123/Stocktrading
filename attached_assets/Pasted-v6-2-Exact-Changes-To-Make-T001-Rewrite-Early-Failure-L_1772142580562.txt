@@ -1,0 +1,176 @@
+v6.2 — Exact Changes To Make
+🔧 T001 — Rewrite Early-Failure Logic (Core Fix)
+
+Replace the current early-failure block entirely.
+
+Early-failure should ONLY trigger if ALL conditions are met:
+
+1️⃣ Time gate (no early chop exits)
+minutesInTrade >= 15
+2️⃣ Loss window gate (true “early” exit only)
+pnlR <= -0.15
+AND
+pnlR > -0.45
+
+If pnlR <= -0.45 → DO NOT early-exit. Let hard stop logic handle it.
+
+This prevents -0.7R panic exits.
+
+3️⃣ Confirmed weakness (not candle color)
+
+Remove:
+
+2 red candles
+
+Replace with:
+
+close < EMA9
+AND
+previousClose < EMA9   // 2 consecutive closes below EMA9
+
+Closes matter. Candle color does not.
+
+4️⃣ Buffered level failure (not tiny pierce)
+
+Require:
+
+close < breakoutLevel - (0.10 * riskPerShare)
+
+Not just “below breakout.”
+
+That buffer eliminates noise.
+
+5️⃣ MFE Grace Rule (protect real momentum)
+
+If the trade ever reached:
+
+mfeR >= +0.20
+
+Then early-failure requires stricter proof:
+
+close < breakoutLevel - (0.15 * riskPerShare)
+AND
+2 consecutive closes below EMA9
+
+This prevents cutting good trades during healthy pullbacks.
+
+🔧 T002 — Ensure mfeR is TRUE max excursion
+
+Make sure mfeR is:
+
+max( (highestPriceSinceEntry - entryPrice) / riskPerShare )
+
+Not current PnL.
+Not rolling.
+Not reset.
+
+True max favorable excursion.
+
+🔧 T003 — Version Bump Cleanly
+
+Do NOT delete trades.
+
+Set currentStrategyVersion = "v6.2"
+
+Reset only v6.2 trades
+
+Restart sim
+
+This keeps audit trail intact.
+
+🚫 What You DO NOT Touch
+
+Do not change:
+
+Score threshold (85)
+
+SPY gate
+
+VCS logic
+
+Partial exit (0.5R, 70%)
+
+Time stop logic
+
+Stop placement
+
+We isolate the variable.
+
+🎯 What We Expect After 30 Trades
+
+Early-failure:
+
+Frequency: 36% → target 10–20%
+
+Avg loss: -0.71R → target -0.20R to -0.35R
+
+Win rate:
+
+Should rise above 30%
+
+Possibly 35%+
+
+Expectancy:
+
+Should move meaningfully closer to 0
+
+If early-failure still >25% OR avg loss still worse than -0.40R,
+then we know something deeper is wrong.
+
+🔥 If v6.2 Still Fails
+
+Then we escalate.
+
+Escalation will NOT be tweaking exits again.
+
+We will:
+
+Remove retest requirement (enter breakout continuation)
+
+Rebuild score weighting around expansion velocity
+
+Possibly redesign from breakout to pullback trend continuation
+
+But we don’t jump there yet.
+
+We test v6.2 cleanly.
+
+📊 What You Send Me After 30 Trades
+
+Send:
+
+Win rate
+
+Avg win
+
+Avg loss
+
+Early-failure count + avg R
+
+% reaching +0.2R
+
+% reaching +0.5R
+
+That’s it.
+
+No noise.
+
+Small Straight Summary
+
+Implement:
+
+Time gate (≥15m)
+
+Loss window (-0.15R to -0.45R)
+
+2 closes below EMA9
+
+Buffered breakout failure (-0.10R, or -0.15R if mfeR ≥ 0.20)
+
+True mfeR tracking
+
+Version bump to v6.2
+
+Then run 30 trades and reassess.
+
+This is the cleanest next move.
