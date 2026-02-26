@@ -262,6 +262,20 @@ export function checkTieredExitRules(
     }
   }
 
+  if (mfeR >= 0.35 && pnlR <= 0.05 && recentBars5m.length >= 9) {
+    const ema9Giveback = lastEMA(recentBars5m.map(c => c.close), 9);
+    if (currentPrice < ema9Giveback) {
+      return {
+        shouldExit: true,
+        exitType: "hard_exit",
+        exitPrice: currentPrice,
+        reason: `Giveback exit: MFE was +${mfeR.toFixed(2)}R, now at +${pnlR.toFixed(2)}R below EMA9`,
+        partialShares: null,
+        newStopPrice: null,
+      };
+    }
+  }
+
   if (recentBars5m.length >= 5) {
     const lookback = recentBars5m.slice(-10);
     const swingLows: number[] = [];
@@ -272,18 +286,22 @@ export function checkTieredExitRules(
     }
     if (swingLows.length > 0) {
       const recentSwingLow = swingLows[swingLows.length - 1];
-      if (currentPrice < recentSwingLow) {
-        const ema9 = lastEMA(recentBars5m.map(c => c.close), 9);
-        if (currentPrice < ema9) {
-          return {
-            shouldExit: true,
-            exitType: "hard_exit",
-            exitPrice: currentPrice,
-            reason: `Structure break: price $${currentPrice.toFixed(2)} below swing low $${recentSwingLow.toFixed(2)} and EMA9`,
-            partialShares: null,
-            newStopPrice: null,
-          };
-        }
+      const bufferPrice = riskPerShare > 0 ? 0.10 * riskPerShare : 0;
+      const bufferedSwingLow = recentSwingLow - bufferPrice;
+      const ema9Struct = lastEMA(recentBars5m.map(c => c.close), 9);
+      const prevBar = recentBars5m.length >= 2 ? recentBars5m[recentBars5m.length - 2] : null;
+      const belowBuffered = currentPrice < bufferedSwingLow;
+      const prevBelowBuffered = prevBar != null && prevBar.close < bufferedSwingLow;
+      const belowEMA9 = currentPrice < ema9Struct;
+      if (belowBuffered && prevBelowBuffered && belowEMA9) {
+        return {
+          shouldExit: true,
+          exitType: "hard_exit",
+          exitPrice: currentPrice,
+          reason: `Structure break: 2-bar close below swing low $${recentSwingLow.toFixed(2)} (buffer 0.10R) and EMA9`,
+          partialShares: null,
+          newStopPrice: null,
+        };
       }
     }
   }
