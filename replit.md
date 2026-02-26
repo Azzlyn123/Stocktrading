@@ -46,7 +46,8 @@ The backend features a modular strategy engine with pure TypeScript modules. A s
 - **Volume Contraction**: Tightened from 0.8x to 0.5x of breakout volume.
 - **Momentum Stall**: Extended from 15m to 45m to allow trades room to breathe.
 - **Default Time Stop**: Extended to 45m.
-- **Status**: 100-day auto-run triggered for user `Hbg`.
+- **Auto-Run Adaptation**: Modified `runAutoRunLoop` in `server/historicalSimulator.ts` to prioritize hitting 100+ trades rather than just completing a fixed day count. If the initial window doesn't yield 120 trades, it dynamically extends the lookback window until the target is met or the time limit (60 min) expires.
+- **Status**: v2 auto-run active with trade-target logic for user `Hbg`.
 
 ### Small-Cap Momentum: First Pullback After HOD Break — EXTENDED OOS COMPLETE
 - **Frozen Config**: gap ≥ 6%, premarket vol ≥ 1M, trail at 0.75R, activation at 1.25R, spread ≤ 1.5%, min dollar vol $2M

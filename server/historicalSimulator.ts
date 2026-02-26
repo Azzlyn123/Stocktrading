@@ -600,16 +600,26 @@ async function runAutoRunLoop(userId: string, storage: IStorage) {
   const deadline =
     autoRunState.startedAt + autoRunState.durationMinutes * 60 * 1000;
 
+  let totalProcessedTrades = 0;
+  const targetTrades = 120;
+
   while (
-    autoRunState.datesRemaining.length > 0 &&
+    (autoRunState.datesRemaining.length > 0 || totalProcessedTrades < targetTrades) &&
     Date.now() < deadline &&
     !autoRunState.cancel
   ) {
+    if (autoRunState.datesRemaining.length === 0) {
+      // If we ran out of dates but haven't hit trade target, look back further
+      const lastDate = new Date(autoRunState.datesCompleted[autoRunState.datesCompleted.length - 1]);
+      const extraDates = getWeekdaysGoingBack(lastDate, 20);
+      autoRunState.datesRemaining.push(...extraDates);
+    }
+
     const date = autoRunState.datesRemaining.shift()!;
     autoRunState.currentDate = date;
 
     log(
-      `[AutoRun] Simulating ${date} (${autoRunState.datesCompleted.length + 1}/${autoRunState.datesCompleted.length + autoRunState.datesRemaining.length + 1})`,
+      `[AutoRun] Simulating ${date} (${autoRunState.datesCompleted.length + 1} dates, ${totalProcessedTrades} trades)`,
       "historical",
     );
 
@@ -626,7 +636,9 @@ async function runAutoRunLoop(userId: string, storage: IStorage) {
 
     const completedRun = await storage.getSimulationRun(run.id);
     if (completedRun) {
-      autoRunState.totalTrades += completedRun.tradesGenerated ?? 0;
+      const generated = completedRun.tradesGenerated ?? 0;
+      autoRunState.totalTrades += generated;
+      totalProcessedTrades += generated;
       autoRunState.totalLessons += completedRun.lessonsGenerated ?? 0;
       autoRunState.totalPnl += completedRun.totalPnl ?? 0;
     }
