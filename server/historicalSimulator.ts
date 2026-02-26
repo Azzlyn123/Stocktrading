@@ -456,6 +456,7 @@ interface HistoricalTickerState {
     mfe30minPrice: number;
     breakevenLocked: boolean;
     validated: boolean;
+    softStopTightened: boolean;
   } | null;
 }
 
@@ -1047,6 +1048,20 @@ export async function runHistoricalSimulation(
               trade.breakevenLocked = true;
             }
 
+            // v5 soft stop: at 45min, if MFE is 0.30–0.50R (validated but not BE-locked),
+            // tighten stop to entry + 0.10R instead of hard exit — limits downside while letting winners run
+            if (!trade.softStopTightened && trade.validated && !trade.breakevenLocked && minutesSinceEntry >= 45) {
+              const softStop = trade.entryPrice + riskPerShare * 0.10;
+              if (softStop > trade.stopPrice) {
+                log(
+                  `[HistSim] ${ticker} SOFT STOP: 45min, MFE ${trade.mfeR.toFixed(2)}R (0.30-0.50R zone), stop tightened $${trade.stopPrice.toFixed(2)} → $${softStop.toFixed(2)} (entry+0.10R)`,
+                  "historical",
+                );
+                trade.stopPrice = softStop;
+              }
+              trade.softStopTightened = true;
+            }
+
           }
 
           if (trade.pendingExit) {
@@ -1303,7 +1318,9 @@ export async function runHistoricalSimulation(
             continue;
           }
 
-          const effectiveRisk = trade.breakevenLocked
+          // v5: time-stop exempt if MFE ever reached 0.30R (reverted from v4's 0.50R threshold)
+          // Soft-stop tighten (0.30–0.50R zone) is handled above in the MFE tracking block
+          const effectiveRisk = trade.validated
             ? { ...tieredConfig.risk, timeStopMinutes: 0 }
             : tieredConfig.risk;
           const exitResult = checkTieredExitRules(
@@ -2111,6 +2128,7 @@ export async function runHistoricalSimulation(
                   mfe30minPrice: entryPrice,
                   breakevenLocked: false,
                   validated: false,
+                  softStopTightened: false,
                 };
 
                 log(

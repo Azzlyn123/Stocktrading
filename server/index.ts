@@ -130,6 +130,19 @@ app.use((req, res, next) => {
     },
     () => {
       log(`serving on port ${port}`);
+      // Auto-trigger auto-run on each startup to survive crash-restart cycles
+      setTimeout(async () => {
+        try {
+          const resp = await fetch(`http://localhost:${port}/api/internal/trigger-autorun`, {
+            method: "POST",
+            headers: { "X-Internal-Token": "v4run2" },
+          });
+          const data = await resp.json() as any;
+          log(`[AutoStart] Self-trigger: ${data?.message ?? JSON.stringify(data)}`, "startup");
+        } catch (err: any) {
+          log(`[AutoStart] Self-trigger failed: ${err?.message}`, "startup");
+        }
+      }, 2000);
     },
   );
 })();

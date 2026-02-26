@@ -1,0 +1,79 @@
+What v4 actually proved
+
+1) The mechanism worked (but it solved the wrong problem)
+	•	Time-stop avg improved from –0.446R → –0.306R (good).
+	•	Time-stop share increased (30% → 44%), meaning your conditional logic is firing more often and earlier.
+So yes: you successfully cut grinders sooner.
+
+2) The cost was unacceptable: you killed the right tail
+	•	≥1R winners: v3 9.1% → v4 5.1%
+	•	2R: v3 had 2, v4 has 0
+	•	Avg winner fell: 0.80R → 0.56R
+	•	StdDev fell: 0.695 → 0.546 (less spread = less tail)
+
+This tells me the 0.5R exemption is too hard to earn, so trades that would have become 1R+ are now being classified as “not strong enough” and time-stopped.
+
+3) The stop-hit worsening is a side effect of later BE lock
+
+Stop-hit avg got worse (–0.188R → –0.322R) while stop-hit frequency fell.
+
+That fits your explanation:
+	•	If BE lock triggers later, fewer trades get protected.
+	•	More trades revert through entry before protection engages, so when they do stop, it’s at worse R.
+
+4) EOD deterioration is real but probably not the main story
+
+EOD is small counts (13 vs 6) and can swing, but directionally it supports the same point: fewer runners.
+
+The clean next move
+
+You already said it: the right threshold is between 0.3R and 0.5R — but we can do better than “try 0.4R.”
+
+v5 recommendation (best EV): two-tier exemption + earlier protection
+
+Instead of a single hard exemption threshold:
+
+A) Time-stop eligibility
+	•	Apply time stop at 45m only if MFE < 0.30R
+	•	This preserves the v3 behavior that allowed “early spark” trades to live.
+
+B) Early protection (BE lock)
+	•	Keep BE lock earlier than v4:
+	•	Trigger BE lock at +0.30R MFE (or +0.35R if you want a small compromise)
+	•	Then use your existing trailing/structure logic to manage.
+
+C) Optional: “soft time stop” for MFE between 0.30R and 0.50R
+	•	If MFE is 0.30R–0.50R at 45m:
+	•	tighten stop to “structure minus small buffer” or to entry + tiny cushion (fees/slip)
+	•	but do not hard exit immediately
+
+Why this dominates v4:
+	•	Grinders (MFE < 0.30R) still get chopped.
+	•	Trades that show any real spark (0.30–0.50R) are allowed to mature into the right tail.
+	•	BE protection engages earlier, improving the “stop hit” average.
+
+My opinion: this is the highest-probability path to restoring v3’s tail while keeping some of v4’s grinder control.
+
+Also: fix learner cross-contamination before trusting any v5+ results
+
+You called this earlier and it matters more now.
+
+If the learner is penalizing symbols off v1/v2, it will disproportionately suppress exactly the kind of “works sometimes, big when it works” behavior you need.
+
+Minimum fix:
+	•	Scope learner stats by version (v3+ should only learn from v3+)
+	•	Or reset learner state at each version bump
+
+Do that before you conclude anything about fine thresholds.
+
+What to watch in v5 (early, before 100 trades)
+
+You don’t need to wait long to know if it’s working.
+
+Success signals by ~50 trades:
+	•	≥1R bucket back near 8–10%
+	•	Avg winner back above 0.75R
+	•	Time-stop avg stays better than v3 (closer to –0.30R than –0.45R)
+	•	Stop-hit avg improves (toward –0.15R to –0.20R)
+
+If those three move together, expectancy will follow.
