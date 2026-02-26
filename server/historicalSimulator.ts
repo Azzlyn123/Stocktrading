@@ -797,6 +797,7 @@ export async function runHistoricalSimulation(
 
     const tieredConfig = buildTieredConfigFromUser(user);
     const _v6 = (user?.currentStrategyVersion ?? "v1") >= "v6";
+    const _v6_3 = (user?.currentStrategyVersion ?? "v1") >= "v6.3";
     if (_v6) {
       tieredConfig.exits.partialAtR = 0.5;
       tieredConfig.exits.partialPct = 70;
@@ -1332,6 +1333,8 @@ export async function runHistoricalSimulation(
                 },
                 durationMinutes: minutesSinceEntry,
                 strategyVersion: user?.currentStrategyVersion ?? "v1",
+                mfeR: Number(trade.mfeR.toFixed(3)),
+                maeR: Number(trade.maeR.toFixed(3)),
               });
               lessonsGenerated++;
             } else {
@@ -1786,6 +1789,8 @@ export async function runHistoricalSimulation(
                 },
                 durationMinutes: minutesSinceEntry,
                 strategyVersion: user?.currentStrategyVersion ?? "v1",
+                mfeR: Number(trade.mfeR.toFixed(3)),
+                maeR: Number(trade.maeR.toFixed(3)),
               });
               lessonsGenerated++;
             } else {
@@ -1870,6 +1875,23 @@ export async function runHistoricalSimulation(
                     "historical",
                   );
                   candidateBoQualified = false;
+                }
+
+                if (candidateBoQualified && _v6_3) {
+                  const last5 = state.bars5m.slice(-6, -1);
+                  if (last5.length >= 3) {
+                    const avgRange5 = last5.reduce((s, b) => s + (b.high - b.low), 0) / last5.length;
+                    const avgVol5 = last5.reduce((s, b) => s + b.volume, 0) / last5.length;
+                    const rangeAccel = avgRange5 > 0 && barRange >= 1.2 * avgRange5;
+                    const volAccel = avgVol5 > 0 && bar.volume >= 1.5 * avgVol5;
+                    if (!rangeAccel || !volAccel) {
+                      log(
+                        `[HistSim] ${ticker} breakout rejected (v6.3 accel gate): range=${barRange.toFixed(2)} vs avg=${avgRange5.toFixed(2)} (${rangeAccel ? "OK" : "FAIL"}) vol=${bar.volume} vs avg=${avgVol5.toFixed(0)} (${volAccel ? "OK" : "FAIL"})`,
+                        "historical",
+                      );
+                      candidateBoQualified = false;
+                    }
+                  }
                 }
               }
 
@@ -2491,6 +2513,8 @@ export async function runHistoricalSimulation(
             },
             durationMinutes: (tickerBars5m.length - trade.entryBarIndex) * 5,
             strategyVersion: user?.currentStrategyVersion ?? "v1",
+            mfeR: Number(trade.mfeR.toFixed(3)),
+            maeR: Number(trade.maeR.toFixed(3)),
           });
           lessonsGenerated++;
         } else {

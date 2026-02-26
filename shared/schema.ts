@@ -226,6 +226,8 @@ export const tradeLessons = pgTable("trade_lessons", {
   durationMinutes: integer("duration_minutes"),
   patternHash: text("pattern_hash"),
   strategyVersion: text("strategy_version"),
+  mfeR: real("mfe_r"),
+  maeR: real("mae_r"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

@@ -1,0 +1,141 @@
+v6.3 — The Next Correct Move
+
+We make ONE structural change.
+
+🔥 Add Momentum Acceleration Filter
+
+Before allowing entry, require:
+
+Breakout candle must satisfy:
+
+(range of breakout candle) >= 1.2 × average range of last 5 candles
+
+AND
+
+breakout candle volume >= 1.5 × average of last 5 candles
+
+This ensures:
+
+not just breakout
+
+but breakout with expansion
+
+Right now your system is entering too many “technical breaks” without real thrust.
+
+Why This Is The Correct Next Lever
+
+Because:
+
+51% time stops = no expansion
+
+22% structure breaks = fake expansion
+
+Acceleration filter attacks both.
+
+Do NOT Change:
+
+T1 (0.5R)
+
+Partial size (70%)
+
+Time stop duration
+
+Score threshold (85)
+
+SPY gate
+
+We isolate the next variable.
+
+What We Expect After v6.3 (30–40 trades)
+
+If acceleration filter works:
+
+Time stops drop from 51% → ~35–40%
+
+Structure breaks drop
+
+Win rate moves toward 30–35%
+
+Avg win stays ≥ 0.5R
+
+Expectancy moves toward -0.10R or better
+
+If expectancy improves again by 0.08–0.12R,
+we’re getting close.
+
+When Do We Become “Close”?
+
+If you print:
+
+32–38% win rate
+
+Avg win ≥ 0.60R
+
+Avg loss ≤ -0.45R
+
+Expectancy ≥ -0.05R
+
+Then we’re one step away.
+
+Should You Add MFE/MAE Columns?
+
+Yes.
+
+Not optional.
+
+You need:
+
+mfe_r
+
+mae_r
+
+Persisted in DB.
+
+Without those you’re blind.
+
+Add them before v6.3 runs so future analysis is precise.
+
+Big Picture Status
+
+You are no longer far away.
+
+You are in the refinement phase.
+
+You’ve:
+
+Eliminated catastrophic exits
+
+Shrunk losses
+
+Improved distribution shape
+
+Now it’s about expansion probability.
+
+Exact Next Steps
+
+Add acceleration filter (range + volume expansion)
+
+Add MFE/MAE persistence
+
+Run 40 trades
+
+Send full breakdown
+
+No exit changes.
+No scoring tweaks.
+
+Small Straight Summary
+
+v6.2 is a real improvement.
+
+Early failure fix worked.
+
+Now entry acceleration is the bottleneck.
+
+Add breakout expansion filter (range + volume vs 5-bar avg).
+
+Add MFE/MAE logging.
+
+Run 40 trades and reassess.
+
+You’re not profitable yet — but this is the first version that feels like it’s converging instead of drifting.
