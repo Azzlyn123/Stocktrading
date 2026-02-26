@@ -13,7 +13,6 @@ export interface ClusterConfig {
   gapCountThreshold: number;
   minPercentAboveVWAP: number;
   minPercentMakingHOD: number;
-  vcsThreshold: number;
   spyVetoEnabled: boolean;
   spyAtrVetoMultiple: number;
   useFullMarket: boolean;
@@ -28,7 +27,6 @@ export const DEFAULT_CLUSTER_CONFIG: ClusterConfig = {
   gapCountThreshold: 6,
   minPercentAboveVWAP: 0.65,
   minPercentMakingHOD: 0.40,
-  vcsThreshold: 0.7,
   spyVetoEnabled: false,
   spyAtrVetoMultiple: 0.8,
   useFullMarket: true,
@@ -133,6 +131,13 @@ export async function batchComputeClusterActivation(
 
   const dailyResults = new Map<string, DailyClusterResult>();
 
+  // Rolling VCS history for dynamic percentile threshold
+  const rollingVcs: number[] = [];
+  const ROLLING_WINDOW = 60;
+  const MIN_THRESHOLD = 0.18;
+  const MAX_THRESHOLD = 0.45;
+  const PERCENTILE = 0.70;
+
   for (const date of sortedDates) {
     const gapQualifiers: string[] = [];
     let universeSize = 0;
@@ -211,7 +216,21 @@ export async function batchComputeClusterActivation(
     const spyScore = Math.min(spyRangeRatio / 2.0, 1.0); // 1.0 at 2x ATR
 
     const vcs = (gapDensityScore * 0.25) + (breadthScore * 0.35) + (expansionScore * 0.25) + (spyScore * 0.15);
-    const regimeActive = vcs >= cfg.vcsThreshold;
+
+    // Dynamic threshold: 70th percentile of last 60 VCS days, clamped [0.18, 0.45]
+    const window = rollingVcs.slice(-ROLLING_WINDOW);
+    let dynamicThreshold: number;
+    if (window.length < 5) {
+      dynamicThreshold = MIN_THRESHOLD;
+    } else {
+      const sorted = [...window].sort((a, b) => a - b);
+      const idx = Math.floor(PERCENTILE * sorted.length);
+      dynamicThreshold = Math.max(MIN_THRESHOLD, Math.min(MAX_THRESHOLD, sorted[idx]));
+    }
+    const regimeActive = vcs >= dynamicThreshold;
+
+    // Append today's VCS to rolling history AFTER threshold decision
+    rollingVcs.push(vcs);
 
     dailyResults.set(date, {
       date,
@@ -231,7 +250,7 @@ export async function batchComputeClusterActivation(
       gapQualifiers,
     });
 
-    log(`[ClusterFilter] ${date}: VCS=${vcs.toFixed(2)} [GD:${gapDensityScore.toFixed(2)} BR:${breadthScore.toFixed(2)} EX:${expansionScore.toFixed(2)} SPY:${spyScore.toFixed(2)}] regime=${regimeActive ? "ON" : "OFF"}`, "historical");
+    log(`[ClusterFilter] ${date}: VCS=${vcs.toFixed(2)} | thresh=${dynamicThreshold.toFixed(2)} | regime=${regimeActive ? "ON" : "OFF"} [GD:${gapDensityScore.toFixed(2)} BR:${breadthScore.toFixed(2)} EX:${expansionScore.toFixed(2)} SPY:${spyScore.toFixed(2)}]`, "historical");
   }
 
   const computeTimeMs = Date.now() - computeStart;

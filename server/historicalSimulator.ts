@@ -2109,30 +2109,43 @@ export async function runHistoricalSimulation(
                     }
                     return true;
                   });
-                  const penaltyResult = computeLearningPenalty(
-                    recentLessons.map((l) => ({
-                      ticker: l.ticker,
-                      tier: l.tier,
-                      outcomeCategory: l.outcomeCategory,
-                      lessonTags: l.lessonTags,
-                      marketContext: l.marketContext,
-                      pnl: l.pnl,
-                      scoreAtEntry: l.scoreAtEntry,
-                    })),
-                    ticker,
-                    state.selectedTier ?? "C",
-                    regimeResult.aligned,
-                    session,
+
+                  // Ramp penalty weight: 0 at 0 lessons → 1.0 at 25+ lessons
+                  // Hard-isolates each version's learning from prior versions
+                  const penaltyWeight = Math.min(1, recentLessons.length / 25);
+                  log(
+                    `[HistSim] ${ticker} lessonCount=${recentLessons.length} penaltyWeight=${penaltyWeight.toFixed(2)}`,
+                    "historical",
                   );
 
-                  if (penaltyResult.penalty > 0) {
-                    const cappedPenalty = Math.min(penaltyResult.penalty, 20);
-                    appliedPenalty = cappedPenalty;
-                    score = Math.max(0, score - cappedPenalty);
-                    log(
-                      `[HistSim] ${ticker} LEARNING PENALTY: -${cappedPenalty} pts (raw: -${penaltyResult.penalty}), score ${score + cappedPenalty} -> ${score}. ${penaltyResult.reasons.join("; ")}`,
-                      "historical",
+                  if (penaltyWeight > 0) {
+                    const penaltyResult = computeLearningPenalty(
+                      recentLessons.map((l) => ({
+                        ticker: l.ticker,
+                        tier: l.tier,
+                        outcomeCategory: l.outcomeCategory,
+                        lessonTags: l.lessonTags,
+                        marketContext: l.marketContext,
+                        pnl: l.pnl,
+                        scoreAtEntry: l.scoreAtEntry,
+                      })),
+                      ticker,
+                      state.selectedTier ?? "C",
+                      regimeResult.aligned,
+                      session,
                     );
+
+                    if (penaltyResult.penalty > 0) {
+                      const cappedPenalty = Math.round(Math.min(penaltyResult.penalty, 20) * penaltyWeight);
+                      if (cappedPenalty > 0) {
+                        appliedPenalty = cappedPenalty;
+                        score = Math.max(0, score - cappedPenalty);
+                        log(
+                          `[HistSim] ${ticker} LEARNING PENALTY: -${cappedPenalty} pts (raw: -${penaltyResult.penalty}, weight: ${penaltyWeight.toFixed(2)}), score ${score + cappedPenalty} -> ${score}. ${penaltyResult.reasons.join("; ")}`,
+                          "historical",
+                        );
+                      }
+                    }
                   }
                 } catch (lpErr) {
                   log(
