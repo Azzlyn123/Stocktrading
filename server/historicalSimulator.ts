@@ -429,6 +429,7 @@ interface HistoricalTickerState {
     isPartiallyExited: boolean;
     partialExitPrice: number | null;
     partialExitShares: number | null;
+    partialExitBarIndex: number | null;
     stopMovedToBE: boolean;
     runnerShares: number | null;
     trailingStopPrice: number | null;
@@ -1358,6 +1359,9 @@ export async function runHistoricalSimulation(
           const effectiveRisk = timeStopExempt
             ? { ...tieredConfig.risk, timeStopMinutes: 0 }
             : tieredConfig.risk;
+          const minutesSincePartial = trade.isPartiallyExited && trade.partialExitBarIndex != null
+            ? (i - trade.partialExitBarIndex) * 5
+            : 0;
           const exitResult = checkTieredExitRules(
             bar,
             state.bars5m.slice(-10),
@@ -1372,6 +1376,7 @@ export async function runHistoricalSimulation(
             state.atr14,
             state.resistanceLevel ?? undefined,
             trade.mfeR,
+            minutesSincePartial,
           );
 
           if (exitResult.shouldExit) {
@@ -1507,6 +1512,7 @@ export async function runHistoricalSimulation(
               trade.isPartiallyExited = true;
               trade.partialExitPrice = partialExitPrice;
               trade.partialExitShares = partialShares;
+              trade.partialExitBarIndex = i;
               trade.runnerShares = shares - partialShares;
               trade.stopMovedToBE = true;
               if (exitResult.newStopPrice) {
@@ -2214,6 +2220,7 @@ export async function runHistoricalSimulation(
                   isPartiallyExited: false,
                   partialExitPrice: null,
                   partialExitShares: null,
+                  partialExitBarIndex: null,
                   stopMovedToBE: false,
                   runnerShares: null,
                   trailingStopPrice: null,

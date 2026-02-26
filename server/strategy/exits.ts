@@ -165,7 +165,8 @@ export function checkTieredExitRules(
   riskConfig: TieredStrategyConfig["risk"],
   currentAtr: number,
   breakoutLevel?: number,
-  mfeR: number = 0
+  mfeR: number = 0,
+  minutesSincePartial: number = 0
 ): ExitDecision {
   const currentPrice = currentCandle.close;
   const pnlR = riskPerShare > 0 ? (currentPrice - entryPrice) / riskPerShare : 0;
@@ -338,34 +339,23 @@ export function checkTieredExitRules(
     }
   }
 
-  let newTrailingStop: number | null = null;
-
   if (isPartiallyExited) {
-    if (exitsConfig.useEMA9Trail && recentBars5m.length >= 9) {
-      const closes = recentBars5m.map((c) => c.close);
-      const ema9 = lastEMA(closes, 9);
-      if (ema9 > stopPrice) {
-        newTrailingStop = newTrailingStop ? Math.max(newTrailingStop, ema9) : ema9;
+    if (minutesSincePartial >= 15 && recentBars5m.length >= 2) {
+      const bar1Low = recentBars5m[recentBars5m.length - 1].low;
+      const bar2Low = recentBars5m[recentBars5m.length - 2].low;
+      const twoBarLow = Math.min(bar1Low, bar2Low);
+      if (twoBarLow > stopPrice) {
+        return {
+          shouldExit: false,
+          exitType: null,
+          exitPrice: null,
+          reason: `Runner 2-bar low trail: stop raised to $${twoBarLow.toFixed(2)}`,
+          partialShares: null,
+          newStopPrice: twoBarLow,
+        };
       }
     }
-
-    if (exitsConfig.usePriorLowTrail && recentBars5m.length >= 2) {
-      const priorLow = recentBars5m[recentBars5m.length - 2].low;
-      if (priorLow > stopPrice) {
-        newTrailingStop = newTrailingStop ? Math.max(newTrailingStop, priorLow) : priorLow;
-      }
-    }
-  }
-
-  if (newTrailingStop && newTrailingStop > stopPrice) {
-    return {
-      shouldExit: false,
-      exitType: null,
-      exitPrice: null,
-      reason: `Trailing stop raised to $${newTrailingStop.toFixed(2)}`,
-      partialShares: null,
-      newStopPrice: newTrailingStop,
-    };
+    // minutesSincePartial < 15: breathing window — stop stays at BE+0.05R (set at T1), no trailing
   }
 
   return {
