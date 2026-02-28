@@ -340,7 +340,7 @@ export function checkTieredExitRules(
   }
 
   if (isPartiallyExited) {
-    if (minutesSincePartial >= 15 && recentBars5m.length >= 2) {
+    if (minutesSincePartial >= 7 && recentBars5m.length >= 2) {
       const bar1Low = recentBars5m[recentBars5m.length - 1].low;
       const bar2Low = recentBars5m[recentBars5m.length - 2].low;
       const twoBarLow = Math.min(bar1Low, bar2Low);
