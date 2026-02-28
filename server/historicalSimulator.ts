@@ -800,10 +800,12 @@ export async function runHistoricalSimulation(
     const _v6 = (user?.currentStrategyVersion ?? "v1") >= "v6";
     const _v6_3 = (user?.currentStrategyVersion ?? "v1") >= "v6.3";
     const _v6_5 = (user?.currentStrategyVersion ?? "v1") >= "v6.5";
+    const _v6_8 = (user?.currentStrategyVersion ?? "v1") >= "v6.8";
     if (_v6) {
       tieredConfig.exits.partialAtR = _v6_5 ? 0.4 : 0.5;
       tieredConfig.exits.partialPct = 70;
       tieredConfig.exits.earlyFailureExit = true;
+      tieredConfig.exits.impulseFilterEnabled = _v6_8;
     }
     let processedBars = 0;
     let tradesGenerated = 0;

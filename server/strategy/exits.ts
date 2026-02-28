@@ -194,6 +194,29 @@ export function checkTieredExitRules(
     };
   }
 
+  if (exitsConfig.impulseFilterEnabled && !isPartiallyExited) {
+    if (minutesSinceEntry >= 10 && mfeR < 0.15) {
+      return {
+        shouldExit: true,
+        exitType: "hard_exit",
+        exitPrice: currentPrice,
+        reason: `Impulse fail: MFE only +${mfeR.toFixed(2)}R at ${minutesSinceEntry}min (need +0.15R by 10min)`,
+        partialShares: null,
+        newStopPrice: null,
+      };
+    }
+    if (minutesSinceEntry >= 15 && mfeR < 0.20) {
+      return {
+        shouldExit: true,
+        exitType: "hard_exit",
+        exitPrice: currentPrice,
+        reason: `Impulse fail: MFE only +${mfeR.toFixed(2)}R at ${minutesSinceEntry}min (need +0.20R by 15min)`,
+        partialShares: null,
+        newStopPrice: null,
+      };
+    }
+  }
+
   if (riskConfig.timeStopMinutes > 0 && minutesSinceEntry >= riskConfig.timeStopMinutes) {
     if (pnlR < riskConfig.timeStopR) {
       return {
@@ -340,7 +363,7 @@ export function checkTieredExitRules(
   }
 
   if (isPartiallyExited) {
-    if (minutesSincePartial >= 7 && recentBars5m.length >= 2) {
+    if (minutesSincePartial >= 15 && recentBars5m.length >= 2) {
       const bar1Low = recentBars5m[recentBars5m.length - 1].low;
       const bar2Low = recentBars5m[recentBars5m.length - 2].low;
       const twoBarLow = Math.min(bar1Low, bar2Low);
