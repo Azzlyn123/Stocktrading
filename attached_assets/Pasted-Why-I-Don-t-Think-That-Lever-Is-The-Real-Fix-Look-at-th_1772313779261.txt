@@ -1,0 +1,124 @@
+Why I Don’t Think That Lever Is The Real Fix
+
+Look at the structure:
+	•	50–60% of trades never reach T1
+	•	Time stop WR is ~9–10%
+	•	That cohort dominates expectancy
+
+That means the majority of trades are structurally weak.
+
+Letting post-T1 trades run longer doesn’t change the fact that half your trades never show strength.
+
+That’s upstream.
+
+Not downstream.
+
+⸻
+
+The Real Question
+
+Why are so many trades failing to impulse?
+
+Your system should be asking:
+
+If this setup is good… why doesn’t it move immediately?
+
+Strong trades show early intent.
+
+Weak trades drift.
+
+Right now, you’re treating them the same for 45 minutes.
+
+That’s the flaw.
+
+⸻
+
+The Better Path (In My Opinion)
+
+Instead of adjusting the back end (time stop, exemptions, classification)…
+
+Move forward and attack the front end.
+
+Add an early confirmation filter.
+
+Example:
+
+If trade does NOT reach:
+	•	+0.15R within first 10 minutes
+OR
+	•	+0.20R within first 15 minutes
+
+→ Kill it early at small loss.
+
+This does three things:
+	1.	Cuts losers faster
+	2.	Raises win rate
+	3.	Preserves runner logic
+
+Because real runners almost always show early expansion.
+
+⸻
+
+Why This Is More Powerful Than Time Stop Tweaks
+
+Time stop adjustments:
+	•	Tweak outcome timing
+	•	Do not improve population quality
+
+Impulse filter:
+	•	Changes population
+	•	Directly increases WR
+	•	Improves expectancy structurally
+
+⸻
+
+Important Reality
+
+Your runner capture logic is good.
+
+Your trailing logic is good.
+
+Your issue is trade selection quality.
+
+You don’t need better exits.
+
+You need fewer mediocre entries.
+
+⸻
+
+So What Do I Believe?
+
+I believe:
+	•	v6.6 runner logic is solid
+	•	The system has a real edge
+	•	But it is diluted by too many low-momentum setups
+
+The next real leap is:
+
+Impulse qualification within first 10–15 minutes.
+
+Not more exit tweaking.
+
+⸻
+
+If This Were My System
+
+I would:
+	1.	Revert to v6.6
+	2.	Keep 15-min breathing
+	3.	Keep 2-bar trail
+	4.	Add early impulse requirement
+	5.	Leave time_stop unchanged
+
+Then re-test controlled window.
+
+⸻
+
+Straight Summary
+	•	No, I don’t think time-stop exemptions alone fix it.
+	•	The problem is too many trades never show early strength.
+	•	The solution is early impulse filtering.
+	•	Fix population quality, not exit timing.
+	•	That’s the higher-probability evolution.
+
+If you want, we can design the exact impulse rule cleanly and test it properly.
