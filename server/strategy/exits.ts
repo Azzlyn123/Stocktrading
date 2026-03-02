@@ -195,22 +195,12 @@ export function checkTieredExitRules(
   }
 
   if (exitsConfig.impulseFilterEnabled && !isPartiallyExited) {
-    if (minutesSinceEntry >= 10 && mfeR < 0.15) {
+    if (minutesSinceEntry >= 15 && mfeR < 0.10) {
       return {
         shouldExit: true,
         exitType: "hard_exit",
         exitPrice: currentPrice,
-        reason: `Impulse fail: MFE only +${mfeR.toFixed(2)}R at ${minutesSinceEntry}min (need +0.15R by 10min)`,
-        partialShares: null,
-        newStopPrice: null,
-      };
-    }
-    if (minutesSinceEntry >= 15 && mfeR < 0.20) {
-      return {
-        shouldExit: true,
-        exitType: "hard_exit",
-        exitPrice: currentPrice,
-        reason: `Impulse fail: MFE only +${mfeR.toFixed(2)}R at ${minutesSinceEntry}min (need +0.20R by 15min)`,
+        reason: `Impulse fail: MFE only +${mfeR.toFixed(2)}R at ${minutesSinceEntry}min (need +0.10R by 15min)`,
         partialShares: null,
         newStopPrice: null,
       };
