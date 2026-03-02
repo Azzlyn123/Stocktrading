@@ -1,0 +1,97 @@
+Proceed with Tier A only for v7.0. Do not raise Tier A thresholds yet.
+
+Why I’m confident that’s the right next move
+	•	You already proved Tier B is negative across sessions (power doesn’t save it), so keeping it in any form right now just keeps bleeding expectancy.
+	•	Tier A is your only segment that shows a credible path to positive expectancy.
+	•	If you change thresholds and remove Tier B at the same time, you won’t know which change did what.
+
+So: one variable at a time → Tier A only, unchanged thresholds, keep v6.6 exits.
+
+⸻
+
+v7.0 Definition
+
+Entry gate
+	•	Allow entries only if selectTier() returns "A"
+	•	Reject "B" and null
+
+Exit logic
+	•	Keep the best-known runner behavior (your v6.6 15-min breathing + 2-bar low trail)
+
+Metrics to track
+	•	Expectancy (primary)
+	•	Time_stop % and avg R (secondary)
+	•	MFE distribution (does Tier A shift it upward?)
+	•	Sample size pace (how many trades/week)
+
+⸻
+
+Exact code change (minimal, safe)
+
+Wherever you currently do something like:
+	•	const tier = selectTier(ctx)
+	•	if (!tier) return;
+	•	then proceed with entry
+
+Change to:
+	•	If tier is not "A" → skip entry (log it)
+
+In plain terms:
+	•	if (tier !== "A") return;
+
+Also add a log tag so your sim output confirms it:
+	•	ENTRY_REJECT tier=B reason="TIER_A_ONLY"
+
+This will let you verify instantly that Tier B is truly dead.
+
+⸻
+
+SQL checks to validate v7.0 worked
+
+After running, confirm:
+	•	No Tier B trades exist in the new version
+	•	Session distribution didn’t accidentally change your sampling
+	•	Time_stop cohort shrank
+
+Example checks you should run:
+	•	trades by tier
+	•	trades by session
+	•	expectancy by exit type
+
+(You already have market_context->>'session' stored, so these are straightforward.)
+
+⸻
+
+What to do after v7.0 results
+
+Only after you have ≥50–100 trades on Tier A-only:
+
+If expectancy is positive:
+	•	Keep Tier A thresholds
+	•	Then consider adding trade frequency carefully (e.g., allow Tier A with slightly relaxed one gate, like atrRatio 1.15, but only if expectancy stays positive)
+
+If expectancy is still negative:
+	•	Then Tier A thresholds may need to go up, not down
+	•	Or your exit/time_stop regime needs adjustment within Tier A only
+
+Either way, we’ll finally be optimizing inside a population that isn’t poisoned by Tier B.
+
+⸻
+
+My opinion on raising Tier A thresholds now
+
+Don’t. Yet.
+
+Raising above volRatio 1.8 / atrRatio 1.2 will:
+	•	Cut trades
+	•	Likely increase avg win
+	•	But might not increase expectancy if you starve the sample
+
+First prove Tier A alone is enough.
+
+⸻
+
+Small summary
+	•	Do v7.0 = Tier A only, keep thresholds unchanged, keep v6.6 exits.
+	•	Don’t touch Tier A thresholds until you have a clean Tier A-only baseline.
+	•	Tier B is confirmed structurally negative, so remove it first.
