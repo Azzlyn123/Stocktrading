@@ -623,10 +623,12 @@ async function runAutoRunLoop(userId: string, storage: IStorage) {
       // If we ran out of dates but haven't hit trade target, look back further
       const lastDate = new Date(autoRunState.datesCompleted[autoRunState.datesCompleted.length - 1]);
       const extraDates = getWeekdaysGoingBack(lastDate, 20).filter(d => !alreadyDone.has(d));
+      if (extraDates.length === 0) break;
       autoRunState.datesRemaining.push(...extraDates);
     }
 
     const date = autoRunState.datesRemaining.shift()!;
+    if (!date) break;
     autoRunState.currentDate = date;
 
     log(
@@ -801,11 +803,12 @@ export async function runHistoricalSimulation(
     const _v6_3 = (user?.currentStrategyVersion ?? "v1") >= "v6.3";
     const _v6_5 = (user?.currentStrategyVersion ?? "v1") >= "v6.5";
     const _v6_8 = (user?.currentStrategyVersion ?? "v1") >= "v6.8";
+    const _v7_0 = (user?.currentStrategyVersion ?? "v1") >= "v7.0";
     if (_v6) {
       tieredConfig.exits.partialAtR = _v6_5 ? 0.4 : 0.5;
       tieredConfig.exits.partialPct = 70;
       tieredConfig.exits.earlyFailureExit = true;
-      tieredConfig.exits.impulseFilterEnabled = _v6_8;
+      tieredConfig.exits.impulseFilterEnabled = _v6_8 && !_v7_0;
     }
     let processedBars = 0;
     let tradesGenerated = 0;
@@ -1909,10 +1912,15 @@ export async function runHistoricalSimulation(
                 state.signalState = "BREAKOUT";
                 state.breakoutCandle = bar;
                 state.selectedTier = tier;
+                if (_v7_0 && state.selectedTier !== "A") {
+                  console.log(`[ENTRY_REJECT] ticker=${ticker} tier=${state.selectedTier} reason="TIER_A_ONLY"`);
+                  state.selectedTier = null;
+                  state.signalState = "IDLE";
+                }
                 state.retestBarsSinceBreakout = 0;
                 state.lastBreakoutBarIndex = i;
 
-                if (!isDryRun) {
+                if (!isDryRun && state.selectedTier !== null) {
                   await storage.createSignal({
                     userId,
                     ticker,
@@ -1951,10 +1959,12 @@ export async function runHistoricalSimulation(
                   });
                 }
 
-                log(
-                  `[HistSim] ${ticker} BREAKOUT at $${state.price.toFixed(2)} (Tier ${tier}) on ${simulationDate}`,
-                  "historical",
-                );
+                if (state.selectedTier !== null) {
+                  log(
+                    `[HistSim] ${ticker} BREAKOUT at $${state.price.toFixed(2)} (Tier ${tier}) on ${simulationDate}`,
+                    "historical",
+                  );
+                }
               }
             }
           }
