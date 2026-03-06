@@ -459,6 +459,7 @@ interface HistoricalTickerState {
     breakevenLocked: boolean;
     validated: boolean;
     softStopTightened: boolean;
+    stopTightenApplied: boolean;
   } | null;
   entryVolRatio: number;
   entryAtrRatio: number;
@@ -1349,6 +1350,7 @@ export async function runHistoricalSimulation(
                   volRatio: state.entryVolRatio,
                   atrRatio: state.entryAtrRatio,
                   tier: trade.tier ?? null,
+                  stopTightenApplied: trade.stopTightenApplied ?? false,
                 },
                 durationMinutes: minutesSinceEntry,
                 strategyVersion: user?.currentStrategyVersion ?? "v1",
@@ -1814,6 +1816,7 @@ export async function runHistoricalSimulation(
                   volRatio: state.entryVolRatio,
                   atrRatio: state.entryAtrRatio,
                   tier: trade.tier ?? null,
+                  stopTightenApplied: trade.stopTightenApplied ?? false,
                 },
                 durationMinutes: minutesSinceEntry,
                 strategyVersion: user?.currentStrategyVersion ?? "v1",
@@ -1831,6 +1834,9 @@ export async function runHistoricalSimulation(
             exitResult.newStopPrice &&
             exitResult.newStopPrice > trade.stopPrice
           ) {
+            if (exitResult.reason?.includes("15min tighten")) {
+              trade.stopTightenApplied = true;
+            }
             trade.trailingStopPrice = exitResult.newStopPrice;
             trade.stopPrice = exitResult.newStopPrice;
           }
@@ -2280,6 +2286,7 @@ export async function runHistoricalSimulation(
                   breakevenLocked: false,
                   validated: false,
                   softStopTightened: false,
+                  stopTightenApplied: false,
                 };
 
                 log(
@@ -2557,6 +2564,7 @@ export async function runHistoricalSimulation(
               volRatio: state.entryVolRatio,
               atrRatio: state.entryAtrRatio,
               tier: trade.tier ?? null,
+              stopTightenApplied: trade.stopTightenApplied ?? false,
             },
             durationMinutes: (tickerBars5m.length - trade.entryBarIndex) * 5,
             strategyVersion: user?.currentStrategyVersion ?? "v1",

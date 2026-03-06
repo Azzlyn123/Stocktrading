@@ -523,7 +523,9 @@ export async function registerRoutes(
           ROUND(AVG(CASE WHEN r_multiple > 0 THEN r_multiple END)::numeric, 3) AS avg_win,
           ROUND(AVG(CASE WHEN r_multiple <= 0 THEN r_multiple END)::numeric, 3) AS avg_loss,
           ROUND(MIN(r_multiple)::numeric, 3)                                    AS worst,
-          ROUND(MAX(r_multiple)::numeric, 3)                                    AS best
+          ROUND(MAX(r_multiple)::numeric, 3)                                    AS best,
+          SUM(CASE WHEN mfe_r >= 0.40 THEN 1 ELSE 0 END)::int                  AS runner_count,
+          ROUND(AVG(CASE WHEN mfe_r >= 0.40 THEN mfe_r END)::numeric, 3)       AS avg_runner_mfe
         FROM trade_lessons
         WHERE strategy_version = ${version}
       `);
@@ -531,7 +533,7 @@ export async function registerRoutes(
       const exitRows = await db.execute(sql`
         SELECT
           CASE
-            WHEN exit_reason ILIKE '%15min tighten%' THEN 'tighten_stop'
+            WHEN (market_context->>'stopTightenApplied')::boolean = true THEN 'tighten_cohort'
             WHEN exit_reason ILIKE '%time stop%'     THEN 'time_stop'
             WHEN exit_reason ILIKE '%stop hit%'      THEN 'stop_hit'
             WHEN exit_reason ILIKE '%end of day%'    THEN 'eod'
@@ -540,10 +542,23 @@ export async function registerRoutes(
           END                                             AS exit_type,
           COUNT(*)::int                                   AS count,
           ROUND(AVG(r_multiple)::numeric, 3)              AS avg_r,
-          SUM(CASE WHEN r_multiple > 0 THEN 1 ELSE 0 END)::int AS wins
+          SUM(CASE WHEN r_multiple > 0 THEN 1 ELSE 0 END)::int AS wins,
+          ROUND(MIN(r_multiple)::numeric, 3)              AS worst_r
         FROM trade_lessons
         WHERE strategy_version = ${version}
         GROUP BY exit_type ORDER BY count DESC
+      `);
+
+      const tightenRows = await db.execute(sql`
+        SELECT
+          COUNT(*)::int                                   AS count,
+          ROUND(AVG(r_multiple)::numeric, 3)              AS avg_r,
+          ROUND(MIN(r_multiple)::numeric, 3)              AS worst_r,
+          ROUND(MAX(r_multiple)::numeric, 3)              AS best_r,
+          SUM(CASE WHEN r_multiple > 0 THEN 1 ELSE 0 END)::int AS wins
+        FROM trade_lessons
+        WHERE strategy_version = ${version}
+          AND (market_context->>'stopTightenApplied')::boolean = true
       `);
 
       const sessionRows = await db.execute(sql`
@@ -570,6 +585,7 @@ export async function registerRoutes(
 
       const o = overallRows.rows[0] as any;
       const total = o?.total ?? 0;
+      const tc = tightenRows.rows[0] as any;
       res.json({
         version,
         total,
@@ -580,7 +596,16 @@ export async function registerRoutes(
         avgLoss: o?.avg_loss,
         best: o?.best,
         worst: o?.worst,
+        runnerCount: o?.runner_count ?? 0,
+        avgRunnerMfe: o?.avg_runner_mfe,
         exits: exitRows.rows,
+        tightenedCohort: {
+          count: tc?.count ?? 0,
+          avgR: tc?.avg_r,
+          worstR: tc?.worst_r,
+          bestR: tc?.best_r,
+          wins: tc?.wins ?? 0,
+        },
         sessions: sessionRows.rows,
         tiers: tierRows.rows,
       });
