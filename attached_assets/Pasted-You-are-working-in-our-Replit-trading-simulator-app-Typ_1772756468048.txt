@@ -1,0 +1,68 @@
+You are working in our Replit trading simulator app (TypeScript). Implement two NEW strategy versions as clean, isolated experiments on top of the current baseline.
+
+CONTEXT (current state)
+- We trade intraday US large-cap equities on 5-minute bars.
+- Trades are logged with R-multiple outcome and market_context (JSONB).
+- Session is computed from minutesSinceOpen:
+  - Open: <= 90
+  - Mid: <= 240
+  - Power: > 240
+- Tier selection is momentum-gates only via selectTier():
+  - Tier A: volRatio >= 1.8 AND atrRatio >= 1.2
+  - Tier B: volRatio >= 1.5 AND atrRatio >= 0.8
+  - returns null if neither passes
+- v7.0 already enforces Tier A only (verify: zero Tier B rows in v7.0).
+
+GOAL
+Make the strategy reliably profitable by reducing low-quality trades without harming runner capture. We want clean A/B testing by strategyVersion.
+
+TASKS (do in this order)
+
+T001 — Add v7.1 “Tier A + Power Session Only”
+1) Create a new strategyVersion "v7.1".
+2) Entry gate: allow entries ONLY when:
+   - tier === "A"
+   - minutesSinceOpen > 240 (Power session)
+3) Keep ALL exit logic identical to v7.0 (no stop/target changes).
+4) Add explicit logging for rejections:
+   - ENTRY_REJECT reason="NOT_POWER_SESSION"
+   - ENTRY_REJECT reason="NOT_TIER_A"
+5) Ensure trades created under v7.1 are labeled with strategyVersion="v7.1".
+
+T002 — Add trade tagging fields for regime analysis (non-breaking, applies to ALL versions)
+Add the following fields into market_context for every trade at entry time:
+- session: "open" | "mid" | "power"
+- minutesSinceOpen: number
+- volRatio: number
+- atrRatio: number
+- tier: "A" | "B" | null
+Also store at exit time:
+- mfeR: number (max favorable excursion in R)
+- maeR: number (max adverse excursion in R)
+If mfeR/maeR are already tracked elsewhere, just ensure they are persisted in market_context.
+
+T003 — Add a report endpoint or script to compare versions
+Create a simple report that outputs for a given strategyVersion:
+- trades count
+- expectancy (avg R)
+- win rate
+- avg win, avg loss
+- exit breakdown (time_stop, stop_hit, eod, partial, etc.)
+- performance by session (group by market_context->>'session')
+This can be:
+- a backend endpoint like GET /api/simulations/report?version=v7.1
+OR
+- a CLI script in /scripts that queries Postgres and prints a table.
+
+REQUIREMENTS
+- Keep changes minimal and isolated. No refactors unless necessary.
+- Add unit tests for the v7.1 entry gate:
+  - rejects when minutesSinceOpen <= 240
+  - accepts when minutesSinceOpen > 240 and tier === "A"
+- Provide exact file paths changed, and clear steps to run:
+  - run sim for v7.0 and v7.1
+  - run the report and paste sample output
+- Verify with a SQL check: v7.1 contains zero non-power trades and zero Tier B.
+
+DELIVERABLE
+A PR-ready set of changes that implements v7.1 gating, enhanced market_context tagging, and a version report so we can validate profitability and regime dependence.
