@@ -9,10 +9,24 @@ BreakoutIQ is a full-stack trading alert application for US equities and ETFs, d
 - JetBrains Mono for monospace
 
 ## Current Strategy Version
-**v6** (active) — High-conviction entry + win-rate-biased exits:
-- Entry: minScore=85, Tier A/B only (hard SPY alignment gate), breakout candle quality (close ≥75% of bar range + volume expansion vs prior bar)
-- Exit: T1 at +0.5R/70% sell, stop moves to BE+0.05R after T1, 30% runner trails EMA9 or prior candle low, early failure exit (below EMA9 with no T1 progress)
-- v5 baseline: 571 trades, -0.292R expectancy, 15.4% WR
+**v7.2** (active) — Tier A only + 15-min stop-tighten:
+- Entry: Tier A only (volRatio ≥1.8, atrRatio ≥1.2), all sessions allowed
+- Exit: T1 at +0.4R/70% sell, stop tightens to entry-0.05R at 15min if MFE < 0.10R (no market exit); time_stop otherwise
+- v7.0 baseline (25 trades): +0.053R expectancy, 40% WR — confirmed positive expectancy
+
+**v7.1** (ready, not active) — Tier A + Power Session only:
+- Entry: Tier A only AND minutesSinceOpen > 240 (power session gate)
+- Activate when ≥50 v7.2 trades exist for clean A/B comparison
+
+**v7.0** (baseline) — Tier A only, all sessions:
+- 25 trades completed: +0.053R expectancy, 40% WR, zero impulse exits
+
+**Key infrastructure added (v7.2 session)**:
+- `stopTightenAt15min` flag in TieredStrategyConfig
+- `checkEntryGate()` pure function in `server/strategy/entryGate.ts` (Vitest-tested, 9 tests pass)
+- `market_context` JSONB enriched with `volRatio`, `atrRatio`, `minutesSinceOpen`, `tier` on every trade
+- `GET /api/simulations/report?version=X` endpoint with full breakdown (exits, sessions, tiers)
+- Vitest installed; config at `vitest.config.ts`; tests at `server/strategy/__tests__/`
 
 ## System Architecture
 BreakoutIQ is built with a React 18 frontend (TypeScript, Vite, TailwindCSS, Shadcn UI), an Express.js (Node.js) backend, and a PostgreSQL database with Drizzle ORM. Authentication uses Passport-local with session-based methods, and real-time data/notifications are handled via WebSockets. The frontend utilizes Wouter for routing, TanStack React Query for state management, and Recharts for charting.

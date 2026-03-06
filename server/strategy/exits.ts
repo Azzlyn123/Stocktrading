@@ -207,6 +207,22 @@ export function checkTieredExitRules(
     }
   }
 
+  if (exitsConfig.stopTightenAt15min && !isPartiallyExited) {
+    if (minutesSinceEntry >= 15 && mfeR < 0.10) {
+      const tightenedStop = entryPrice - 0.05 * riskPerShare;
+      if (tightenedStop > stopPrice) {
+        return {
+          shouldExit: false,
+          exitType: null,
+          exitPrice: null,
+          reason: `15min tighten: MFE +${mfeR.toFixed(2)}R < 0.10R → stop to entry-0.05R ($${tightenedStop.toFixed(2)})`,
+          partialShares: null,
+          newStopPrice: tightenedStop,
+        };
+      }
+    }
+  }
+
   if (riskConfig.timeStopMinutes > 0 && minutesSinceEntry >= riskConfig.timeStopMinutes) {
     if (pnlR < riskConfig.timeStopR) {
       return {

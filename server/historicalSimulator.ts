@@ -18,6 +18,7 @@ import {
   type TradeTier,
 } from "./strategy";
 import { DEFAULT_STRATEGY_CONFIG } from "./strategy/config";
+import { checkEntryGate } from "./strategy/entryGate";
 import {
   analyzeClosedTrade,
   computeLearningPenalty,
@@ -459,6 +460,8 @@ interface HistoricalTickerState {
     validated: boolean;
     softStopTightened: boolean;
   } | null;
+  entryVolRatio: number;
+  entryAtrRatio: number;
 }
 
 interface SizingResult {
@@ -804,11 +807,14 @@ export async function runHistoricalSimulation(
     const _v6_5 = (user?.currentStrategyVersion ?? "v1") >= "v6.5";
     const _v6_8 = (user?.currentStrategyVersion ?? "v1") >= "v6.8";
     const _v7_0 = (user?.currentStrategyVersion ?? "v1") >= "v7.0";
+    const _v7_1 = (user?.currentStrategyVersion ?? "v1") >= "v7.1";
+    const _v7_2 = (user?.currentStrategyVersion ?? "v1") >= "v7.2";
     if (_v6) {
       tieredConfig.exits.partialAtR = _v6_5 ? 0.4 : 0.5;
       tieredConfig.exits.partialPct = 70;
       tieredConfig.exits.earlyFailureExit = true;
       tieredConfig.exits.impulseFilterEnabled = _v6_8 && !_v7_0;
+      tieredConfig.exits.stopTightenAt15min = _v7_2;
     }
     let processedBars = 0;
     let tradesGenerated = 0;
@@ -936,6 +942,8 @@ export async function runHistoricalSimulation(
         retestBarsSinceBreakout: 0,
         lastBreakoutBarIndex: -100,
         activeTrade: null,
+        entryVolRatio: 0,
+        entryAtrRatio: 0,
       };
 
       let lastRegimeResult = checkMarketRegime(
@@ -1337,6 +1345,10 @@ export async function runHistoricalSimulation(
                 marketContext: {
                   ...(lessonResult.marketContext as Record<string, any>),
                   simulationDate,
+                  minutesSinceOpen: state.minutesSinceOpen,
+                  volRatio: state.entryVolRatio,
+                  atrRatio: state.entryAtrRatio,
+                  tier: trade.tier ?? null,
                 },
                 durationMinutes: minutesSinceEntry,
                 strategyVersion: user?.currentStrategyVersion ?? "v1",
@@ -1798,6 +1810,10 @@ export async function runHistoricalSimulation(
                 marketContext: {
                   ...(lessonResult.marketContext as Record<string, any>),
                   simulationDate,
+                  minutesSinceOpen: state.minutesSinceOpen,
+                  volRatio: state.entryVolRatio,
+                  atrRatio: state.entryAtrRatio,
+                  tier: trade.tier ?? null,
                 },
                 durationMinutes: minutesSinceEntry,
                 strategyVersion: user?.currentStrategyVersion ?? "v1",
@@ -1860,6 +1876,8 @@ export async function runHistoricalSimulation(
                 : 1.0;
 
             const tier = selectTier(volRatio, atrRatio, tieredConfig);
+            state.entryVolRatio = volRatio;
+            state.entryAtrRatio = atrRatio;
 
             if (tier) {
               diag.tierSelected++;
@@ -1912,8 +1930,13 @@ export async function runHistoricalSimulation(
                 state.signalState = "BREAKOUT";
                 state.breakoutCandle = bar;
                 state.selectedTier = tier;
-                if (_v7_0 && state.selectedTier !== "A") {
-                  console.log(`[ENTRY_REJECT] ticker=${ticker} tier=${state.selectedTier} reason="TIER_A_ONLY"`);
+                const gateResult = checkEntryGate(
+                  user?.currentStrategyVersion ?? "v1",
+                  state.selectedTier,
+                  state.minutesSinceOpen,
+                );
+                if (!gateResult.allowed) {
+                  console.log(`[ENTRY_REJECT] ticker=${ticker} tier=${state.selectedTier} reason="${gateResult.reason}"`);
                   state.selectedTier = null;
                   state.signalState = "IDLE";
                 }
@@ -2530,6 +2553,10 @@ export async function runHistoricalSimulation(
             marketContext: {
               ...(lessonResult.marketContext as Record<string, any>),
               simulationDate,
+              minutesSinceOpen: state.minutesSinceOpen,
+              volRatio: state.entryVolRatio,
+              atrRatio: state.entryAtrRatio,
+              tier: trade.tier ?? null,
             },
             durationMinutes: (tickerBars5m.length - trade.entryBarIndex) * 5,
             strategyVersion: user?.currentStrategyVersion ?? "v1",

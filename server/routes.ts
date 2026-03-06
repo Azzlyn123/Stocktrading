@@ -17,6 +17,8 @@ import { DEFAULT_PULLBACK_CONFIG } from "./strategy/pullbackDetector";
 import { SMALLCAP_SCAN_TICKERS, buildScanDatesRange } from "./strategy/smallCapUniverse";
 import { fetchMultiDayDailyBars, fetchForwardDailyBars } from "./alpaca";
 import { getTradeLog, getTradeLogCSV } from "./analytics/tradeLogger";
+import { db } from "./db";
+import { sql } from "drizzle-orm";
 
 declare global {
   namespace Express {
@@ -505,6 +507,85 @@ export async function registerRoutes(
       res.json(metrics);
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to compute metrics" });
+    }
+  });
+
+  app.get("/api/simulations/report", requireAuth, async (req, res) => {
+    try {
+      const version = req.query.version as string | undefined;
+      if (!version) return res.status(400).json({ error: "version parameter required" });
+
+      const overallRows = await db.execute(sql`
+        SELECT
+          COUNT(*)::int                                                         AS total,
+          SUM(CASE WHEN r_multiple > 0 THEN 1 ELSE 0 END)::int                 AS wins,
+          ROUND(AVG(r_multiple)::numeric, 3)                                    AS expectancy,
+          ROUND(AVG(CASE WHEN r_multiple > 0 THEN r_multiple END)::numeric, 3) AS avg_win,
+          ROUND(AVG(CASE WHEN r_multiple <= 0 THEN r_multiple END)::numeric, 3) AS avg_loss,
+          ROUND(MIN(r_multiple)::numeric, 3)                                    AS worst,
+          ROUND(MAX(r_multiple)::numeric, 3)                                    AS best
+        FROM trade_lessons
+        WHERE strategy_version = ${version}
+      `);
+
+      const exitRows = await db.execute(sql`
+        SELECT
+          CASE
+            WHEN exit_reason ILIKE '%15min tighten%' THEN 'tighten_stop'
+            WHEN exit_reason ILIKE '%time stop%'     THEN 'time_stop'
+            WHEN exit_reason ILIKE '%stop hit%'      THEN 'stop_hit'
+            WHEN exit_reason ILIKE '%end of day%'    THEN 'eod'
+            WHEN exit_reason ILIKE '%partial%'       THEN 'partial'
+            ELSE 'other'
+          END                                             AS exit_type,
+          COUNT(*)::int                                   AS count,
+          ROUND(AVG(r_multiple)::numeric, 3)              AS avg_r,
+          SUM(CASE WHEN r_multiple > 0 THEN 1 ELSE 0 END)::int AS wins
+        FROM trade_lessons
+        WHERE strategy_version = ${version}
+        GROUP BY exit_type ORDER BY count DESC
+      `);
+
+      const sessionRows = await db.execute(sql`
+        SELECT
+          market_context->>'session'                                  AS session,
+          COUNT(*)::int                                               AS count,
+          ROUND(AVG(r_multiple)::numeric, 3)                          AS avg_r,
+          SUM(CASE WHEN r_multiple > 0 THEN 1 ELSE 0 END)::int       AS wins
+        FROM trade_lessons
+        WHERE strategy_version = ${version}
+        GROUP BY market_context->>'session'
+        ORDER BY count DESC
+      `);
+
+      const tierRows = await db.execute(sql`
+        SELECT
+          tier,
+          COUNT(*)::int                                               AS count,
+          ROUND(AVG(r_multiple)::numeric, 3)                          AS avg_r
+        FROM trade_lessons
+        WHERE strategy_version = ${version}
+        GROUP BY tier ORDER BY count DESC
+      `);
+
+      const o = overallRows.rows[0] as any;
+      const total = o?.total ?? 0;
+      res.json({
+        version,
+        total,
+        wins: o?.wins ?? 0,
+        winRate: total > 0 ? Number(((o?.wins ?? 0) / total * 100).toFixed(1)) : 0,
+        expectancy: o?.expectancy,
+        avgWin: o?.avg_win,
+        avgLoss: o?.avg_loss,
+        best: o?.best,
+        worst: o?.worst,
+        exits: exitRows.rows,
+        sessions: sessionRows.rows,
+        tiers: tierRows.rows,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

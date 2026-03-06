@@ -62,6 +62,7 @@ export interface TieredStrategyConfig {
     hardExitRedCandles: number;
     earlyFailureExit: boolean;
     impulseFilterEnabled?: boolean;
+    stopTightenAt15min?: boolean;
   };
   daily: {
     maxLosingTrades: number;
