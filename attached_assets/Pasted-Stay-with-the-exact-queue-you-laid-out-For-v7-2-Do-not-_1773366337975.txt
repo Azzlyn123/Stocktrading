@@ -1,0 +1,95 @@
+Stay with the exact queue you laid out.
+
+For v7.2
+
+Do not touch anything until you hit:
+	•	75 trades
+	•	100 trades
+	•	150 trades
+
+At each checkpoint, compare:
+	•	expectancy
+	•	avg loss
+	•	win rate
+	•	runner count
+	•	avg runner MFE
+	•	tightened cohort count
+	•	tightened cohort avg R
+	•	tightened cohort exit breakdown
+
+What success looks like at 100 trades
+
+I’d consider v7.2 genuinely strong if it still shows roughly:
+	•	expectancy above +0.08R
+	•	avg loss better than -0.30R
+	•	runner count above 35%
+	•	runner MFE holding near 0.70R+
+	•	tightened cohort showing it cuts losses without touching runners
+
+If those hold, then v7.2 is not just promising — it’s probably real.
+
+When to flip to v7.1
+
+I agree with your queue:
+
+Wait until 100 v7.2 trades first.
+
+That gives you enough confidence in the new baseline before testing session filtering.
+
+Because once you flip to v7.1, trade count will slow down, and you want to do that from a position of clarity, not uncertainty.
+
+How to think about v7.1
+
+v7.1 is not “the next improvement.”
+It’s a population test.
+
+It answers one question only:
+
+Does removing non-power-session trades improve expectancy enough to justify lower frequency?
+
+That’s it.
+
+So when you run it, judge it on:
+	•	expectancy
+	•	trade frequency
+	•	runner frequency
+	•	whether the edge improves enough to justify fewer trades
+
+A version can be “better” statistically but worse practically if it kills too much opportunity.
+
+My opinion
+
+Your current process is strong enough now that I would stop seeking new ideas for a bit.
+
+You already have:
+	•	a live baseline
+	•	a queued next experiment
+	•	proper version isolation
+	•	metrics that matter
+
+That’s better than most people ever get.
+
+One thing I’d add
+
+At the 100-trade v7.2 checkpoint, make one summary table with:
+	•	v7.0
+	•	v7.2
+	•	delta
+
+and then separately:
+	•	tightened cohort only
+	•	non-tightened cohort only
+
+That table will tell you, in one glance, whether the rule is truly responsible for the improvement.
+
+Bottom line
+
+You should keep doing exactly this:
+	•	let v7.2 run
+	•	review at 75 / 100 / 150
+	•	only then flip to v7.1
+	•	only consider v7.3 if both standalone experiments hold up
+
+Small summary
+
+You’re on the right path. Don’t change anything right now. Let v7.2 reach 100 trades, verify the tightened cohort and runner stats hold, then test v7.1 as a separate variable.
