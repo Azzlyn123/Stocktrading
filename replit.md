@@ -9,24 +9,34 @@ BreakoutIQ is a full-stack trading alert application for US equities and ETFs, d
 - JetBrains Mono for monospace
 
 ## Current Strategy Version
-**v7.2** (active) — Tier A only + 15-min stop-tighten:
+**v7.2** (active — new baseline) — Tier A only + 15-min stop-tighten:
 - Entry: Tier A only (volRatio ≥1.8, atrRatio ≥1.2), all sessions allowed
 - Exit: T1 at +0.4R/70% sell, stop tightens to entry-0.05R at 15min if MFE < 0.10R (no market exit); time_stop otherwise
-- v7.0 baseline (25 trades): +0.053R expectancy, 40% WR — confirmed positive expectancy
+- **FROZEN. Do not modify rules.**
+- n=54 results: +0.164R expectancy, 38.9% WR, avg loss -0.201R, avg win +0.736R, runners 46% at 0.863R avg MFE
+- Time-stop rate collapsed v7.0→v7.2: 56% → 18.5%; avg time-stop R flipped -0.137R → +0.085R
+- Checkpoints: 75 trades → 100 trades → 150 trades
 
-**v7.1** (ready, not active) — Tier A + Power Session only:
+**v7.1** (ready, not yet active) — Tier A + Power Session only (NO stop-tighten):
 - Entry: Tier A only AND minutesSinceOpen > 240 (power session gate)
-- Activate when ≥50 v7.2 trades exist for clean A/B comparison
+- Activate by DB update: `current_strategy_version = 'v7.1'` — code is fully implemented
+- Purpose: isolate whether session filtering adds edge independently
+- Run AFTER v7.2 reaches 100 trades
 
-**v7.0** (baseline) — Tier A only, all sessions:
-- 25 trades completed: +0.053R expectancy, 40% WR, zero impulse exits
+**v7.3** (future, do not build yet) — v7.2 + power-session gate combined:
+- Only justified if v7.1 also demonstrates independent edge
+- Do not build until both v7.1 and v7.2 individual tests are conclusive
 
-**Key infrastructure added (v7.2 session)**:
-- `stopTightenAt15min` flag in TieredStrategyConfig
+**v7.0** (retired baseline):
+- 25 trades: +0.053R expectancy, 40% WR — used to validate v7.2; no longer primary reference
+
+**Key infrastructure**:
+- `stopTightenAt15min` flag in TieredStrategyConfig; `stopTightenApplied: boolean` on activeTrade (records to market_context JSONB)
 - `checkEntryGate()` pure function in `server/strategy/entryGate.ts` (Vitest-tested, 9 tests pass)
-- `market_context` JSONB enriched with `volRatio`, `atrRatio`, `minutesSinceOpen`, `tier` on every trade
-- `GET /api/simulations/report?version=X` endpoint with full breakdown (exits, sessions, tiers)
-- Vitest installed; config at `vitest.config.ts`; tests at `server/strategy/__tests__/`
+- `checkTieredExitRules()` stop-tighten branch (Vitest-tested, 7 tests pass); 16 total passing
+- `market_context` JSONB enriched with `volRatio`, `atrRatio`, `minutesSinceOpen`, `tier`, `stopTightenApplied` on every trade
+- `GET /api/simulations/report?version=X` endpoint — returns exits, tightenedCohort, sessions, tiers, runnerCount, avgRunnerMfe
+- Vitest at `vitest.config.ts`; tests at `server/strategy/__tests__/`
 
 ## System Architecture
 BreakoutIQ is built with a React 18 frontend (TypeScript, Vite, TailwindCSS, Shadcn UI), an Express.js (Node.js) backend, and a PostgreSQL database with Drizzle ORM. Authentication uses Passport-local with session-based methods, and real-time data/notifications are handled via WebSockets. The frontend utilizes Wouter for routing, TanStack React Query for state management, and Recharts for charting.
