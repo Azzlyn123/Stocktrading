@@ -2561,7 +2561,7 @@ export async function registerRoutes(
     if (token !== "v6run") return res.status(403).json({ error: "Forbidden" });
     const user = await storage.getUserByUsername("Hbg");
     if (!user) return res.status(404).json({ error: "User not found" });
-    const result = await startAutoRun(user.id, 60, storage, 365);
+    const result = await startAutoRun(user.id, 60, storage, 730);
     res.json(result);
   });
 
