@@ -1,6 +1,12 @@
 import WebSocket from "ws";
 import { log } from "./index";
 import type { Candle } from "./strategy/types";
+import {
+  fetchBarsForDatePolygon,
+  fetchDailyBarsForDatePolygon,
+  fetchMultiDayDailyBarsPolygon,
+  fetchBulkDailyBarsPolygon,
+} from "./polygon";
 
 const ALPACA_API_KEY = process.env.ALPACA_API_KEY || "";
 const ALPACA_API_SECRET = process.env.ALPACA_API_SECRET || "";
@@ -11,6 +17,10 @@ const headers: Record<string, string> = {
   "APCA-API-KEY-ID": ALPACA_API_KEY,
   "APCA-API-SECRET-KEY": ALPACA_API_SECRET,
 };
+
+function usePolygon(): boolean {
+  return (process.env.POLYGON_API_KEY || "").length > 0;
+}
 
 export function isAlpacaConfigured(): boolean {
   return ALPACA_API_KEY.length > 0 && ALPACA_API_SECRET.length > 0;
@@ -124,6 +134,8 @@ export async function fetchBarsForDate(
   date: string,
   timeframe: string = "5Min"
 ): Promise<Map<string, Candle[]>> {
+  if (usePolygon()) return fetchBarsForDatePolygon(symbols, date, timeframe);
+
   const result = new Map<string, Candle[]>();
 
   const start = `${date}T09:30:00-05:00`;
@@ -156,6 +168,8 @@ export async function fetchMultiDayDailyBars(
   date: string,
   lookbackDays: number = 20
 ): Promise<Map<string, Candle[]>> {
+  if (usePolygon()) return fetchMultiDayDailyBarsPolygon(symbols, date, lookbackDays);
+
   const result = new Map<string, Candle[]>();
   const endDate = new Date(date + "T12:00:00Z");
   const startDate = new Date(endDate);
@@ -216,6 +230,8 @@ export async function fetchDailyBarsForDate(
   symbols: string[],
   date: string
 ): Promise<Map<string, Candle>> {
+  if (usePolygon()) return fetchDailyBarsForDatePolygon(symbols, date);
+
   const result = new Map<string, Candle>();
   const prevDate = new Date(date + "T12:00:00Z");
   prevDate.setDate(prevDate.getDate() - 3);
@@ -312,6 +328,8 @@ export async function fetchBulkDailyBars(
   startDate: string,
   endDate: string,
 ): Promise<Map<string, DailyBar[]>> {
+  if (usePolygon()) return fetchBulkDailyBarsPolygon(symbols, startDate, endDate);
+
   const result = new Map<string, DailyBar[]>();
   const symbolStr = symbols.join(",");
   const url = `${DATA_BASE_URL}/stocks/bars?symbols=${symbolStr}&timeframe=1Day&start=${startDate}T00:00:00Z&end=${endDate}T23:59:59Z&limit=10000&feed=sip&adjustment=split`;

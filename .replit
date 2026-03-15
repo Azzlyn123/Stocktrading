@@ -41,3 +41,8 @@ author = "agent"
 task = "shell.exec"
 args = "npm run dev"
 waitForPort = 5000
+
+[userenv]
+
+[userenv.shared]
+POLYGON_API_KEY = "7r_IlT0XhW5RnQ8fVcj_5uKv2pTIgbjc"
