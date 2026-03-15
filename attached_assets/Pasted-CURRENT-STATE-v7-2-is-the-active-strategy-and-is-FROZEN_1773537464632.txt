@@ -1,0 +1,98 @@
+CURRENT STATE
+-------------
+v7.2 is the active strategy and is FROZEN. No rule changes are allowed while trades accumulate.
+
+OBJECTIVE
+---------
+Validate whether v7.2 produces a stable positive expectancy and confirms that the stop-tighten rule improves loss control without harming runner trades.
+
+NEXT ACTIONS
+------------
+
+1. LET THE SIM RUN
+Do not modify any strategy rules or filters.
+Allow v7.2 to continue accumulating trades autonomously.
+
+Next checkpoint: 75 trades.
+
+2. 75 TRADE CHECKPOINT (Sanity Check)
+
+Run:
+GET /api/simulations/report?version=v7.2
+
+Review the following metrics:
+
+Expectancy target: >= +0.08R
+Average loss target: < -0.30R
+Runner percentage target: >= 35%
+Average runner MFE target: >= 0.70R
+Time_stop percentage: should remain low (well below v7.0 levels)
+
+If any metric drifts significantly outside the target range, flag for investigation.
+
+3. 100 TRADE CHECKPOINT (Primary Verdict)
+
+Generate the comparison table:
+
+Metric
+v7.0 (n=25)
+v7.2 (n=100)
+Delta
+
+Expectancy
+Win rate
+Average loss
+Average win
+Runner count
+Average runner MFE
+
+This table determines whether v7.2 is truly superior to v7.0.
+
+4. COHORT ANALYSIS
+
+Split trades into two cohorts using the DB flag:
+
+stopTightenApplied = true
+stopTightenApplied = false
+
+Create the following table:
+
+Cohort | n | Expectancy | Avg Loss | Runner % | Avg Runner MFE
+
+Tightened
+Non-tightened
+
+Expected behavior:
+
+Tightened cohort → reduced losses
+Non-tightened cohort → still produces runners
+
+If improvements appear only in the non-tightened cohort, the rule may not be responsible for the improvement.
+
+5. 150 TRADE CHECKPOINT (Stability Confirmation)
+
+If expectancy remains >= +0.08R and other metrics remain within targets, the v7.2 rule set is considered validated.
+
+6. v7.1 EXPERIMENT (ONLY AFTER v7.2 VALIDATION)
+
+Once v7.2 reaches 100 trades and metrics remain stable, activate v7.1.
+
+v7.1 tests the session filter only:
+Tier A + Power Session entries.
+
+Activate with:
+
+UPDATE users
+SET current_strategy_version = 'v7.1';
+
+No code changes required.
+
+7. EXPERIMENT ORDER (DO NOT CHANGE)
+
+v7.2 → validate stop-tighten rule
+v7.1 → test power-session filter
+v7.3 → combine both rules only if both experiments independently improve performance
+
+IMPORTANT RULE
+--------------
+Do not modify strategy logic while v7.2 is accumulating trades. The current phase is validation, not optimization.
