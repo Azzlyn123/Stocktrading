@@ -45,4 +45,5 @@ waitForPort = 5000
 [userenv]
 
 [userenv.shared]
-POLYGON_API_KEY = "7r_IlT0XhW5RnQ8fVcj_5uKv2pTIgbjc"
+POLYGON_API_KEY = "QIi8QLvd0nL9MbdsXYBAyV9N6ce43jFs"
+POLYGON_RATE_MS = "300"

@@ -63,7 +63,8 @@ The backend features a modular strategy engine with pure TypeScript modules and 
 -   **UI/UX**: Features a dashboard, scanner, watchlist, signals feed, trades log, and settings, all with a default dark theme.
 
 ## External Dependencies
--   **Alpaca API**: Provides live bars, snapshots, WebSocket data streams, market clock, and historical bar data.
+-   **Alpaca API**: Provides live bars, snapshots, WebSocket data streams, market clock, and historical bar data (live feed + recent intraday history).
+-   **Polygon.io API** (paid Starter plan): Historical intraday and daily bar data for simulation beyond Alpaca's free-tier limit. Routed via `server/polygon.ts`. Activated when `POLYGON_API_KEY` env var is set. Rate: `POLYGON_RATE_MS` env var (default 13000ms for free tier; set to 300 for paid plan). Key infrastructure: `usePolygon()` gate in `alpaca.ts`; all four fetch functions delegate to Polygon equivalents transparently.
 -   **PostgreSQL**: Primary relational database.
 -   **WebSocket**: Used for real-time price updates and market status notifications.
 -   **Passport-local**: Handles user authentication.
