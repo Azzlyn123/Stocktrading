@@ -517,7 +517,7 @@ export class AlpacaStream {
             } else if (msg.T === "success" && msg.msg === "authenticated") {
               this.authenticated = true;
               log("Alpaca WebSocket authenticated", "alpaca");
-              const tradeSymbols = this.symbols.slice(0, 30);
+              const tradeSymbols = this.symbols.slice(0, 15);
               const quoteSymbols = this.symbols.slice(0, 10);
               this.ws?.send(
                 JSON.stringify({
