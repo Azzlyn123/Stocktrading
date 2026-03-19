@@ -1,0 +1,78 @@
+Because you need clean evidence first.
+
+3. Use the learning system as an analysis layer, not a control layer
+
+Best use right now:
+	•	generate lessons
+	•	rank repeated failure patterns
+	•	show which regimes or setup clusters fail
+	•	suggest candidate filters for future versions
+
+Bad use right now:
+	•	automatically skip trades in the main experiment
+	•	dynamically lower scores during the same validation run
+
+That turns your backtest into a moving target.
+
+When it becomes useful
+
+Once you have a validated base system — say after 150–300 trades and cleaner evidence — then the learning system becomes a great v8+ experiment.
+
+At that point you can test:
+	•	baseline fixed strategy
+	•	baseline + lesson-based penalties
+	•	baseline + lesson-based skip logic
+
+And compare them properly.
+
+The biggest risk with your current learning system
+
+It can create silent overfitting.
+
+Example:
+	•	simulator sees a pattern fail 3 times
+	•	labels it bad
+	•	future setups like that get skipped
+	•	performance improves
+
+That may look smart, but it might just be:
+	•	data snooping
+	•	regime-specific memorization
+	•	deleting legitimate future winners
+
+That’s why it needs its own isolated test later.
+
+My recommendation
+
+For now:
+	•	keep the “AI learning system” in the app, but
+	•	turn it off for your main strategy validation
+	•	keep it on only for lesson generation / analysis
+	•	revisit it as a separate experiment after the base strategy is proven enough
+
+Best structure going forward
+
+Core engine
+	•	fixed rules
+	•	clean versioning
+	•	no adaptive memory
+
+Research assistant layer
+	•	lesson generation
+	•	pattern tagging
+	•	regime notes
+	•	reports on repeated failure setups
+
+Future adaptive experiment
+	•	score penalties
+	•	setup skipping
+	•	only tested in a separate branch
+
+Bottom line
+
+Yes, that system can be valuable.
+But right now it should be treated as a research tool, not part of the core strategy logic.
+
+Small summary
+
+Your app’s “AI learning system” is useful for finding patterns, but it should not be allowed to change the main validation backtest yet. Keep the core strategy fixed, use the learning layer for analysis only, and test adaptive filtering later as its own experiment.
