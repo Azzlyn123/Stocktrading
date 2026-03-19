@@ -2693,6 +2693,7 @@ export async function runHistoricalSimulation(
       processedBars,
       tradesGenerated,
       lessonsGenerated,
+      learningEnabled: !options?.disableLearning,
       totalPnl: Number(totalPnl.toFixed(2)),
       grossPnl: Number(grossPnlTotal.toFixed(2)),
       totalCommission: Number(totalCommissions.toFixed(2)),

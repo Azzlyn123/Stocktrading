@@ -1722,8 +1722,21 @@ export default function Backtester() {
             <History className="w-4 h-4 text-muted-foreground" />
             <h3 className="text-sm font-medium">Single Day Simulation</h3>
           </div>
+          <div className="flex items-center gap-1">
+            {learningMode === "A" ? (
+              <Lock className="w-3.5 h-3.5 text-muted-foreground" />
+            ) : (
+              <FlaskConical className="w-3.5 h-3.5 text-amber-500" />
+            )}
+            <span className={`text-[10px] ${learningMode === "A" ? "text-muted-foreground" : "text-amber-500"}`}>
+              {learningMode === "A" ? "Mode A — Frozen" : "Mode B — Adaptive"}
+            </span>
+          </div>
         </CardHeader>
         <CardContent className="p-4 pt-0">
+          <p className="text-[10px] text-muted-foreground mb-3">
+            Mode is shared with Auto-Run above. Switch mode there to change how this run applies learning.
+          </p>
           <div className="flex items-end gap-3 flex-wrap">
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground" htmlFor="sim-date">
