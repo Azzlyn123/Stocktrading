@@ -1734,9 +1734,32 @@ export default function Backtester() {
           </div>
         </CardHeader>
         <CardContent className="p-4 pt-0">
-          <p className="text-[10px] text-muted-foreground mb-3">
-            Mode is shared with Auto-Run above. Switch mode there to change how this run applies learning.
-          </p>
+          <div className="flex items-center gap-1 mb-3 p-1 bg-accent/50 rounded-lg w-fit" data-testid="toggle-learning-mode-single">
+            <button
+              onClick={() => setLearningMode("A")}
+              data-testid="button-single-mode-a"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                learningMode === "A"
+                  ? "bg-background shadow-sm text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Lock className="w-3 h-3" />
+              Mode A — Frozen
+            </button>
+            <button
+              onClick={() => setLearningMode("B")}
+              data-testid="button-single-mode-b"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                learningMode === "B"
+                  ? "bg-amber-500/15 shadow-sm text-amber-500"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <FlaskConical className="w-3 h-3" />
+              Mode B — Adaptive
+            </button>
+          </div>
           <div className="flex items-end gap-3 flex-wrap">
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground" htmlFor="sim-date">
