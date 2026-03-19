@@ -252,6 +252,7 @@ export const simulationRuns = pgTable("simulation_runs", {
   skippedSetups: jsonb("skipped_setups").default([]),
   errorMessage: text("error_message"),
   strategyVersion: text("strategy_version"),
+  learningEnabled: boolean("learning_enabled").default(true),
   startedAt: timestamp("started_at").defaultNow(),
   completedAt: timestamp("completed_at"),
 });

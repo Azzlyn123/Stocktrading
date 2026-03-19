@@ -34,6 +34,8 @@ import {
   Download,
   Tag,
   Gauge,
+  Lock,
+  FlaskConical,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -372,12 +374,24 @@ function RunCard({ run, onCancel }: { run: SimulationRun; onCancel: (id: string)
     <Card data-testid={`card-simulation-${run.id}`}>
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-2 flex-wrap">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Calendar className="w-4 h-4 text-muted-foreground" />
             <span className="text-sm font-medium" data-testid={`text-sim-date-${run.id}`}>
               {formatDate(run.simulationDate)}
             </span>
             <StatusBadge status={run.status ?? "pending"} />
+            {run.learningEnabled === false && (
+              <Badge variant="outline" className="text-[10px] px-1.5 min-h-5 bg-muted/50 text-muted-foreground" data-testid={`badge-mode-frozen-${run.id}`}>
+                <Lock className="w-2.5 h-2.5 mr-1" />
+                Frozen
+              </Badge>
+            )}
+            {run.learningEnabled === true && (
+              <Badge variant="outline" className="text-[10px] px-1.5 min-h-5 bg-amber-500/10 border-amber-500/30 text-amber-500" data-testid={`badge-mode-adaptive-${run.id}`}>
+                <FlaskConical className="w-2.5 h-2.5 mr-1" />
+                Adaptive
+              </Badge>
+            )}
           </div>
           {isRunning && (
             <Button
@@ -1444,6 +1458,7 @@ export default function Backtester() {
 
   const [autoRunMinutes, setAutoRunMinutes] = useState(5);
   const [strategyVersion, setStrategyVersion] = useState("v1");
+  const [learningMode, setLearningMode] = useState<"A" | "B">("A");
 
   const { toast } = useToast();
 
@@ -1467,6 +1482,7 @@ export default function Backtester() {
     mutationFn: async (date: string) => {
       const res = await apiRequest("POST", "/api/simulations", {
         simulationDate: date,
+        disableLearning: learningMode === "A",
       });
       return res.json();
     },
@@ -1494,6 +1510,7 @@ export default function Backtester() {
       const res = await apiRequest("POST", "/api/simulations/auto-run", {
         durationMinutes: opts.minutes,
         exactDays: opts.exactDays,
+        disableLearning: learningMode === "A",
       });
       return res.json();
     },
@@ -1573,13 +1590,49 @@ export default function Backtester() {
             <h3 className="text-sm font-medium">Auto-Run Training</h3>
           </div>
           <div className="flex items-center gap-1">
-            <ShieldCheck className="w-3.5 h-3.5 text-muted-foreground" />
-            <span className="text-[10px] text-muted-foreground">AI adapts from lessons</span>
+            {learningMode === "A" ? (
+              <Lock className="w-3.5 h-3.5 text-muted-foreground" />
+            ) : (
+              <FlaskConical className="w-3.5 h-3.5 text-amber-500" />
+            )}
+            <span className={`text-[10px] ${learningMode === "A" ? "text-muted-foreground" : "text-amber-500"}`}>
+              {learningMode === "A" ? "Mode A — Frozen Baseline" : "Mode B — Adaptive"}
+            </span>
           </div>
         </CardHeader>
         <CardContent className="p-4 pt-0">
+          <div className="flex items-center gap-1 mb-3 p-1 bg-accent/50 rounded-lg w-fit" data-testid="toggle-learning-mode">
+            <button
+              onClick={() => setLearningMode("A")}
+              disabled={isAutoRunActive}
+              data-testid="button-mode-a"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                learningMode === "A"
+                  ? "bg-background shadow-sm text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Lock className="w-3 h-3" />
+              Mode A — Frozen
+            </button>
+            <button
+              onClick={() => setLearningMode("B")}
+              disabled={isAutoRunActive}
+              data-testid="button-mode-b"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                learningMode === "B"
+                  ? "bg-amber-500/15 shadow-sm text-amber-500"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <FlaskConical className="w-3 h-3" />
+              Mode B — Adaptive
+            </button>
+          </div>
           <p className="text-[10px] text-muted-foreground mb-3">
-            Automatically simulates multiple past trading days. The AI learns from each day and adjusts entry decisions for the next, skipping setups that match past failure patterns.
+            {learningMode === "A"
+              ? "Frozen baseline: fixed rules, no score adjustments from past lessons. Use this for strategy validation."
+              : "Adaptive: lessons from past runs adjust scores and can skip setups matching prior failure patterns."}
           </p>
           <div className="flex items-end gap-3 flex-wrap">
             <div className="space-y-1.5">

@@ -569,6 +569,7 @@ export async function startAutoRun(
   durationMinutes: number,
   storage: IStorage,
   exactDays?: number,
+  disableLearning?: boolean,
 ): Promise<{ started: boolean; message: string }> {
   if (autoRunState?.active) {
     return { started: false, message: "Auto-run is already active." };
@@ -593,11 +594,11 @@ export async function startAutoRun(
   };
 
   log(
-    `[AutoRun] Starting ${durationMinutes}-minute auto-run across ${dates.length} dates`,
+    `[AutoRun] Starting ${durationMinutes}-minute auto-run across ${dates.length} dates (learning: ${disableLearning ? "OFF" : "ON"})`,
     "historical",
   );
 
-  runAutoRunLoop(userId, storage).catch((err) => {
+  runAutoRunLoop(userId, storage, disableLearning).catch((err) => {
     log(`[AutoRun] Error: ${err.message}`, "historical");
   });
 
@@ -607,7 +608,7 @@ export async function startAutoRun(
   };
 }
 
-async function runAutoRunLoop(userId: string, storage: IStorage) {
+async function runAutoRunLoop(userId: string, storage: IStorage, disableLearning?: boolean) {
   if (!autoRunState) return;
 
   const deadline =
@@ -654,9 +655,10 @@ async function runAutoRunLoop(userId: string, storage: IStorage) {
       status: "pending",
       tickers: null,
       strategyVersion: user?.currentStrategyVersion ?? "v1",
+      learningEnabled: !disableLearning,
     });
 
-    await runHistoricalSimulation(run.id, date, userId, storage);
+    await runHistoricalSimulation(run.id, date, userId, storage, undefined, { disableLearning });
     
     // Yield to event loop after each simulation to keep Express responsive
     await new Promise(resolve => setImmediate(resolve));
@@ -714,6 +716,7 @@ export async function runHistoricalSimulation(
     costOverrides?: CostOverrides;
     dryRun?: boolean;
     preloadedBars?: SimulationBarData;
+    disableLearning?: boolean;
   },
 ): Promise<DryRunResult | void> {
   const tickers = tickerList ?? BACKTEST_TICKERS;
@@ -2177,59 +2180,61 @@ export async function runHistoricalSimulation(
                       ? "mid"
                       : "power";
                 let appliedPenalty = 0;
-                try {
-                  const recentLessons = (
-                    await storage.getRecentLessonsByVersion(100, user.currentStrategyVersion ?? "v1")
-                  ).filter((l) => {
-                    const ctx = l.marketContext as Record<string, any> | null;
-                    if (ctx?.simulationDate) {
-                      return ctx.simulationDate < simulationDate;
-                    }
-                    return true;
-                  });
+                if (!options?.disableLearning) {
+                  try {
+                    const recentLessons = (
+                      await storage.getRecentLessonsByVersion(100, user.currentStrategyVersion ?? "v1")
+                    ).filter((l) => {
+                      const ctx = l.marketContext as Record<string, any> | null;
+                      if (ctx?.simulationDate) {
+                        return ctx.simulationDate < simulationDate;
+                      }
+                      return true;
+                    });
 
-                  // Ramp penalty weight: 0 at 0 lessons → 1.0 at 25+ lessons
-                  // Hard-isolates each version's learning from prior versions
-                  const penaltyWeight = Math.min(1, recentLessons.length / 25);
-                  log(
-                    `[HistSim] ${ticker} lessonCount=${recentLessons.length} penaltyWeight=${penaltyWeight.toFixed(2)}`,
-                    "historical",
-                  );
-
-                  if (penaltyWeight > 0) {
-                    const penaltyResult = computeLearningPenalty(
-                      recentLessons.map((l) => ({
-                        ticker: l.ticker,
-                        tier: l.tier,
-                        outcomeCategory: l.outcomeCategory,
-                        lessonTags: l.lessonTags,
-                        marketContext: l.marketContext,
-                        pnl: l.pnl,
-                        scoreAtEntry: l.scoreAtEntry,
-                      })),
-                      ticker,
-                      state.selectedTier ?? "C",
-                      regimeResult.aligned,
-                      session,
+                    // Ramp penalty weight: 0 at 0 lessons → 1.0 at 25+ lessons
+                    // Hard-isolates each version's learning from prior versions
+                    const penaltyWeight = Math.min(1, recentLessons.length / 25);
+                    log(
+                      `[HistSim] ${ticker} lessonCount=${recentLessons.length} penaltyWeight=${penaltyWeight.toFixed(2)}`,
+                      "historical",
                     );
 
-                    if (penaltyResult.penalty > 0) {
-                      const cappedPenalty = Math.round(Math.min(penaltyResult.penalty, 20) * penaltyWeight);
-                      if (cappedPenalty > 0) {
-                        appliedPenalty = cappedPenalty;
-                        score = Math.max(0, score - cappedPenalty);
-                        log(
-                          `[HistSim] ${ticker} LEARNING PENALTY: -${cappedPenalty} pts (raw: -${penaltyResult.penalty}, weight: ${penaltyWeight.toFixed(2)}), score ${score + cappedPenalty} -> ${score}. ${penaltyResult.reasons.join("; ")}`,
-                          "historical",
-                        );
+                    if (penaltyWeight > 0) {
+                      const penaltyResult = computeLearningPenalty(
+                        recentLessons.map((l) => ({
+                          ticker: l.ticker,
+                          tier: l.tier,
+                          outcomeCategory: l.outcomeCategory,
+                          lessonTags: l.lessonTags,
+                          marketContext: l.marketContext,
+                          pnl: l.pnl,
+                          scoreAtEntry: l.scoreAtEntry,
+                        })),
+                        ticker,
+                        state.selectedTier ?? "C",
+                        regimeResult.aligned,
+                        session,
+                      );
+
+                      if (penaltyResult.penalty > 0) {
+                        const cappedPenalty = Math.round(Math.min(penaltyResult.penalty, 20) * penaltyWeight);
+                        if (cappedPenalty > 0) {
+                          appliedPenalty = cappedPenalty;
+                          score = Math.max(0, score - cappedPenalty);
+                          log(
+                            `[HistSim] ${ticker} LEARNING PENALTY: -${cappedPenalty} pts (raw: -${penaltyResult.penalty}, weight: ${penaltyWeight.toFixed(2)}), score ${score + cappedPenalty} -> ${score}. ${penaltyResult.reasons.join("; ")}`,
+                            "historical",
+                          );
+                        }
                       }
                     }
+                  } catch (lpErr) {
+                    log(
+                      `[HistSim] Learning penalty error: ${lpErr}`,
+                      "historical",
+                    );
                   }
-                } catch (lpErr) {
-                  log(
-                    `[HistSim] Learning penalty error: ${lpErr}`,
-                    "historical",
-                  );
                 }
 
                 const minScore = _v6 ? 85 : 70;

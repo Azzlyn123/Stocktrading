@@ -307,7 +307,7 @@ export async function registerRoutes(
   app.post("/api/simulations", requireAuth, async (req, res) => {
     const user = req.user as User;
     const userId = user.id;
-    const { simulationDate, tickers } = req.body;
+    const { simulationDate, tickers, disableLearning } = req.body;
 
     if (!simulationDate || typeof simulationDate !== "string") {
       return res.status(400).json({ error: "simulationDate is required (YYYY-MM-DD)" });
@@ -330,6 +330,7 @@ export async function registerRoutes(
       status: "pending",
       tickers: tickers ?? null,
       strategyVersion: user.currentStrategyVersion ?? "v1",
+      learningEnabled: !disableLearning,
     });
 
     runHistoricalSimulation(
@@ -337,7 +338,8 @@ export async function registerRoutes(
       simulationDate,
       userId,
       storage,
-      tickers && tickers.length > 0 ? tickers : undefined
+      tickers && tickers.length > 0 ? tickers : undefined,
+      { disableLearning: !!disableLearning },
     ).catch((err) => {
       console.error("Historical simulation error:", err);
     });
@@ -395,10 +397,10 @@ export async function registerRoutes(
 
   app.post("/api/simulations/auto-run", requireAuth, async (req, res) => {
     const userId = (req.user as User).id;
-    const { durationMinutes, exactDays } = req.body;
+    const { durationMinutes, exactDays, disableLearning } = req.body;
     const duration = Math.min(Math.max(Number(durationMinutes) || 5, 1), 60);
     const days = exactDays ? Math.min(Math.max(Number(exactDays), 1), 120) : undefined;
-    const result = await startAutoRun(userId, duration, storage, days);
+    const result = await startAutoRun(userId, duration, storage, days, !!disableLearning);
     if (!result.started) {
       return res.status(409).json({ error: result.message });
     }
