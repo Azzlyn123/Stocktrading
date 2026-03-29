@@ -23,7 +23,10 @@ function usePolygon(): boolean {
 }
 
 export function isAlpacaConfigured(): boolean {
-  return ALPACA_API_KEY.length > 0 && ALPACA_API_SECRET.length > 0;
+  // Polygon-only mode is also valid
+  return (
+    (ALPACA_API_KEY.length > 0 && ALPACA_API_SECRET.length > 0) || usePolygon()
+  );
 }
 
 interface AlpacaBar {
@@ -59,7 +62,7 @@ function alpacaBarToCandle(bar: AlpacaBar): Candle {
 export async function fetchHistoricalBars(
   symbol: string,
   timeframe: string,
-  limit: number = 100
+  limit: number = 100,
 ): Promise<Candle[]> {
   const end = new Date();
   const start = new Date();
@@ -94,7 +97,7 @@ export async function fetchHistoricalBars(
 export async function fetchMultipleHistoricalBars(
   symbols: string[],
   timeframe: string,
-  limit: number = 100
+  limit: number = 100,
 ): Promise<Map<string, Candle[]>> {
   const result = new Map<string, Candle[]>();
   const end = new Date();
@@ -132,7 +135,7 @@ export async function fetchMultipleHistoricalBars(
 export async function fetchBarsForDate(
   symbols: string[],
   date: string,
-  timeframe: string = "5Min"
+  timeframe: string = "5Min",
 ): Promise<Map<string, Candle[]>> {
   if (usePolygon()) return fetchBarsForDatePolygon(symbols, date, timeframe);
 
@@ -166,9 +169,10 @@ export async function fetchBarsForDate(
 export async function fetchMultiDayDailyBars(
   symbols: string[],
   date: string,
-  lookbackDays: number = 20
+  lookbackDays: number = 20,
 ): Promise<Map<string, Candle[]>> {
-  if (usePolygon()) return fetchMultiDayDailyBarsPolygon(symbols, date, lookbackDays);
+  if (usePolygon())
+    return fetchMultiDayDailyBarsPolygon(symbols, date, lookbackDays);
 
   const result = new Map<string, Candle[]>();
   const endDate = new Date(date + "T12:00:00Z");
@@ -197,7 +201,7 @@ export async function fetchMultiDayDailyBars(
 export async function fetchForwardDailyBars(
   symbols: string[],
   afterDate: string,
-  forwardDays: number = 5
+  forwardDays: number = 5,
 ): Promise<Map<string, Candle[]>> {
   const result = new Map<string, Candle[]>();
   const startDate = new Date(afterDate + "T12:00:00Z");
@@ -228,7 +232,7 @@ export async function fetchForwardDailyBars(
 
 export async function fetchDailyBarsForDate(
   symbols: string[],
-  date: string
+  date: string,
 ): Promise<Map<string, Candle>> {
   if (usePolygon()) return fetchDailyBarsForDatePolygon(symbols, date);
 
@@ -270,7 +274,7 @@ export interface TwoDayBars {
 
 export async function fetchTwoDayDailyBars(
   symbols: string[],
-  date: string
+  date: string,
 ): Promise<Map<string, TwoDayBars>> {
   const result = new Map<string, TwoDayBars>();
   const endDate = new Date(date + "T12:00:00Z");
@@ -288,7 +292,7 @@ export async function fetchTwoDayDailyBars(
     const barsMap: Record<string, AlpacaBar[]> = data.bars || {};
     for (const [sym, bars] of Object.entries(barsMap)) {
       const sorted = (bars as AlpacaBar[]).sort(
-        (a, b) => new Date(a.t).getTime() - new Date(b.t).getTime()
+        (a, b) => new Date(a.t).getTime() - new Date(b.t).getTime(),
       );
       if (sorted.length >= 2) {
         const prior = sorted[sorted.length - 2];
@@ -328,7 +332,8 @@ export async function fetchBulkDailyBars(
   startDate: string,
   endDate: string,
 ): Promise<Map<string, DailyBar[]>> {
-  if (usePolygon()) return fetchBulkDailyBarsPolygon(symbols, startDate, endDate);
+  if (usePolygon())
+    return fetchBulkDailyBarsPolygon(symbols, startDate, endDate);
 
   const result = new Map<string, DailyBar[]>();
   const symbolStr = symbols.join(",");
@@ -341,16 +346,19 @@ export async function fetchBulkDailyBars(
     const barsMap: Record<string, AlpacaBar[]> = data.bars || {};
     for (const [sym, bars] of Object.entries(barsMap)) {
       const sorted = (bars as AlpacaBar[]).sort(
-        (a, b) => new Date(a.t).getTime() - new Date(b.t).getTime()
+        (a, b) => new Date(a.t).getTime() - new Date(b.t).getTime(),
       );
-      result.set(sym, sorted.map(b => ({
-        date: new Date(b.t).toISOString().split("T")[0],
-        open: b.o,
-        high: b.h,
-        low: b.l,
-        close: b.c,
-        volume: b.v,
-      })));
+      result.set(
+        sym,
+        sorted.map((b) => ({
+          date: new Date(b.t).toISOString().split("T")[0],
+          open: b.o,
+          high: b.h,
+          low: b.l,
+          close: b.c,
+          volume: b.v,
+        })),
+      );
     }
   } catch (e: any) {
     log(`Alpaca bulk daily bars fetch failed: ${e.message}`, "alpaca");
@@ -368,7 +376,8 @@ export async function fetchAllActiveEquitySymbols(): Promise<string[]> {
     return cachedActiveSymbols;
   }
 
-  const url = "https://paper-api.alpaca.markets/v2/assets?status=active&asset_class=us_equity";
+  const url =
+    "https://paper-api.alpaca.markets/v2/assets?status=active&asset_class=us_equity";
   try {
     const res = await fetch(url, { headers });
     if (!res.ok) {
@@ -382,8 +391,13 @@ export async function fetchAllActiveEquitySymbols(): Promise<string[]> {
         const sym = a.symbol as string;
         if (sym.length > 5 || sym.includes("/")) return false;
         const name = (a.name as string) || "";
-        if (name.includes("Preferred") || name.includes("Warrant") ||
-            name.includes("Unit") || name.includes("Rights")) return false;
+        if (
+          name.includes("Preferred") ||
+          name.includes("Warrant") ||
+          name.includes("Unit") ||
+          name.includes("Rights")
+        )
+          return false;
         return true;
       })
       .map((a: any) => a.symbol as string);
@@ -399,7 +413,7 @@ export async function fetchAllActiveEquitySymbols(): Promise<string[]> {
 }
 
 export async function fetchSnapshots(
-  symbols: string[]
+  symbols: string[],
 ): Promise<Map<string, AlpacaSnapshot>> {
   const result = new Map<string, AlpacaSnapshot>();
   const symbolStr = symbols.join(",");
@@ -512,7 +526,7 @@ export class AlpacaStream {
                   action: "auth",
                   key: ALPACA_API_KEY,
                   secret: ALPACA_API_SECRET,
-                })
+                }),
               );
             } else if (msg.T === "success" && msg.msg === "authenticated") {
               this.authenticated = true;
@@ -525,14 +539,14 @@ export class AlpacaStream {
                   trades: tradeSymbols,
                   bars: tradeSymbols,
                   quotes: quoteSymbols,
-                })
+                }),
               );
             } else if (msg.T === "error") {
               log(`Alpaca WS error: ${msg.code} ${msg.msg}`, "alpaca");
             } else if (msg.T === "subscription") {
               log(
                 `Alpaca subscribed - trades: ${msg.trades?.length || 0}, bars: ${msg.bars?.length || 0}, quotes: ${msg.quotes?.length || 0}`,
-                "alpaca"
+                "alpaca",
               );
             } else if (msg.T === "t" && this.onTrade) {
               this.onTrade({
