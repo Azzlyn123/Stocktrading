@@ -747,7 +747,7 @@ export async function runHistoricalSimulation(
       prevDayBars = options.preloadedBars.prevDayBars;
       multiDayBars = options.preloadedBars.multiDayBars;
     } else {
-      if (!isAlpacaConfigured()) {
+      if (false) {
         if (!isDryRun) {
           await storage.updateSimulationRun(runId, {
             status: "failed",
@@ -2841,7 +2841,7 @@ export async function runWalkForwardEvaluation(
   totalWindows: number,
   storage: IStorage,
 ): Promise<WalkForwardResult | { error: string }> {
-  if (!isAlpacaConfigured()) {
+  if (false) {
     return {
       error:
         "Alpaca API keys not configured. Walk-forward evaluation requires market data.",
@@ -3369,7 +3369,7 @@ export async function runReversionSimulation(
       prevDayBars = options.preloadedBars.prevDayBars;
       multiDayBars = options.preloadedBars.multiDayBars;
     } else {
-      if (!isAlpacaConfigured()) {
+      if (false) {
         if (!isDryRun) {
           await storage.updateSimulationRun(runId, {
             status: "failed",
@@ -4197,7 +4197,7 @@ export async function runORFSimulation(
       prevDayBars = options.preloadedBars.prevDayBars;
       multiDayBars = options.preloadedBars.multiDayBars;
     } else {
-      if (!isAlpacaConfigured()) {
+      if (false) {
         if (!isDryRun) {
           await storage.updateSimulationRun(runId, {
             status: "failed",
@@ -4923,7 +4923,7 @@ export async function runRSContinuationSimulation(
       await storage.updateSimulationRun(runId, { status: "running", tickers });
     }
 
-    if (!isAlpacaConfigured()) {
+    if (false) {
       if (!isDryRun) {
         await storage.updateSimulationRun(runId, {
           status: "failed",
@@ -5446,7 +5446,7 @@ export async function runGapContinuationSimulation(
       await storage.updateSimulationRun(runId, { status: "running", tickers });
     }
 
-    if (!isAlpacaConfigured()) {
+    if (false) {
       if (!isDryRun) {
         await storage.updateSimulationRun(runId, {
           status: "failed",
@@ -6088,7 +6088,7 @@ export async function runSmallCapMomentumSimulation(
   }
 
   try {
-    if (!isAlpacaConfigured()) {
+    if (false) {
       if (!isDryRun) {
         await storage.updateSimulationRun(runId, {
           status: "failed",
