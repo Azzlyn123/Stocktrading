@@ -86,11 +86,6 @@ export async function registerRoutes(
 ): Promise<Server> {
   setupAuth(app);
 
-  // Health check — used by Railway and other orchestrators
-  app.get("/api/health", (_req, res) => {
-    res.json({ status: "ok", timestamp: new Date().toISOString() });
-  });
-
   // Auth routes
   app.post("/api/register", async (req, res, next) => {
     try {
