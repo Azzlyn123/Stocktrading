@@ -14,22 +14,30 @@ process.on("uncaughtException", (err: any) => {
 });
 
 const _realExit = process.exit.bind(process);
-(process as any).exit = (code?: number) => {
-  const stack = new Error().stack;
-  console.warn(`[server] process.exit(${code}) INTERCEPTED — keeping server alive. Stack: ${stack?.slice(0, 500)}`);
-};
 
-process.on("exit", (code) => {
-  console.warn(`[server] process 'exit' event fired with code ${code} — this means something called real exit`);
-});
+if (process.env.NODE_ENV !== "production") {
+  (process as any).exit = (code?: number) => {
+    const stack = new Error().stack;
+    console.warn(`[server] process.exit(${code}) INTERCEPTED — keeping server alive. Stack: ${stack?.slice(0, 500)}`);
+  };
 
-process.on("SIGTERM", () => {
-  console.warn("[server] SIGTERM received — keeping alive for auto-run");
-});
+  process.on("exit", (code) => {
+    console.warn(`[server] process 'exit' event fired with code ${code} — this means something called real exit`);
+  });
 
-process.on("SIGINT", () => {
-  console.warn("[server] SIGINT received — keeping alive for auto-run");
-});
+  process.on("SIGTERM", () => {
+    console.warn("[server] SIGTERM received — keeping alive for auto-run");
+  });
+
+  process.on("SIGINT", () => {
+    console.warn("[server] SIGINT received — keeping alive for auto-run");
+  });
+} else {
+  process.on("SIGTERM", () => {
+    console.log("[server] SIGTERM received — shutting down gracefully");
+    _realExit(0);
+  });
+}
 
 const app = express();
 app.set("trust proxy", 1);
