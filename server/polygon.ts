@@ -16,7 +16,7 @@ const POLYGON_BASE = "https://api.polygon.io";
 // Free Polygon plan: 5 calls/min hard limit → 13s gap.
 // Paid plan: set POLYGON_RATE_MS env var to a smaller value (e.g. 300).
 // The gap adapts upward on 429 and slowly recovers after a run of successes.
-const RATE_MS = parseInt(process.env.POLYGON_RATE_MS || "13000");
+const RATE_MS = parseInt(process.env.POLYGON_RATE_MS || "300");
 let _gapMs = RATE_MS;
 let _successStreak = 0;
 let _requestChain: Promise<void> = Promise.resolve();
