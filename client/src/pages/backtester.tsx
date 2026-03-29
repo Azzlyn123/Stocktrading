@@ -90,17 +90,32 @@ function formatTime(seconds: number): string {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const variants: Record<string, { variant: "default" | "secondary" | "destructive" | "outline"; label: string }> = {
+  const variants: Record<
+    string,
+    {
+      variant: "default" | "secondary" | "destructive" | "outline";
+      label: string;
+    }
+  > = {
     pending: { variant: "outline", label: "Pending" },
     running: { variant: "secondary", label: "Running" },
     completed: { variant: "default", label: "Completed" },
     failed: { variant: "destructive", label: "Failed" },
     cancelled: { variant: "outline", label: "Cancelled" },
   };
-  const config = variants[status] ?? { variant: "outline" as const, label: status };
+  const config = variants[status] ?? {
+    variant: "outline" as const,
+    label: status,
+  };
   return (
-    <Badge variant={config.variant} className="text-[10px] px-1.5 min-h-5" data-testid={`badge-status-${status}`}>
-      {status === "running" && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}
+    <Badge
+      variant={config.variant}
+      className="text-[10px] px-1.5 min-h-5"
+      data-testid={`badge-status-${status}`}
+    >
+      {status === "running" && (
+        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+      )}
       {status === "completed" && <CheckCircle2 className="w-3 h-3 mr-1" />}
       {status === "failed" && <AlertCircle className="w-3 h-3 mr-1" />}
       {config.label}
@@ -108,10 +123,19 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function ProgressBar({ processed, total }: { processed: number; total: number }) {
+function ProgressBar({
+  processed,
+  total,
+}: {
+  processed: number;
+  total: number;
+}) {
   const pct = total > 0 ? Math.min((processed / total) * 100, 100) : 0;
   return (
-    <div className="w-full h-1.5 bg-accent rounded-full overflow-hidden" data-testid="progress-bar">
+    <div
+      className="w-full h-1.5 bg-accent rounded-full overflow-hidden"
+      data-testid="progress-bar"
+    >
       <div
         className="h-full bg-primary transition-all duration-300 rounded-full"
         style={{ width: `${pct}%` }}
@@ -120,20 +144,31 @@ function ProgressBar({ processed, total }: { processed: number; total: number })
   );
 }
 
-function BreakdownTable({ title, data }: { title: string; data: Record<string, { wins: number; losses: number; pnl: number }> }) {
+function BreakdownTable({
+  title,
+  data,
+}: {
+  title: string;
+  data: Record<string, { wins: number; losses: number; pnl: number }>;
+}) {
   const entries = Object.entries(data);
   if (entries.length === 0) return null;
   return (
     <div>
-      <p className="text-[10px] text-muted-foreground font-medium mb-1">{title}</p>
+      <p className="text-[10px] text-muted-foreground font-medium mb-1">
+        {title}
+      </p>
       <div className="space-y-0.5">
         {entries.map(([key, val]) => (
           <div key={key} className="grid grid-cols-4 gap-2 text-[10px]">
             <span className="text-muted-foreground capitalize">{key}</span>
             <span className="text-emerald-500 text-center">{val.wins}W</span>
             <span className="text-red-500 text-center">{val.losses}L</span>
-            <span className={`text-right font-medium ${val.pnl >= 0 ? "text-emerald-500" : "text-red-500"}`}>
-              {val.pnl >= 0 ? "+" : ""}{formatCurrency(val.pnl)}
+            <span
+              className={`text-right font-medium ${val.pnl >= 0 ? "text-emerald-500" : "text-red-500"}`}
+            >
+              {val.pnl >= 0 ? "+" : ""}
+              {formatCurrency(val.pnl)}
             </span>
           </div>
         ))}
@@ -147,22 +182,31 @@ function CostSensitivityGrid({ grid }: { grid: any[] }) {
   const spreadValues = [1, 3, 5];
 
   const getCell = (slip: number, spread: number) => {
-    return grid.find((g: any) => g.baseSlippageBps === slip && g.halfSpreadBps === spread);
+    return grid.find(
+      (g: any) => g.baseSlippageBps === slip && g.halfSpreadBps === spread,
+    );
   };
 
   return (
     <div className="mt-3 space-y-2" data-testid="cost-sensitivity-grid">
       <div className="flex items-center gap-1 mb-1.5">
         <BarChart3 className="w-3 h-3 text-muted-foreground" />
-        <p className="text-[10px] text-muted-foreground font-medium">Cost Sensitivity Analysis</p>
+        <p className="text-[10px] text-muted-foreground font-medium">
+          Cost Sensitivity Analysis
+        </p>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-[10px]">
           <thead>
             <tr>
-              <th className="text-left text-muted-foreground font-medium p-1.5">Slip \ Spread</th>
+              <th className="text-left text-muted-foreground font-medium p-1.5">
+                Slip \ Spread
+              </th>
               {spreadValues.map((s) => (
-                <th key={s} className="text-center text-muted-foreground font-medium p-1.5">
+                <th
+                  key={s}
+                  className="text-center text-muted-foreground font-medium p-1.5"
+                >
                   {s} bps
                 </th>
               ))}
@@ -171,18 +215,23 @@ function CostSensitivityGrid({ grid }: { grid: any[] }) {
           <tbody>
             {slippageValues.map((slip) => (
               <tr key={slip}>
-                <td className="text-muted-foreground font-medium p-1.5">{slip} bps</td>
+                <td className="text-muted-foreground font-medium p-1.5">
+                  {slip} bps
+                </td>
                 {spreadValues.map((spread) => {
                   const cell = getCell(slip, spread);
-                  if (!cell) return <td key={spread} className="p-1.5 text-center">--</td>;
+                  if (!cell)
+                    return (
+                      <td key={spread} className="p-1.5 text-center">
+                        --
+                      </td>
+                    );
                   const edgeSurvives = cell.expectancyR > 0;
                   return (
                     <td
                       key={spread}
                       className={`p-1.5 text-center rounded-md ${
-                        cell.isBaseline
-                          ? "ring-1 ring-primary/50"
-                          : ""
+                        cell.isBaseline ? "ring-1 ring-primary/50" : ""
                       } ${
                         edgeSurvives
                           ? "bg-emerald-500/10 dark:bg-emerald-500/10"
@@ -191,17 +240,30 @@ function CostSensitivityGrid({ grid }: { grid: any[] }) {
                       data-testid={`cell-cost-${slip}-${spread}`}
                     >
                       <div className="space-y-0.5">
-                        <div className={`font-semibold ${edgeSurvives ? "text-emerald-500" : "text-red-500"}`}>
-                          {cell.expectancyR > 0 ? "+" : ""}{cell.expectancyR.toFixed(2)}R
+                        <div
+                          className={`font-semibold ${edgeSurvives ? "text-emerald-500" : "text-red-500"}`}
+                        >
+                          {cell.expectancyR > 0 ? "+" : ""}
+                          {cell.expectancyR.toFixed(2)}R
                         </div>
                         <div className="text-muted-foreground">
                           {cell.trades}t | {cell.winRate.toFixed(0)}%
                         </div>
-                        <div className={cell.netPnl >= 0 ? "text-emerald-500" : "text-red-500"}>
-                          {cell.netPnl >= 0 ? "+" : ""}{formatCurrency(cell.netPnl)}
+                        <div
+                          className={
+                            cell.netPnl >= 0
+                              ? "text-emerald-500"
+                              : "text-red-500"
+                          }
+                        >
+                          {cell.netPnl >= 0 ? "+" : ""}
+                          {formatCurrency(cell.netPnl)}
                         </div>
                         <div className="text-muted-foreground">
-                          PF {cell.profitFactor === Infinity ? "\u221E" : cell.profitFactor.toFixed(1)}
+                          PF{" "}
+                          {cell.profitFactor === Infinity
+                            ? "\u221E"
+                            : cell.profitFactor.toFixed(1)}
                         </div>
                       </div>
                     </td>
@@ -227,12 +289,22 @@ function CostSensitivityGrid({ grid }: { grid: any[] }) {
   );
 }
 
-function AutoRunPanel({ status, onCancel }: { status: AutoRunStatus | null; onCancel: () => void }) {
+function AutoRunPanel({
+  status,
+  onCancel,
+}: {
+  status: AutoRunStatus | null;
+  onCancel: () => void;
+}) {
   if (!status) return null;
 
-  const progressPct = status.durationMinutes > 0
-    ? Math.min((status.elapsedSeconds / (status.durationMinutes * 60)) * 100, 100)
-    : 0;
+  const progressPct =
+    status.durationMinutes > 0
+      ? Math.min(
+          (status.elapsedSeconds / (status.durationMinutes * 60)) * 100,
+          100,
+        )
+      : 0;
 
   return (
     <Card className="border-primary/30" data-testid="card-auto-run">
@@ -310,8 +382,11 @@ function AutoRunPanel({ status, onCancel }: { status: AutoRunStatus | null; onCa
           </div>
           <div className="text-center" data-testid="autorun-pnl">
             <p className="text-[10px] text-muted-foreground">P&L</p>
-            <p className={`text-sm font-semibold ${status.totalPnl >= 0 ? "text-emerald-500" : "text-red-500"}`}>
-              {status.totalPnl >= 0 ? "+" : ""}{formatCurrency(status.totalPnl)}
+            <p
+              className={`text-sm font-semibold ${status.totalPnl >= 0 ? "text-emerald-500" : "text-red-500"}`}
+            >
+              {status.totalPnl >= 0 ? "+" : ""}
+              {formatCurrency(status.totalPnl)}
             </p>
           </div>
         </div>
@@ -319,15 +394,24 @@ function AutoRunPanel({ status, onCancel }: { status: AutoRunStatus | null; onCa
         {status.skippedByLearning > 0 && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground bg-accent/50 rounded-md px-3 py-1.5">
             <ShieldCheck className="w-3.5 h-3.5 text-primary shrink-0" />
-            <span>AI skipped {status.skippedByLearning} setups based on past lessons</span>
+            <span>
+              AI skipped {status.skippedByLearning} setups based on past lessons
+            </span>
           </div>
         )}
 
         {!status.active && status.datesCompleted.length > 0 && (
           <div className="flex items-center gap-1 flex-wrap mt-1">
             {status.datesCompleted.slice(-6).map((d) => (
-              <Badge key={d} variant="outline" className="text-[9px] px-1 min-h-4">
-                {new Date(d + "T12:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              <Badge
+                key={d}
+                variant="outline"
+                className="text-[9px] px-1 min-h-4"
+              >
+                {new Date(d + "T12:00:00Z").toLocaleDateString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                })}
               </Badge>
             ))}
             {status.datesCompleted.length > 6 && (
@@ -342,7 +426,13 @@ function AutoRunPanel({ status, onCancel }: { status: AutoRunStatus | null; onCa
   );
 }
 
-function RunCard({ run, onCancel }: { run: SimulationRun; onCancel: (id: string) => void }) {
+function RunCard({
+  run,
+  onCancel,
+}: {
+  run: SimulationRun;
+  onCancel: (id: string) => void;
+}) {
   const isRunning = run.status === "running";
   const [expanded, setExpanded] = useState(false);
   const [costSensitivity, setCostSensitivity] = useState<any[] | null>(null);
@@ -350,7 +440,10 @@ function RunCard({ run, onCancel }: { run: SimulationRun; onCancel: (id: string)
 
   const costSensitivityMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/simulations/${run.id}/cost-sensitivity`);
+      const res = await apiRequest(
+        "POST",
+        `/api/simulations/${run.id}/cost-sensitivity`,
+      );
       return res.json();
     },
     onSuccess: (data: any) => {
@@ -364,10 +457,15 @@ function RunCard({ run, onCancel }: { run: SimulationRun; onCancel: (id: string)
   const breakdown = run.breakdown as any;
   const skippedSetups = run.skippedSetups as any;
 
-  const hasBenchmarks = benchmarks && (benchmarks.buyAndHold != null || benchmarks.emaBaseline != null);
-  const hasMetrics = metrics && (metrics.expectancy != null || metrics.profitFactor != null);
+  const hasBenchmarks =
+    benchmarks &&
+    (benchmarks.buyAndHold != null || benchmarks.emaBaseline != null);
+  const hasMetrics =
+    metrics && (metrics.expectancy != null || metrics.profitFactor != null);
   const hasCosts = (run.grossPnl ?? 0) !== (run.totalPnl ?? 0);
-  const hasBreakdown = breakdown && (breakdown.byRegime || breakdown.bySession || breakdown.byTier);
+  const hasBreakdown =
+    breakdown &&
+    (breakdown.byRegime || breakdown.bySession || breakdown.byTier);
   const skippedCount = Array.isArray(skippedSetups) ? skippedSetups.length : 0;
 
   return (
@@ -376,18 +474,29 @@ function RunCard({ run, onCancel }: { run: SimulationRun; onCancel: (id: string)
         <div className="flex items-start justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-2 flex-wrap">
             <Calendar className="w-4 h-4 text-muted-foreground" />
-            <span className="text-sm font-medium" data-testid={`text-sim-date-${run.id}`}>
+            <span
+              className="text-sm font-medium"
+              data-testid={`text-sim-date-${run.id}`}
+            >
               {formatDate(run.simulationDate)}
             </span>
             <StatusBadge status={run.status ?? "pending"} />
             {run.learningEnabled === false && (
-              <Badge variant="outline" className="text-[10px] px-1.5 min-h-5 bg-muted/50 text-muted-foreground" data-testid={`badge-mode-frozen-${run.id}`}>
+              <Badge
+                variant="outline"
+                className="text-[10px] px-1.5 min-h-5 bg-muted/50 text-muted-foreground"
+                data-testid={`badge-mode-frozen-${run.id}`}
+              >
                 <Lock className="w-2.5 h-2.5 mr-1" />
                 Frozen
               </Badge>
             )}
             {run.learningEnabled === true && (
-              <Badge variant="outline" className="text-[10px] px-1.5 min-h-5 bg-amber-500/10 border-amber-500/30 text-amber-500" data-testid={`badge-mode-adaptive-${run.id}`}>
+              <Badge
+                variant="outline"
+                className="text-[10px] px-1.5 min-h-5 bg-amber-500/10 border-amber-500/30 text-amber-500"
+                data-testid={`badge-mode-adaptive-${run.id}`}
+              >
                 <FlaskConical className="w-2.5 h-2.5 mr-1" />
                 Adaptive
               </Badge>
@@ -407,7 +516,10 @@ function RunCard({ run, onCancel }: { run: SimulationRun; onCancel: (id: string)
 
         {isRunning && (
           <div className="mt-3 space-y-1">
-            <ProgressBar processed={run.processedBars ?? 0} total={run.totalBars ?? 0} />
+            <ProgressBar
+              processed={run.processedBars ?? 0}
+              total={run.totalBars ?? 0}
+            />
             <p className="text-[10px] text-muted-foreground">
               {run.processedBars ?? 0} / {run.totalBars ?? 0} bars processed
             </p>
@@ -417,26 +529,41 @@ function RunCard({ run, onCancel }: { run: SimulationRun; onCancel: (id: string)
         {run.status === "completed" && (
           <>
             <div className="grid grid-cols-4 gap-3 mt-3">
-              <div className="text-center" data-testid={`stat-trades-${run.id}`}>
+              <div
+                className="text-center"
+                data-testid={`stat-trades-${run.id}`}
+              >
                 <p className="text-xs text-muted-foreground">Trades</p>
-                <p className="text-sm font-semibold">{run.tradesGenerated ?? 0}</p>
+                <p className="text-sm font-semibold">
+                  {run.tradesGenerated ?? 0}
+                </p>
               </div>
-              <div className="text-center" data-testid={`stat-lessons-${run.id}`}>
+              <div
+                className="text-center"
+                data-testid={`stat-lessons-${run.id}`}
+              >
                 <p className="text-xs text-muted-foreground">Lessons</p>
-                <p className="text-sm font-semibold">{run.lessonsGenerated ?? 0}</p>
+                <p className="text-sm font-semibold">
+                  {run.lessonsGenerated ?? 0}
+                </p>
               </div>
               <div className="text-center" data-testid={`stat-pnl-${run.id}`}>
                 <p className="text-xs text-muted-foreground">P&L</p>
                 <p
                   className={`text-sm font-semibold ${
-                    (run.totalPnl ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"
+                    (run.totalPnl ?? 0) >= 0
+                      ? "text-emerald-500"
+                      : "text-red-500"
                   }`}
                 >
                   {(run.totalPnl ?? 0) >= 0 ? "+" : ""}
                   {formatCurrency(run.totalPnl ?? 0)}
                 </p>
               </div>
-              <div className="text-center" data-testid={`stat-winrate-${run.id}`}>
+              <div
+                className="text-center"
+                data-testid={`stat-winrate-${run.id}`}
+              >
                 <p className="text-xs text-muted-foreground">Win Rate</p>
                 <p className="text-sm font-semibold">
                   {run.winRate != null ? `${run.winRate.toFixed(0)}%` : "--"}
@@ -448,25 +575,40 @@ function RunCard({ run, onCancel }: { run: SimulationRun; onCancel: (id: string)
               <div className="mt-3" data-testid={`benchmarks-${run.id}`}>
                 <div className="flex items-center gap-1 mb-1.5">
                   <Target className="w-3 h-3 text-muted-foreground" />
-                  <p className="text-[10px] text-muted-foreground font-medium">vs. Benchmarks</p>
+                  <p className="text-[10px] text-muted-foreground font-medium">
+                    vs. Benchmarks
+                  </p>
                 </div>
                 <div className="grid grid-cols-3 gap-3">
                   <div className="text-center">
                     <p className="text-[10px] text-muted-foreground">Bot P&L</p>
-                    <p className={`text-sm font-semibold ${(run.totalPnl ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}>
-                      {(run.totalPnl ?? 0) >= 0 ? "+" : ""}{formatCurrency(run.totalPnl ?? 0)}
+                    <p
+                      className={`text-sm font-semibold ${(run.totalPnl ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}
+                    >
+                      {(run.totalPnl ?? 0) >= 0 ? "+" : ""}
+                      {formatCurrency(run.totalPnl ?? 0)}
                     </p>
                   </div>
                   <div className="text-center">
-                    <p className="text-[10px] text-muted-foreground">Buy & Hold</p>
-                    <p className={`text-sm font-semibold ${(benchmarks?.buyAndHold ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}>
-                      {(benchmarks?.buyAndHold ?? 0) >= 0 ? "+" : ""}{formatCurrency(benchmarks?.buyAndHold ?? 0)}
+                    <p className="text-[10px] text-muted-foreground">
+                      Buy & Hold
+                    </p>
+                    <p
+                      className={`text-sm font-semibold ${(benchmarks?.buyAndHold ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}
+                    >
+                      {(benchmarks?.buyAndHold ?? 0) >= 0 ? "+" : ""}
+                      {formatCurrency(benchmarks?.buyAndHold ?? 0)}
                     </p>
                   </div>
                   <div className="text-center">
-                    <p className="text-[10px] text-muted-foreground">EMA Baseline</p>
-                    <p className={`text-sm font-semibold ${(benchmarks?.emaBaseline ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}>
-                      {(benchmarks?.emaBaseline ?? 0) >= 0 ? "+" : ""}{formatCurrency(benchmarks?.emaBaseline ?? 0)}
+                    <p className="text-[10px] text-muted-foreground">
+                      EMA Baseline
+                    </p>
+                    <p
+                      className={`text-sm font-semibold ${(benchmarks?.emaBaseline ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}
+                    >
+                      {(benchmarks?.emaBaseline ?? 0) >= 0 ? "+" : ""}
+                      {formatCurrency(benchmarks?.emaBaseline ?? 0)}
                     </p>
                   </div>
                 </div>
@@ -477,24 +619,40 @@ function RunCard({ run, onCancel }: { run: SimulationRun; onCancel: (id: string)
               <div className="mt-3" data-testid={`metrics-${run.id}`}>
                 <div className="flex items-center gap-1 mb-1.5">
                   <Activity className="w-3 h-3 text-muted-foreground" />
-                  <p className="text-[10px] text-muted-foreground font-medium">Advanced Metrics</p>
+                  <p className="text-[10px] text-muted-foreground font-medium">
+                    Advanced Metrics
+                  </p>
                 </div>
                 <div className="grid grid-cols-4 gap-3">
                   <div className="text-center">
-                    <p className="text-[10px] text-muted-foreground">Expectancy</p>
-                    <p className="text-sm font-semibold">{(metrics?.expectancy ?? 0).toFixed(2)}R</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      Expectancy
+                    </p>
+                    <p className="text-sm font-semibold">
+                      {(metrics?.expectancy ?? 0).toFixed(2)}R
+                    </p>
                   </div>
                   <div className="text-center">
-                    <p className="text-[10px] text-muted-foreground">Profit Factor</p>
-                    <p className="text-sm font-semibold">{(metrics?.profitFactor ?? 0).toFixed(2)}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      Profit Factor
+                    </p>
+                    <p className="text-sm font-semibold">
+                      {(metrics?.profitFactor ?? 0).toFixed(2)}
+                    </p>
                   </div>
                   <div className="text-center">
-                    <p className="text-[10px] text-muted-foreground">Max Drawdown</p>
-                    <p className="text-sm font-semibold text-red-500">{formatCurrency(metrics?.maxDrawdown ?? 0)}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      Max Drawdown
+                    </p>
+                    <p className="text-sm font-semibold text-red-500">
+                      {formatCurrency(metrics?.maxDrawdown ?? 0)}
+                    </p>
                   </div>
                   <div className="text-center">
                     <p className="text-[10px] text-muted-foreground">Sharpe</p>
-                    <p className="text-sm font-semibold">{(metrics?.sharpe ?? 0).toFixed(2)}</p>
+                    <p className="text-sm font-semibold">
+                      {(metrics?.sharpe ?? 0).toFixed(2)}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -504,27 +662,45 @@ function RunCard({ run, onCancel }: { run: SimulationRun; onCancel: (id: string)
               <div className="mt-3" data-testid={`costs-${run.id}`}>
                 <div className="flex items-center gap-1 mb-1.5">
                   <DollarSign className="w-3 h-3 text-muted-foreground" />
-                  <p className="text-[10px] text-muted-foreground font-medium">Cost Breakdown</p>
+                  <p className="text-[10px] text-muted-foreground font-medium">
+                    Cost Breakdown
+                  </p>
                 </div>
                 <div className="grid grid-cols-4 gap-3">
                   <div className="text-center">
-                    <p className="text-[10px] text-muted-foreground">Gross P&L</p>
-                    <p className={`text-sm font-semibold ${(run.grossPnl ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}>
-                      {(run.grossPnl ?? 0) >= 0 ? "+" : ""}{formatCurrency(run.grossPnl ?? 0)}
+                    <p className="text-[10px] text-muted-foreground">
+                      Gross P&L
+                    </p>
+                    <p
+                      className={`text-sm font-semibold ${(run.grossPnl ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}
+                    >
+                      {(run.grossPnl ?? 0) >= 0 ? "+" : ""}
+                      {formatCurrency(run.grossPnl ?? 0)}
                     </p>
                   </div>
                   <div className="text-center">
-                    <p className="text-[10px] text-muted-foreground">Slippage</p>
-                    <p className="text-sm font-semibold text-red-500">-{formatCurrency(run.totalSlippageCost ?? 0)}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      Slippage
+                    </p>
+                    <p className="text-sm font-semibold text-red-500">
+                      -{formatCurrency(run.totalSlippageCost ?? 0)}
+                    </p>
                   </div>
                   <div className="text-center">
-                    <p className="text-[10px] text-muted-foreground">Commission</p>
-                    <p className="text-sm font-semibold text-red-500">-{formatCurrency(run.totalCommission ?? 0)}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      Commission
+                    </p>
+                    <p className="text-sm font-semibold text-red-500">
+                      -{formatCurrency(run.totalCommission ?? 0)}
+                    </p>
                   </div>
                   <div className="text-center">
                     <p className="text-[10px] text-muted-foreground">Net P&L</p>
-                    <p className={`text-sm font-semibold ${(run.totalPnl ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}>
-                      {(run.totalPnl ?? 0) >= 0 ? "+" : ""}{formatCurrency(run.totalPnl ?? 0)}
+                    <p
+                      className={`text-sm font-semibold ${(run.totalPnl ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}
+                    >
+                      {(run.totalPnl ?? 0) >= 0 ? "+" : ""}
+                      {formatCurrency(run.totalPnl ?? 0)}
                     </p>
                   </div>
                 </div>
@@ -538,27 +714,46 @@ function RunCard({ run, onCancel }: { run: SimulationRun; onCancel: (id: string)
                   className="flex items-center gap-1 text-[10px] text-muted-foreground font-medium hover-elevate rounded-md px-1 py-0.5"
                   data-testid={`button-toggle-breakdown-${run.id}`}
                 >
-                  {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                  {expanded ? (
+                    <ChevronUp className="w-3 h-3" />
+                  ) : (
+                    <ChevronDown className="w-3 h-3" />
+                  )}
                   Performance Breakdown
                 </button>
                 {expanded && (
                   <div className="mt-2 space-y-3">
-                    {breakdown.byRegime && Object.keys(breakdown.byRegime).length > 0 && (
-                      <BreakdownTable title="By Regime" data={breakdown.byRegime} />
-                    )}
-                    {breakdown.bySession && Object.keys(breakdown.bySession).length > 0 && (
-                      <BreakdownTable title="By Session" data={breakdown.bySession} />
-                    )}
-                    {breakdown.byTier && Object.keys(breakdown.byTier).length > 0 && (
-                      <BreakdownTable title="By Tier" data={breakdown.byTier} />
-                    )}
+                    {breakdown.byRegime &&
+                      Object.keys(breakdown.byRegime).length > 0 && (
+                        <BreakdownTable
+                          title="By Regime"
+                          data={breakdown.byRegime}
+                        />
+                      )}
+                    {breakdown.bySession &&
+                      Object.keys(breakdown.bySession).length > 0 && (
+                        <BreakdownTable
+                          title="By Session"
+                          data={breakdown.bySession}
+                        />
+                      )}
+                    {breakdown.byTier &&
+                      Object.keys(breakdown.byTier).length > 0 && (
+                        <BreakdownTable
+                          title="By Tier"
+                          data={breakdown.byTier}
+                        />
+                      )}
                   </div>
                 )}
               </div>
             )}
 
             {skippedCount > 0 && (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground bg-accent/50 rounded-md px-3 py-1.5 mt-3" data-testid={`skipped-${run.id}`}>
+              <div
+                className="flex items-center gap-2 text-xs text-muted-foreground bg-accent/50 rounded-md px-3 py-1.5 mt-3"
+                data-testid={`skipped-${run.id}`}
+              >
                 <ShieldCheck className="w-3.5 h-3.5 text-primary shrink-0" />
                 <span>AI skipped {skippedCount} setups</span>
               </div>
@@ -586,8 +781,8 @@ function RunCard({ run, onCancel }: { run: SimulationRun; onCancel: (id: string)
                 {costSensitivityMutation.isPending
                   ? "Running..."
                   : showCostSensitivity
-                  ? "Hide Cost Sensitivity"
-                  : "Run Cost Sensitivity"}
+                    ? "Hide Cost Sensitivity"
+                    : "Run Cost Sensitivity"}
               </Button>
             </div>
 
@@ -598,7 +793,10 @@ function RunCard({ run, onCancel }: { run: SimulationRun; onCancel: (id: string)
         )}
 
         {run.status === "failed" && run.errorMessage && (
-          <p className="text-[10px] text-red-500 mt-2" data-testid={`text-error-${run.id}`}>
+          <p
+            className="text-[10px] text-red-500 mt-2"
+            data-testid={`text-error-${run.id}`}
+          >
             {run.errorMessage}
           </p>
         )}
@@ -606,7 +804,11 @@ function RunCard({ run, onCancel }: { run: SimulationRun; onCancel: (id: string)
         {(run.tickers ?? []).length > 0 && (
           <div className="flex items-center gap-1 mt-2 flex-wrap">
             {(run.tickers ?? []).slice(0, 8).map((t) => (
-              <Badge key={t} variant="outline" className="text-[9px] px-1 min-h-4">
+              <Badge
+                key={t}
+                variant="outline"
+                className="text-[9px] px-1 min-h-4"
+              >
                 {t}
               </Badge>
             ))}
@@ -715,7 +917,11 @@ function WalkForwardPanel() {
 
   const startWF = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/walk-forward", { trainDays, testDays, totalWindows });
+      const res = await apiRequest("POST", "/api/walk-forward", {
+        trainDays,
+        testDays,
+        totalWindows,
+      });
       return res.json();
     },
     onSuccess: (data: any) => {
@@ -723,7 +929,11 @@ function WalkForwardPanel() {
       toast({ title: "Walk-Forward Started", description: data.message });
     },
     onError: (err: Error) => {
-      toast({ title: "Failed to start walk-forward", description: err.message, variant: "destructive" });
+      toast({
+        title: "Failed to start walk-forward",
+        description: err.message,
+        variant: "destructive",
+      });
     },
   });
 
@@ -733,18 +943,24 @@ function WalkForwardPanel() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/walk-forward/status"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/walk-forward/results"] });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/walk-forward/results"],
+      });
       toast({ title: "Walk-forward cancelled" });
     },
   });
 
   const isActive = wfStatus?.active ?? false;
-  const hasResults = wfResults && !wfResults.error && wfResults.windows?.length > 0;
+  const hasResults =
+    wfResults && !wfResults.error && wfResults.windows?.length > 0;
   const hasError = wfResults && "error" in wfResults && wfResults.error;
 
-  const progressPct = isActive && wfStatus?.progress
-    ? ((wfStatus.progress.currentWindow - 1) / wfStatus.progress.totalWindows) * 100
-    : 0;
+  const progressPct =
+    isActive && wfStatus?.progress
+      ? ((wfStatus.progress.currentWindow - 1) /
+          wfStatus.progress.totalWindows) *
+        100
+      : 0;
 
   return (
     <Card className="border-primary/20" data-testid="card-walk-forward">
@@ -755,17 +971,26 @@ function WalkForwardPanel() {
         </div>
         <div className="flex items-center gap-1">
           <Activity className="w-3.5 h-3.5 text-muted-foreground" />
-          <span className="text-[10px] text-muted-foreground">Out-of-sample testing</span>
+          <span className="text-[10px] text-muted-foreground">
+            Out-of-sample testing
+          </span>
         </div>
       </CardHeader>
       <CardContent className="p-4 pt-0 space-y-3">
         <p className="text-[10px] text-muted-foreground">
-          Splits historical data into rolling train/test windows to measure strategy robustness on unseen data. Each window trains on past days, then tests on the next period.
+          Splits historical data into rolling train/test windows to measure
+          strategy robustness on unseen data. Each window trains on past days,
+          then tests on the next period.
         </p>
 
         <div className="flex items-end gap-3 flex-wrap">
           <div className="space-y-1.5">
-            <label className="text-xs text-muted-foreground" htmlFor="wf-train-days">Train Days</label>
+            <label
+              className="text-xs text-muted-foreground"
+              htmlFor="wf-train-days"
+            >
+              Train Days
+            </label>
             <Input
               id="wf-train-days"
               type="number"
@@ -779,7 +1004,12 @@ function WalkForwardPanel() {
             />
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs text-muted-foreground" htmlFor="wf-test-days">Test Days</label>
+            <label
+              className="text-xs text-muted-foreground"
+              htmlFor="wf-test-days"
+            >
+              Test Days
+            </label>
             <Input
               id="wf-test-days"
               type="number"
@@ -793,7 +1023,12 @@ function WalkForwardPanel() {
             />
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs text-muted-foreground" htmlFor="wf-windows">Windows</label>
+            <label
+              className="text-xs text-muted-foreground"
+              htmlFor="wf-windows"
+            >
+              Windows
+            </label>
             <Input
               id="wf-windows"
               type="number"
@@ -843,7 +1078,8 @@ function WalkForwardPanel() {
             <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
               <span className="flex items-center gap-1">
                 <Loader2 className="w-3 h-3 animate-spin" />
-                Window {wfStatus.progress.currentWindow}/{wfStatus.progress.totalWindows}
+                Window {wfStatus.progress.currentWindow}/
+                {wfStatus.progress.totalWindows}
               </span>
               <Badge variant="outline" className="text-[10px] px-1.5 min-h-5">
                 {wfStatus.progress.phase === "train" ? "Training" : "Testing"}
@@ -872,9 +1108,16 @@ function WalkForwardPanel() {
               className="flex items-center gap-1 text-xs text-muted-foreground font-medium hover-elevate rounded-md px-1 py-0.5"
               data-testid="button-toggle-wf-results"
             >
-              {showResults ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              {showResults ? (
+                <ChevronUp className="w-3 h-3" />
+              ) : (
+                <ChevronDown className="w-3 h-3" />
+              )}
               {showResults ? "Hide Results" : "Show Results"}
-              <Badge variant="default" className="text-[10px] px-1.5 min-h-5 ml-1">
+              <Badge
+                variant="default"
+                className="text-[10px] px-1.5 min-h-5 ml-1"
+              >
                 <CheckCircle2 className="w-3 h-3 mr-1" />
                 {wfResults!.windows.length} windows
               </Badge>
@@ -884,56 +1127,88 @@ function WalkForwardPanel() {
               <div className="space-y-4">
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div className="text-center" data-testid="wf-total-trades">
-                    <p className="text-[10px] text-muted-foreground">Test Trades</p>
-                    <p className="text-sm font-semibold">{wfResults!.aggregate.totalTestTrades}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      Test Trades
+                    </p>
+                    <p className="text-sm font-semibold">
+                      {wfResults!.aggregate.totalTestTrades}
+                    </p>
                   </div>
                   <div className="text-center" data-testid="wf-win-rate">
-                    <p className="text-[10px] text-muted-foreground">Win Rate</p>
-                    <p className="text-sm font-semibold">{wfResults!.aggregate.overallWinRate}%</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      Win Rate
+                    </p>
+                    <p className="text-sm font-semibold">
+                      {wfResults!.aggregate.overallWinRate}%
+                    </p>
                   </div>
                   <div className="text-center" data-testid="wf-expectancy">
-                    <p className="text-[10px] text-muted-foreground">Expectancy</p>
-                    <p className={`text-sm font-semibold ${wfResults!.aggregate.overallExpectancyR >= 0 ? "text-emerald-500" : "text-red-500"}`}>
-                      {wfResults!.aggregate.overallExpectancyR > 0 ? "+" : ""}{wfResults!.aggregate.overallExpectancyR}R
+                    <p className="text-[10px] text-muted-foreground">
+                      Expectancy
+                    </p>
+                    <p
+                      className={`text-sm font-semibold ${wfResults!.aggregate.overallExpectancyR >= 0 ? "text-emerald-500" : "text-red-500"}`}
+                    >
+                      {wfResults!.aggregate.overallExpectancyR > 0 ? "+" : ""}
+                      {wfResults!.aggregate.overallExpectancyR}R
                     </p>
                   </div>
                   <div className="text-center" data-testid="wf-net-pnl">
                     <p className="text-[10px] text-muted-foreground">Net P&L</p>
-                    <p className={`text-sm font-semibold ${wfResults!.aggregate.totalNetPnl >= 0 ? "text-emerald-500" : "text-red-500"}`}>
-                      {wfResults!.aggregate.totalNetPnl >= 0 ? "+" : ""}{formatCurrency(wfResults!.aggregate.totalNetPnl)}
+                    <p
+                      className={`text-sm font-semibold ${wfResults!.aggregate.totalNetPnl >= 0 ? "text-emerald-500" : "text-red-500"}`}
+                    >
+                      {wfResults!.aggregate.totalNetPnl >= 0 ? "+" : ""}
+                      {formatCurrency(wfResults!.aggregate.totalNetPnl)}
                     </p>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-3 gap-3">
                   <div className="text-center">
-                    <p className="text-[10px] text-muted-foreground">Profit Factor</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      Profit Factor
+                    </p>
                     <p className="text-sm font-semibold">
-                      {wfResults!.aggregate.overallProfitFactor === 999 ? "N/A" : wfResults!.aggregate.overallProfitFactor.toFixed(2)}
+                      {wfResults!.aggregate.overallProfitFactor === 999
+                        ? "N/A"
+                        : wfResults!.aggregate.overallProfitFactor.toFixed(2)}
                     </p>
                   </div>
                   <div className="text-center">
-                    <p className="text-[10px] text-muted-foreground">Max Drawdown</p>
-                    <p className="text-sm font-semibold text-red-500">{wfResults!.aggregate.maxDrawdown.toFixed(2)}R</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      Max Drawdown
+                    </p>
+                    <p className="text-sm font-semibold text-red-500">
+                      {wfResults!.aggregate.maxDrawdown.toFixed(2)}R
+                    </p>
                   </div>
                   <div className="text-center">
-                    <p className="text-[10px] text-muted-foreground">Date Range</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      Date Range
+                    </p>
                     <p className="text-[10px] font-medium">
-                      {wfResults!.config.startDate} to {wfResults!.config.endDate}
+                      {wfResults!.config.startDate} to{" "}
+                      {wfResults!.config.endDate}
                     </p>
                   </div>
                 </div>
 
                 {wfResults!.aggregate.equityCurve.length > 0 && (
                   <div data-testid="wf-equity-curve">
-                    <p className="text-[10px] text-muted-foreground font-medium mb-1.5">Cumulative P&L by Window</p>
+                    <p className="text-[10px] text-muted-foreground font-medium mb-1.5">
+                      Cumulative P&L by Window
+                    </p>
                     <div className="flex items-end gap-1 h-16">
                       {wfResults!.aggregate.equityCurve.map((point, idx) => {
                         const maxAbs = Math.max(
-                          ...wfResults!.aggregate.equityCurve.map(p => Math.abs(p.cumulativePnl)),
-                          1
+                          ...wfResults!.aggregate.equityCurve.map((p) =>
+                            Math.abs(p.cumulativePnl),
+                          ),
+                          1,
                         );
-                        const height = Math.abs(point.cumulativePnl) / maxAbs * 100;
+                        const height =
+                          (Math.abs(point.cumulativePnl) / maxAbs) * 100;
                         const isPositive = point.cumulativePnl >= 0;
                         return (
                           <div
@@ -944,7 +1219,9 @@ function WalkForwardPanel() {
                               className={`w-full rounded-sm ${isPositive ? "bg-emerald-500/60" : "bg-red-500/60"}`}
                               style={{ height: `${Math.max(height, 4)}%` }}
                             />
-                            <span className="text-[8px] text-muted-foreground mt-0.5">W{idx + 1}</span>
+                            <span className="text-[8px] text-muted-foreground mt-0.5">
+                              W{idx + 1}
+                            </span>
                           </div>
                         );
                       })}
@@ -952,62 +1229,120 @@ function WalkForwardPanel() {
                   </div>
                 )}
 
-                {(wfResults!.aggregate.regimeBreakdown && Object.keys(wfResults!.aggregate.regimeBreakdown).length > 0) && (
-                  <div data-testid="wf-aggregate-breakdowns">
-                    <p className="text-[10px] text-muted-foreground font-medium mb-2">Aggregate Breakdowns</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      {[
-                        { label: "By Regime", data: wfResults!.aggregate.regimeBreakdown },
-                        { label: "By Session", data: wfResults!.aggregate.sessionBreakdown },
-                        { label: "By Tier", data: wfResults!.aggregate.tierBreakdown },
-                      ].filter(s => Object.keys(s.data).length > 0).map(section => (
-                        <div key={section.label}>
-                          <p className="text-[9px] text-muted-foreground mb-1">{section.label}</p>
-                          <div className="space-y-1">
-                            {Object.entries(section.data).map(([key, val]) => {
-                              const total = val.wins + val.losses;
-                              return (
-                                <div key={key} className="flex items-center justify-between text-[10px] gap-1">
-                                  <span className="font-medium capitalize">{key}</span>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-muted-foreground">{val.winRate}%</span>
-                                    <span className={val.pnl >= 0 ? "text-emerald-500" : "text-red-500"}>
-                                      {val.pnl >= 0 ? "+" : ""}{formatCurrency(val.pnl)}
-                                    </span>
-                                    <span className="text-muted-foreground">({total})</span>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))}
+                {wfResults!.aggregate.regimeBreakdown &&
+                  Object.keys(wfResults!.aggregate.regimeBreakdown).length >
+                    0 && (
+                    <div data-testid="wf-aggregate-breakdowns">
+                      <p className="text-[10px] text-muted-foreground font-medium mb-2">
+                        Aggregate Breakdowns
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        {[
+                          {
+                            label: "By Regime",
+                            data: wfResults!.aggregate.regimeBreakdown,
+                          },
+                          {
+                            label: "By Session",
+                            data: wfResults!.aggregate.sessionBreakdown,
+                          },
+                          {
+                            label: "By Tier",
+                            data: wfResults!.aggregate.tierBreakdown,
+                          },
+                        ]
+                          .filter((s) => Object.keys(s.data).length > 0)
+                          .map((section) => (
+                            <div key={section.label}>
+                              <p className="text-[9px] text-muted-foreground mb-1">
+                                {section.label}
+                              </p>
+                              <div className="space-y-1">
+                                {Object.entries(section.data).map(
+                                  ([key, val]) => {
+                                    const total = val.wins + val.losses;
+                                    return (
+                                      <div
+                                        key={key}
+                                        className="flex items-center justify-between text-[10px] gap-1"
+                                      >
+                                        <span className="font-medium capitalize">
+                                          {key}
+                                        </span>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-muted-foreground">
+                                            {val.winRate}%
+                                          </span>
+                                          <span
+                                            className={
+                                              val.pnl >= 0
+                                                ? "text-emerald-500"
+                                                : "text-red-500"
+                                            }
+                                          >
+                                            {val.pnl >= 0 ? "+" : ""}
+                                            {formatCurrency(val.pnl)}
+                                          </span>
+                                          <span className="text-muted-foreground">
+                                            ({total})
+                                          </span>
+                                        </div>
+                                      </div>
+                                    );
+                                  },
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
                 <div>
-                  <p className="text-[10px] text-muted-foreground font-medium mb-2">Per-Window Breakdown</p>
+                  <p className="text-[10px] text-muted-foreground font-medium mb-2">
+                    Per-Window Breakdown
+                  </p>
                   <div className="space-y-2">
                     {wfResults!.windows.map((win) => (
-                      <Card key={win.windowIndex} data-testid={`card-wf-window-${win.windowIndex}`}>
+                      <Card
+                        key={win.windowIndex}
+                        data-testid={`card-wf-window-${win.windowIndex}`}
+                      >
                         <CardContent className="p-3">
                           <button
-                            onClick={() => setExpandedWindow(expandedWindow === win.windowIndex ? null : win.windowIndex)}
+                            onClick={() =>
+                              setExpandedWindow(
+                                expandedWindow === win.windowIndex
+                                  ? null
+                                  : win.windowIndex,
+                              )
+                            }
                             className="w-full flex items-center justify-between gap-2"
                             data-testid={`button-toggle-window-${win.windowIndex}`}
                           >
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-xs font-medium">Window {win.windowIndex + 1}</span>
-                              <Badge variant="outline" className="text-[9px] px-1 min-h-4">
+                              <span className="text-xs font-medium">
+                                Window {win.windowIndex + 1}
+                              </span>
+                              <Badge
+                                variant="outline"
+                                className="text-[9px] px-1 min-h-4"
+                              >
                                 Test: {win.testStart} to {win.testEnd}
                               </Badge>
                             </div>
                             <div className="flex items-center gap-2">
-                              <span className={`text-xs font-semibold ${win.testMetrics.netPnl >= 0 ? "text-emerald-500" : "text-red-500"}`}>
-                                {win.testMetrics.netPnl >= 0 ? "+" : ""}{formatCurrency(win.testMetrics.netPnl)}
+                              <span
+                                className={`text-xs font-semibold ${win.testMetrics.netPnl >= 0 ? "text-emerald-500" : "text-red-500"}`}
+                              >
+                                {win.testMetrics.netPnl >= 0 ? "+" : ""}
+                                {formatCurrency(win.testMetrics.netPnl)}
                               </span>
-                              {expandedWindow === win.windowIndex ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                              {expandedWindow === win.windowIndex ? (
+                                <ChevronUp className="w-3 h-3" />
+                              ) : (
+                                <ChevronDown className="w-3 h-3" />
+                              )}
                             </div>
                           </button>
 
@@ -1015,78 +1350,153 @@ function WalkForwardPanel() {
                             <div className="mt-3 space-y-2">
                               <div className="grid grid-cols-2 gap-2 text-[10px]">
                                 <div>
-                                  <span className="text-muted-foreground">Train:</span>{" "}
-                                  <span className="font-medium">{win.trainStart} to {win.trainEnd}</span>
+                                  <span className="text-muted-foreground">
+                                    Train:
+                                  </span>{" "}
+                                  <span className="font-medium">
+                                    {win.trainStart} to {win.trainEnd}
+                                  </span>
                                 </div>
                                 <div>
-                                  <span className="text-muted-foreground">Train Trades:</span>{" "}
-                                  <span className="font-medium">{win.trainSummary.totalTrades}</span>
-                                  <span className={`ml-1 ${win.trainSummary.totalPnl >= 0 ? "text-emerald-500" : "text-red-500"}`}>
-                                    ({win.trainSummary.totalPnl >= 0 ? "+" : ""}{formatCurrency(win.trainSummary.totalPnl)})
+                                  <span className="text-muted-foreground">
+                                    Train Trades:
+                                  </span>{" "}
+                                  <span className="font-medium">
+                                    {win.trainSummary.totalTrades}
+                                  </span>
+                                  <span
+                                    className={`ml-1 ${win.trainSummary.totalPnl >= 0 ? "text-emerald-500" : "text-red-500"}`}
+                                  >
+                                    ({win.trainSummary.totalPnl >= 0 ? "+" : ""}
+                                    {formatCurrency(win.trainSummary.totalPnl)})
                                   </span>
                                 </div>
                               </div>
                               <div className="grid grid-cols-4 gap-2">
                                 <div className="text-center">
-                                  <p className="text-[9px] text-muted-foreground">Trades</p>
-                                  <p className="text-xs font-semibold">{win.testMetrics.trades}</p>
-                                </div>
-                                <div className="text-center">
-                                  <p className="text-[9px] text-muted-foreground">Win Rate</p>
-                                  <p className="text-xs font-semibold">{win.testMetrics.winRate}%</p>
-                                </div>
-                                <div className="text-center">
-                                  <p className="text-[9px] text-muted-foreground">Expectancy</p>
-                                  <p className={`text-xs font-semibold ${win.testMetrics.expectancyR >= 0 ? "text-emerald-500" : "text-red-500"}`}>
-                                    {win.testMetrics.expectancyR > 0 ? "+" : ""}{win.testMetrics.expectancyR}R
+                                  <p className="text-[9px] text-muted-foreground">
+                                    Trades
+                                  </p>
+                                  <p className="text-xs font-semibold">
+                                    {win.testMetrics.trades}
                                   </p>
                                 </div>
                                 <div className="text-center">
-                                  <p className="text-[9px] text-muted-foreground">PF</p>
+                                  <p className="text-[9px] text-muted-foreground">
+                                    Win Rate
+                                  </p>
                                   <p className="text-xs font-semibold">
-                                    {win.testMetrics.profitFactor === 999 ? "N/A" : win.testMetrics.profitFactor.toFixed(2)}
+                                    {win.testMetrics.winRate}%
+                                  </p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-[9px] text-muted-foreground">
+                                    Expectancy
+                                  </p>
+                                  <p
+                                    className={`text-xs font-semibold ${win.testMetrics.expectancyR >= 0 ? "text-emerald-500" : "text-red-500"}`}
+                                  >
+                                    {win.testMetrics.expectancyR > 0 ? "+" : ""}
+                                    {win.testMetrics.expectancyR}R
+                                  </p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-[9px] text-muted-foreground">
+                                    PF
+                                  </p>
+                                  <p className="text-xs font-semibold">
+                                    {win.testMetrics.profitFactor === 999
+                                      ? "N/A"
+                                      : win.testMetrics.profitFactor.toFixed(2)}
                                   </p>
                                 </div>
                               </div>
                               <div className="grid grid-cols-3 gap-2">
                                 <div className="text-center">
-                                  <p className="text-[9px] text-muted-foreground">Gross P&L</p>
-                                  <p className={`text-xs font-semibold ${win.testMetrics.grossPnl >= 0 ? "text-emerald-500" : "text-red-500"}`}>
-                                    {win.testMetrics.grossPnl >= 0 ? "+" : ""}{formatCurrency(win.testMetrics.grossPnl)}
+                                  <p className="text-[9px] text-muted-foreground">
+                                    Gross P&L
+                                  </p>
+                                  <p
+                                    className={`text-xs font-semibold ${win.testMetrics.grossPnl >= 0 ? "text-emerald-500" : "text-red-500"}`}
+                                  >
+                                    {win.testMetrics.grossPnl >= 0 ? "+" : ""}
+                                    {formatCurrency(win.testMetrics.grossPnl)}
                                   </p>
                                 </div>
                                 <div className="text-center">
-                                  <p className="text-[9px] text-muted-foreground">Costs</p>
-                                  <p className="text-xs font-semibold text-red-500">-{formatCurrency(win.testMetrics.totalCosts)}</p>
+                                  <p className="text-[9px] text-muted-foreground">
+                                    Costs
+                                  </p>
+                                  <p className="text-xs font-semibold text-red-500">
+                                    -
+                                    {formatCurrency(win.testMetrics.totalCosts)}
+                                  </p>
                                 </div>
                                 <div className="text-center">
-                                  <p className="text-[9px] text-muted-foreground">Max DD</p>
-                                  <p className="text-xs font-semibold text-red-500">{win.testMetrics.maxDrawdown.toFixed(2)}R</p>
+                                  <p className="text-[9px] text-muted-foreground">
+                                    Max DD
+                                  </p>
+                                  <p className="text-xs font-semibold text-red-500">
+                                    {win.testMetrics.maxDrawdown.toFixed(2)}R
+                                  </p>
                                 </div>
                               </div>
-                              {(win.testMetrics.byRegime && Object.keys(win.testMetrics.byRegime).length > 0) && (
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 border-t border-border/50">
-                                  {[
-                                    { label: "Regime", data: win.testMetrics.byRegime },
-                                    { label: "Session", data: win.testMetrics.bySession },
-                                    { label: "Tier", data: win.testMetrics.byTier },
-                                  ].filter(s => Object.keys(s.data).length > 0).map(section => (
-                                    <div key={section.label}>
-                                      <p className="text-[9px] text-muted-foreground mb-0.5">{section.label}</p>
-                                      {Object.entries(section.data).map(([key, val]) => {
-                                        const total = val.wins + val.losses;
-                                        const wr = total > 0 ? ((val.wins / total) * 100).toFixed(0) : "0";
-                                        return (
-                                          <div key={key} className="flex items-center justify-between text-[9px] gap-1">
-                                            <span className="capitalize">{key}</span>
-                                            <span className="text-muted-foreground">{wr}% ({total})</span>
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
+                              {win.testMetrics.byRegime &&
+                                Object.keys(win.testMetrics.byRegime).length >
+                                  0 && (
+                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 border-t border-border/50">
+                                    {[
+                                      {
+                                        label: "Regime",
+                                        data: win.testMetrics.byRegime,
+                                      },
+                                      {
+                                        label: "Session",
+                                        data: win.testMetrics.bySession,
+                                      },
+                                      {
+                                        label: "Tier",
+                                        data: win.testMetrics.byTier,
+                                      },
+                                    ]
+                                      .filter(
+                                        (s) => Object.keys(s.data).length > 0,
+                                      )
+                                      .map((section) => (
+                                        <div key={section.label}>
+                                          <p className="text-[9px] text-muted-foreground mb-0.5">
+                                            {section.label}
+                                          </p>
+                                          {Object.entries(section.data).map(
+                                            ([key, val]) => {
+                                              const total =
+                                                val.wins + val.losses;
+                                              const wr =
+                                                total > 0
+                                                  ? (
+                                                      (val.wins / total) *
+                                                      100
+                                                    ).toFixed(0)
+                                                  : "0";
+                                              return (
+                                                <div
+                                                  key={key}
+                                                  className="flex items-center justify-between text-[9px] gap-1"
+                                                >
+                                                  <span className="capitalize">
+                                                    {key}
+                                                  </span>
+                                                  <span className="text-muted-foreground">
+                                                    {wr}% ({total})
+                                                  </span>
+                                                </div>
+                                              );
+                                            },
+                                          )}
+                                        </div>
+                                      ))}
+                                  </div>
+                                )}
                             </div>
                           )}
                         </CardContent>
@@ -1135,17 +1545,49 @@ interface CoreMetrics {
   distinctDays: number;
 }
 
-function getConfidenceTier(tradeCount: number): { label: string; color: string; bgClass: string; textClass: string } {
-  if (tradeCount >= 100) return { label: "Full", color: "emerald", bgClass: "bg-emerald-500/15 border-emerald-500/30", textClass: "text-emerald-500" };
-  if (tradeCount >= 50) return { label: "Minimum", color: "emerald", bgClass: "bg-emerald-500/10 border-emerald-500/20", textClass: "text-emerald-400" };
-  if (tradeCount >= 20) return { label: "Building", color: "amber", bgClass: "bg-amber-500/10 border-amber-500/20", textClass: "text-amber-500" };
-  return { label: "Low", color: "red", bgClass: "bg-red-500/10 border-red-500/20", textClass: "text-red-500" };
+function getConfidenceTier(tradeCount: number): {
+  label: string;
+  color: string;
+  bgClass: string;
+  textClass: string;
+} {
+  if (tradeCount >= 100)
+    return {
+      label: "Full",
+      color: "emerald",
+      bgClass: "bg-emerald-500/15 border-emerald-500/30",
+      textClass: "text-emerald-500",
+    };
+  if (tradeCount >= 50)
+    return {
+      label: "Minimum",
+      color: "emerald",
+      bgClass: "bg-emerald-500/10 border-emerald-500/20",
+      textClass: "text-emerald-400",
+    };
+  if (tradeCount >= 20)
+    return {
+      label: "Building",
+      color: "amber",
+      bgClass: "bg-amber-500/10 border-amber-500/20",
+      textClass: "text-amber-500",
+    };
+  return {
+    label: "Low",
+    color: "red",
+    bgClass: "bg-red-500/10 border-red-500/20",
+    textClass: "text-red-500",
+  };
 }
 
 function ConfidenceBadge({ tradeCount }: { tradeCount: number }) {
   const tier = getConfidenceTier(tradeCount);
   return (
-    <Badge variant="outline" className={`text-[10px] px-1.5 min-h-5 ${tier.bgClass} ${tier.textClass}`} data-testid="badge-confidence">
+    <Badge
+      variant="outline"
+      className={`text-[10px] px-1.5 min-h-5 ${tier.bgClass} ${tier.textClass}`}
+      data-testid="badge-confidence"
+    >
       <ShieldCheck className="w-3 h-3 mr-1" />
       {tier.label}
     </Badge>
@@ -1156,9 +1598,12 @@ function CoreMetricsPanel({ strategyVersion }: { strategyVersion: string }) {
   const { data: metrics } = useQuery<CoreMetrics>({
     queryKey: ["/api/simulations/core-metrics", strategyVersion],
     queryFn: async () => {
-      const res = await fetch(`/api/simulations/core-metrics?version=${encodeURIComponent(strategyVersion)}`, {
-        credentials: "include",
-      });
+      const res = await fetch(
+        `/api/simulations/core-metrics?version=${encodeURIComponent(strategyVersion)}`,
+        {
+          credentials: "include",
+        },
+      );
       if (!res.ok) throw new Error("Failed to fetch metrics");
       return res.json();
     },
@@ -1181,7 +1626,8 @@ function CoreMetricsPanel({ strategyVersion }: { strategyVersion: string }) {
             </div>
           </div>
           <p className="text-xs text-muted-foreground">
-            No trades recorded for this strategy version yet. Run simulations to start tracking metrics.
+            No trades recorded for this strategy version yet. Run simulations to
+            start tracking metrics.
           </p>
         </CardContent>
       </Card>
@@ -1214,7 +1660,9 @@ function CoreMetricsPanel({ strategyVersion }: { strategyVersion: string }) {
         <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
           <div className="text-center" data-testid="metric-win-rate">
             <p className="text-[10px] text-muted-foreground">Win Rate</p>
-            <p className={`text-sm font-semibold ${winRateOk ? "text-emerald-500" : "text-red-500"}`}>
+            <p
+              className={`text-sm font-semibold ${winRateOk ? "text-emerald-500" : "text-red-500"}`}
+            >
               {metrics.winRate.toFixed(1)}%
             </p>
           </div>
@@ -1232,8 +1680,11 @@ function CoreMetricsPanel({ strategyVersion }: { strategyVersion: string }) {
           </div>
           <div className="text-center" data-testid="metric-expectancy">
             <p className="text-[10px] text-muted-foreground">Expectancy</p>
-            <p className={`text-sm font-semibold ${expectancyOk ? "text-emerald-500" : "text-red-500"}`}>
-              {metrics.expectancyR > 0 ? "+" : ""}{metrics.expectancyR.toFixed(3)}R
+            <p
+              className={`text-sm font-semibold ${expectancyOk ? "text-emerald-500" : "text-red-500"}`}
+            >
+              {metrics.expectancyR > 0 ? "+" : ""}
+              {metrics.expectancyR.toFixed(3)}R
             </p>
           </div>
           <div className="text-center" data-testid="metric-max-dd">
@@ -1254,9 +1705,14 @@ function CoreMetricsPanel({ strategyVersion }: { strategyVersion: string }) {
           <div className="flex items-center justify-between text-[10px]">
             <span className="text-muted-foreground">
               Sample: {metrics.totalTrades} trades
-              {metrics.totalTrades < 20 && ` — need ${20 - metrics.totalTrades} more for "Building"`}
-              {metrics.totalTrades >= 20 && metrics.totalTrades < 50 && ` — need ${50 - metrics.totalTrades} more for "Minimum"`}
-              {metrics.totalTrades >= 50 && metrics.totalTrades < 100 && ` — need ${100 - metrics.totalTrades} more for "Full"`}
+              {metrics.totalTrades < 20 &&
+                ` — need ${20 - metrics.totalTrades} more for "Building"`}
+              {metrics.totalTrades >= 20 &&
+                metrics.totalTrades < 50 &&
+                ` — need ${50 - metrics.totalTrades} more for "Minimum"`}
+              {metrics.totalTrades >= 50 &&
+                metrics.totalTrades < 100 &&
+                ` — need ${100 - metrics.totalTrades} more for "Full"`}
             </span>
             <span className={`font-medium ${tier.textClass}`}>
               {tier.label} confidence
@@ -1265,42 +1721,72 @@ function CoreMetricsPanel({ strategyVersion }: { strategyVersion: string }) {
           <div className="w-full h-1.5 bg-accent rounded-full overflow-hidden">
             <div
               className={`h-full transition-all duration-300 rounded-full ${
-                metrics.totalTrades >= 50 ? "bg-emerald-500" : metrics.totalTrades >= 20 ? "bg-amber-500" : "bg-red-500"
+                metrics.totalTrades >= 50
+                  ? "bg-emerald-500"
+                  : metrics.totalTrades >= 20
+                    ? "bg-amber-500"
+                    : "bg-red-500"
               }`}
               style={{ width: `${fullPct}%` }}
             />
           </div>
           <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-            <span className={metrics.totalTrades >= 20 ? "text-amber-500" : ""}>20: Building</span>
-            <span className={metrics.totalTrades >= 50 ? "text-emerald-400" : ""}>50: Minimum</span>
-            <span className={metrics.totalTrades >= 100 ? "text-emerald-500 font-medium" : ""}>100: Full</span>
+            <span className={metrics.totalTrades >= 20 ? "text-amber-500" : ""}>
+              20: Building
+            </span>
+            <span
+              className={metrics.totalTrades >= 50 ? "text-emerald-400" : ""}
+            >
+              50: Minimum
+            </span>
+            <span
+              className={
+                metrics.totalTrades >= 100 ? "text-emerald-500 font-medium" : ""
+              }
+            >
+              100: Full
+            </span>
           </div>
         </div>
 
         <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
           <span>{metrics.distinctDays} days simulated</span>
           <span>|</span>
-          <span>{metrics.wins}W / {metrics.losses}L</span>
+          <span>
+            {metrics.wins}W / {metrics.losses}L
+          </span>
         </div>
       </CardContent>
     </Card>
   );
 }
 
-function ResetSimulationButton({ currentVersion, onVersionChange }: { currentVersion: string; onVersionChange: (v: string) => void }) {
+function ResetSimulationButton({
+  currentVersion,
+  onVersionChange,
+}: {
+  currentVersion: string;
+  onVersionChange: (v: string) => void;
+}) {
   const [archiveLabel, setArchiveLabel] = useState(currentVersion);
   const [newVersion, setNewVersion] = useState("");
-  const [step, setStep] = useState<"confirm" | "archiving" | "archived">("confirm");
+  const [step, setStep] = useState<"confirm" | "archiving" | "archived">(
+    "confirm",
+  );
 
   const { toast } = useToast();
 
   const archiveMutation = useMutation({
     mutationFn: async (label: string) => {
-      const res = await apiRequest("POST", "/api/simulations/archive", { label });
+      const res = await apiRequest("POST", "/api/simulations/archive", {
+        label,
+      });
       return res.json();
     },
     onSuccess: (data: any) => {
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const blob = new Blob([JSON.stringify(data, null, 2)], {
+        type: "application/json",
+      });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -1314,14 +1800,20 @@ function ResetSimulationButton({ currentVersion, onVersionChange }: { currentVer
       });
     },
     onError: (err: Error) => {
-      toast({ title: "Archive failed", description: err.message, variant: "destructive" });
+      toast({
+        title: "Archive failed",
+        description: err.message,
+        variant: "destructive",
+      });
     },
   });
 
   const resetMutation = useMutation({
     mutationFn: async () => {
       if (newVersion) {
-        await apiRequest("PATCH", "/api/settings", { currentStrategyVersion: newVersion });
+        await apiRequest("PATCH", "/api/settings", {
+          currentStrategyVersion: newVersion,
+        });
       }
       const res = await apiRequest("POST", "/api/simulations/reset");
       return res.json();
@@ -1334,8 +1826,12 @@ function ResetSimulationButton({ currentVersion, onVersionChange }: { currentVer
       queryClient.invalidateQueries({ queryKey: ["/api/summaries"] });
       queryClient.invalidateQueries({ queryKey: ["/api/lessons"] });
       queryClient.invalidateQueries({ queryKey: ["/api/lessons/insights"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/walk-forward/results"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/simulations/core-metrics"] });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/walk-forward/results"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/simulations/core-metrics"],
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/user"] });
       if (newVersion) onVersionChange(newVersion);
       const d = data.deleted;
@@ -1347,14 +1843,29 @@ function ResetSimulationButton({ currentVersion, onVersionChange }: { currentVer
       setNewVersion("");
     },
     onError: (err: Error) => {
-      toast({ title: "Reset failed", description: err.message, variant: "destructive" });
+      toast({
+        title: "Reset failed",
+        description: err.message,
+        variant: "destructive",
+      });
     },
   });
 
   return (
-    <AlertDialog onOpenChange={(open) => { if (!open) { setStep("confirm"); setNewVersion(""); } }}>
+    <AlertDialog
+      onOpenChange={(open) => {
+        if (!open) {
+          setStep("confirm");
+          setNewVersion("");
+        }
+      }}
+    >
       <AlertDialogTrigger asChild>
-        <Button variant="outline" size="sm" data-testid="button-reset-simulation">
+        <Button
+          variant="outline"
+          size="sm"
+          data-testid="button-reset-simulation"
+        >
           <Trash2 className="w-4 h-4 mr-2" />
           Archive & Reset
         </Button>
@@ -1367,16 +1878,21 @@ function ResetSimulationButton({ currentVersion, onVersionChange }: { currentVer
             {step === "archived" && "Archive Complete — Ready to Reset"}
           </AlertDialogTitle>
           <AlertDialogDescription>
-            {step === "confirm" && "First, download an archive of all existing data. Then reset and optionally start a new strategy version."}
-            {step === "archiving" && "Your archive is being prepared for download."}
-            {step === "archived" && "Your data has been archived. Set a new version label and confirm the reset."}
+            {step === "confirm" &&
+              "First, download an archive of all existing data. Then reset and optionally start a new strategy version."}
+            {step === "archiving" &&
+              "Your archive is being prepared for download."}
+            {step === "archived" &&
+              "Your data has been archived. Set a new version label and confirm the reset."}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
         {step === "confirm" && (
           <div className="space-y-3 py-2">
             <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground">Archive label</label>
+              <label className="text-xs text-muted-foreground">
+                Archive label
+              </label>
               <Input
                 value={archiveLabel}
                 onChange={(e) => setArchiveLabel(e.target.value)}
@@ -1394,20 +1910,26 @@ function ResetSimulationButton({ currentVersion, onVersionChange }: { currentVer
               <span>Archive downloaded successfully</span>
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground">New strategy version label</label>
+              <label className="text-xs text-muted-foreground">
+                New strategy version label
+              </label>
               <Input
                 value={newVersion}
                 onChange={(e) => setNewVersion(e.target.value)}
                 placeholder="e.g. v2"
                 data-testid="input-new-version"
               />
-              <p className="text-[10px] text-muted-foreground">Leave empty to keep the current version ({currentVersion})</p>
+              <p className="text-[10px] text-muted-foreground">
+                Leave empty to keep the current version ({currentVersion})
+              </p>
             </div>
           </div>
         )}
 
         <AlertDialogFooter>
-          <AlertDialogCancel data-testid="button-cancel-reset">Cancel</AlertDialogCancel>
+          <AlertDialogCancel data-testid="button-cancel-reset">
+            Cancel
+          </AlertDialogCancel>
           {step === "confirm" && (
             <Button
               onClick={() => {
@@ -1460,6 +1982,19 @@ export default function Backtester() {
   const [strategyVersion, setStrategyVersion] = useState("v1");
   const [learningMode, setLearningMode] = useState<"A" | "B">("A");
 
+  // Date range batch runner
+  const threeMonthsAgo = new Date();
+  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+  const [rangeStart, setRangeStart] = useState(
+    threeMonthsAgo.toISOString().split("T")[0],
+  );
+  const [rangeEnd, setRangeEnd] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1);
+    return d.toISOString().split("T")[0];
+  });
+
   const { toast } = useToast();
 
   const { data: userData } = useQuery<any>({
@@ -1488,10 +2023,17 @@ export default function Backtester() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/simulations"] });
-      toast({ title: "Simulation started", description: `Replaying ${formatDate(selectedDate)}` });
+      toast({
+        title: "Simulation started",
+        description: `Replaying ${formatDate(selectedDate)}`,
+      });
     },
     onError: (err: Error) => {
-      toast({ title: "Failed to start simulation", description: err.message, variant: "destructive" });
+      toast({
+        title: "Failed to start simulation",
+        description: err.message,
+        variant: "destructive",
+      });
     },
   });
 
@@ -1516,11 +2058,17 @@ export default function Backtester() {
     },
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/simulations"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/simulations/auto-run/status"] });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/simulations/auto-run/status"],
+      });
       toast({ title: "Auto-run started", description: data.message });
     },
     onError: (err: Error) => {
-      toast({ title: "Failed to start auto-run", description: err.message, variant: "destructive" });
+      toast({
+        title: "Failed to start auto-run",
+        description: err.message,
+        variant: "destructive",
+      });
     },
   });
 
@@ -1529,25 +2077,64 @@ export default function Backtester() {
       await apiRequest("POST", "/api/simulations/auto-run/cancel");
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/simulations/auto-run/status"] });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/simulations/auto-run/status"],
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/simulations"] });
       toast({ title: "Auto-run cancelled" });
+    },
+  });
+
+  const startDateRangeRun = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/simulations/auto-run", {
+        durationMinutes: 1440,
+        disableLearning: learningMode === "A",
+        startDate: rangeStart,
+        endDate: rangeEnd,
+      });
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/simulations"] });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/simulations/auto-run/status"],
+      });
+      toast({ title: "Date range run started", description: data.message });
+    },
+    onError: (err: Error) => {
+      toast({
+        title: "Failed to start",
+        description: err.message,
+        variant: "destructive",
+      });
     },
   });
 
   if (isLoading) return <LoadingSkeleton />;
 
   const sortedRuns = [...(runs ?? [])].sort(
-    (a, b) => new Date(b.startedAt ?? 0).getTime() - new Date(a.startedAt ?? 0).getTime()
+    (a, b) =>
+      new Date(b.startedAt ?? 0).getTime() -
+      new Date(a.startedAt ?? 0).getTime(),
   );
 
   const hasRunning = sortedRuns.some((r) => r.status === "running");
   const isAutoRunActive = autoRunStatus?.active ?? false;
   const completedRuns = sortedRuns.filter((r) => r.status === "completed");
-  const totalLessons = completedRuns.reduce((s, r) => s + (r.lessonsGenerated ?? 0), 0);
-  const totalTrades = completedRuns.reduce((s, r) => s + (r.tradesGenerated ?? 0), 0);
+  const totalLessons = completedRuns.reduce(
+    (s, r) => s + (r.lessonsGenerated ?? 0),
+    0,
+  );
+  const totalTrades = completedRuns.reduce(
+    (s, r) => s + (r.tradesGenerated ?? 0),
+    0,
+  );
   const totalPnl = completedRuns.reduce((s, r) => s + (r.totalPnl ?? 0), 0);
-  const totalCosts = completedRuns.reduce((s, r) => s + (r.totalCommission ?? 0) + (r.totalSlippageCost ?? 0), 0);
+  const totalCosts = completedRuns.reduce(
+    (s, r) => s + (r.totalCommission ?? 0) + (r.totalSlippageCost ?? 0),
+    0,
+  );
   const aggBuyAndHold = completedRuns.reduce((s, r) => {
     const b = r.benchmarks as any;
     return s + (b?.buyAndHold ?? 0);
@@ -1568,7 +2155,10 @@ export default function Backtester() {
     >
       <div className="flex items-start justify-between gap-2 flex-wrap">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight" data-testid="text-backtester-title">
+          <h1
+            className="text-xl font-semibold tracking-tight"
+            data-testid="text-backtester-title"
+          >
             Historical Backtester
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5">
@@ -1595,13 +2185,20 @@ export default function Backtester() {
             ) : (
               <FlaskConical className="w-3.5 h-3.5 text-amber-500" />
             )}
-            <span className={`text-[10px] ${learningMode === "A" ? "text-muted-foreground" : "text-amber-500"}`}>
-              {learningMode === "A" ? "Mode A — Frozen Baseline" : "Mode B — Adaptive"}
+            <span
+              className={`text-[10px] ${learningMode === "A" ? "text-muted-foreground" : "text-amber-500"}`}
+            >
+              {learningMode === "A"
+                ? "Mode A — Frozen Baseline"
+                : "Mode B — Adaptive"}
             </span>
           </div>
         </CardHeader>
         <CardContent className="p-4 pt-0">
-          <div className="flex items-center gap-1 mb-3 p-1 bg-accent/50 rounded-lg w-fit" data-testid="toggle-learning-mode">
+          <div
+            className="flex items-center gap-1 mb-3 p-1 bg-accent/50 rounded-lg w-fit"
+            data-testid="toggle-learning-mode"
+          >
             <button
               onClick={() => setLearningMode("A")}
               disabled={isAutoRunActive}
@@ -1636,7 +2233,10 @@ export default function Backtester() {
           </p>
           <div className="flex items-end gap-3 flex-wrap">
             <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground" htmlFor="auto-run-duration">
+              <label
+                className="text-xs text-muted-foreground"
+                htmlFor="auto-run-duration"
+              >
                 Duration (minutes)
               </label>
               <Input
@@ -1645,7 +2245,11 @@ export default function Backtester() {
                 min={1}
                 max={60}
                 value={autoRunMinutes}
-                onChange={(e) => setAutoRunMinutes(Math.min(60, Math.max(1, Number(e.target.value) || 5)))}
+                onChange={(e) =>
+                  setAutoRunMinutes(
+                    Math.min(60, Math.max(1, Number(e.target.value) || 5)),
+                  )
+                }
                 className="w-24"
                 disabled={isAutoRunActive}
                 data-testid="input-auto-run-duration"
@@ -1664,7 +2268,9 @@ export default function Backtester() {
             ) : (
               <>
                 <Button
-                  onClick={() => startAutoRun.mutate({ minutes: autoRunMinutes })}
+                  onClick={() =>
+                    startAutoRun.mutate({ minutes: autoRunMinutes })
+                  }
                   disabled={startAutoRun.isPending || hasRunning}
                   data-testid="button-start-auto-run"
                 >
@@ -1677,7 +2283,9 @@ export default function Backtester() {
                 </Button>
                 <Button
                   variant="outline"
-                  onClick={() => startAutoRun.mutate({ minutes: 60, exactDays: 5 })}
+                  onClick={() =>
+                    startAutoRun.mutate({ minutes: 60, exactDays: 5 })
+                  }
                   disabled={startAutoRun.isPending || hasRunning}
                   data-testid="button-run-last-5-days"
                 >
@@ -1690,7 +2298,9 @@ export default function Backtester() {
                 </Button>
                 <Button
                   variant="outline"
-                  onClick={() => startAutoRun.mutate({ minutes: 60, exactDays: 100 })}
+                  onClick={() =>
+                    startAutoRun.mutate({ minutes: 60, exactDays: 100 })
+                  }
                   disabled={startAutoRun.isPending || hasRunning}
                   data-testid="button-run-100-days"
                 >
@@ -1714,6 +2324,156 @@ export default function Backtester() {
         />
       )}
 
+      {/* Date Range Batch Runner */}
+      <Card className="border-primary/20" data-testid="card-date-range-runner">
+        <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2 p-4">
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-primary" />
+            <h3 className="text-sm font-medium">Batch Date Range Runner</h3>
+          </div>
+          <Badge
+            variant="outline"
+            className="text-[10px] px-1.5 min-h-5 bg-primary/10 border-primary/30 text-primary"
+          >
+            <Zap className="w-3 h-3 mr-1" />
+            Fastest way to 100+ trades
+          </Badge>
+        </CardHeader>
+        <CardContent className="p-4 pt-0 space-y-3">
+          <p className="text-[10px] text-muted-foreground">
+            Runs every trading day in the selected range — no time limit. Pick 3
+            months to get ~60 trading days, or 6 months for ~125. Skips days
+            already simulated for this strategy version.
+          </p>
+          <div className="flex items-end gap-3 flex-wrap">
+            <div className="space-y-1.5">
+              <label
+                className="text-xs text-muted-foreground"
+                htmlFor="range-start"
+              >
+                Start Date
+              </label>
+              <Input
+                id="range-start"
+                type="date"
+                value={rangeStart}
+                onChange={(e) => setRangeStart(e.target.value)}
+                max={rangeEnd}
+                className="w-36"
+                disabled={isAutoRunActive}
+                data-testid="input-range-start"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label
+                className="text-xs text-muted-foreground"
+                htmlFor="range-end"
+              >
+                End Date
+              </label>
+              <Input
+                id="range-end"
+                type="date"
+                value={rangeEnd}
+                onChange={(e) => setRangeEnd(e.target.value)}
+                min={rangeStart}
+                max={new Date().toISOString().split("T")[0]}
+                className="w-36"
+                disabled={isAutoRunActive}
+                data-testid="input-range-end"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-[10px] text-muted-foreground">
+                Est. trading days
+              </p>
+              <p className="text-sm font-semibold text-primary px-2">
+                {rangeStart && rangeEnd
+                  ? `~${Math.round(
+                      ((new Date(rangeEnd).getTime() -
+                        new Date(rangeStart).getTime()) /
+                        (1000 * 60 * 60 * 24)) *
+                        (5 / 7),
+                    )} days`
+                  : "--"}
+              </p>
+            </div>
+            {isAutoRunActive ? (
+              <Button
+                variant="destructive"
+                onClick={() => cancelAutoRunMutation.mutate()}
+                disabled={cancelAutoRunMutation.isPending}
+                data-testid="button-stop-range-run"
+              >
+                <Square className="w-4 h-4 mr-2" />
+                Stop Run
+              </Button>
+            ) : (
+              <>
+                <Button
+                  onClick={() => startDateRangeRun.mutate()}
+                  disabled={
+                    startDateRangeRun.isPending ||
+                    hasRunning ||
+                    !rangeStart ||
+                    !rangeEnd
+                  }
+                  data-testid="button-start-range-run"
+                >
+                  {startDateRangeRun.isPending ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Play className="w-4 h-4 mr-2" />
+                  )}
+                  Run Date Range
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    const s = new Date();
+                    s.setMonth(s.getMonth() - 6);
+                    setRangeStart(s.toISOString().split("T")[0]);
+                    const e = new Date();
+                    e.setDate(e.getDate() - 1);
+                    while (e.getDay() === 0 || e.getDay() === 6)
+                      e.setDate(e.getDate() - 1);
+                    setRangeEnd(e.toISOString().split("T")[0]);
+                  }}
+                  disabled={isAutoRunActive}
+                  data-testid="button-preset-6-months"
+                >
+                  Last 6 Months
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    const s = new Date();
+                    s.setMonth(s.getMonth() - 3);
+                    setRangeStart(s.toISOString().split("T")[0]);
+                    const e = new Date();
+                    e.setDate(e.getDate() - 1);
+                    while (e.getDay() === 0 || e.getDay() === 6)
+                      e.setDate(e.getDate() - 1);
+                    setRangeEnd(e.toISOString().split("T")[0]);
+                  }}
+                  disabled={isAutoRunActive}
+                  data-testid="button-preset-3-months"
+                >
+                  Last 3 Months
+                </Button>
+              </>
+            )}
+          </div>
+          <div className="flex items-center gap-2 text-[10px] text-muted-foreground bg-accent/50 rounded-md px-3 py-1.5">
+            <ShieldCheck className="w-3.5 h-3.5 text-primary shrink-0" />
+            <span>
+              Already-simulated days for <strong>{currentVersion}</strong> are
+              automatically skipped — safe to re-run anytime
+            </span>
+          </div>
+        </CardContent>
+      </Card>
+
       <WalkForwardPanel />
 
       <Card data-testid="card-new-simulation">
@@ -1728,13 +2488,18 @@ export default function Backtester() {
             ) : (
               <FlaskConical className="w-3.5 h-3.5 text-amber-500" />
             )}
-            <span className={`text-[10px] ${learningMode === "A" ? "text-muted-foreground" : "text-amber-500"}`}>
+            <span
+              className={`text-[10px] ${learningMode === "A" ? "text-muted-foreground" : "text-amber-500"}`}
+            >
               {learningMode === "A" ? "Mode A — Frozen" : "Mode B — Adaptive"}
             </span>
           </div>
         </CardHeader>
         <CardContent className="p-4 pt-0">
-          <div className="flex items-center gap-1 mb-3 p-1 bg-accent/50 rounded-lg w-fit" data-testid="toggle-learning-mode-single">
+          <div
+            className="flex items-center gap-1 mb-3 p-1 bg-accent/50 rounded-lg w-fit"
+            data-testid="toggle-learning-mode-single"
+          >
             <button
               onClick={() => setLearningMode("A")}
               data-testid="button-single-mode-a"
@@ -1762,7 +2527,10 @@ export default function Backtester() {
           </div>
           <div className="flex items-end gap-3 flex-wrap">
             <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground" htmlFor="sim-date">
+              <label
+                className="text-xs text-muted-foreground"
+                htmlFor="sim-date"
+              >
                 Trading Date
               </label>
               <Input
@@ -1776,7 +2544,9 @@ export default function Backtester() {
             </div>
             <Button
               onClick={() => startSimulation.mutate(selectedDate)}
-              disabled={startSimulation.isPending || hasRunning || isAutoRunActive}
+              disabled={
+                startSimulation.isPending || hasRunning || isAutoRunActive
+              }
               data-testid="button-start-simulation"
             >
               {startSimulation.isPending ? (
@@ -1806,7 +2576,9 @@ export default function Backtester() {
               <CardContent className="p-4 flex items-center gap-3">
                 <Brain className="w-5 h-5 text-muted-foreground shrink-0" />
                 <div>
-                  <p className="text-xs text-muted-foreground">Lessons Generated</p>
+                  <p className="text-xs text-muted-foreground">
+                    Lessons Generated
+                  </p>
                   <p className="text-lg font-semibold">{totalLessons}</p>
                 </div>
               </CardContent>
@@ -1845,18 +2617,30 @@ export default function Backtester() {
           </div>
 
           {hasBenchmarkAgg && (
-            <div className="flex items-center gap-4 text-xs text-muted-foreground bg-accent/50 rounded-md px-3 py-2 flex-wrap" data-testid="aggregate-benchmarks">
+            <div
+              className="flex items-center gap-4 text-xs text-muted-foreground bg-accent/50 rounded-md px-3 py-2 flex-wrap"
+              data-testid="aggregate-benchmarks"
+            >
               <Target className="w-3.5 h-3.5 shrink-0" />
-              <span className={`font-medium ${totalPnl >= 0 ? "text-emerald-500" : "text-red-500"}`}>
-                Bot: {totalPnl >= 0 ? "+" : ""}{formatCurrency(totalPnl)}
+              <span
+                className={`font-medium ${totalPnl >= 0 ? "text-emerald-500" : "text-red-500"}`}
+              >
+                Bot: {totalPnl >= 0 ? "+" : ""}
+                {formatCurrency(totalPnl)}
               </span>
               <span className="text-muted-foreground">|</span>
-              <span className={`font-medium ${aggBuyAndHold >= 0 ? "text-emerald-500" : "text-red-500"}`}>
-                Buy & Hold: {aggBuyAndHold >= 0 ? "+" : ""}{formatCurrency(aggBuyAndHold)}
+              <span
+                className={`font-medium ${aggBuyAndHold >= 0 ? "text-emerald-500" : "text-red-500"}`}
+              >
+                Buy & Hold: {aggBuyAndHold >= 0 ? "+" : ""}
+                {formatCurrency(aggBuyAndHold)}
               </span>
               <span className="text-muted-foreground">|</span>
-              <span className={`font-medium ${aggEma >= 0 ? "text-emerald-500" : "text-red-500"}`}>
-                EMA: {aggEma >= 0 ? "+" : ""}{formatCurrency(aggEma)}
+              <span
+                className={`font-medium ${aggEma >= 0 ? "text-emerald-500" : "text-red-500"}`}
+              >
+                EMA: {aggEma >= 0 ? "+" : ""}
+                {formatCurrency(aggEma)}
               </span>
             </div>
           )}
@@ -1876,7 +2660,10 @@ export default function Backtester() {
           <Card>
             <CardContent className="p-8 text-center">
               <History className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
-              <p className="text-sm text-muted-foreground" data-testid="text-empty-state">
+              <p
+                className="text-sm text-muted-foreground"
+                data-testid="text-empty-state"
+              >
                 No simulations yet. Pick a date and run your first backtest.
               </p>
             </CardContent>
@@ -1884,7 +2671,11 @@ export default function Backtester() {
         ) : (
           <div className="space-y-3">
             {sortedRuns.map((run) => (
-              <RunCard key={run.id} run={run} onCancel={(id) => cancelMutation.mutate(id)} />
+              <RunCard
+                key={run.id}
+                run={run}
+                onCancel={(id) => cancelMutation.mutate(id)}
+              />
             ))}
           </div>
         )}
